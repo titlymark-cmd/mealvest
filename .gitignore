@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+*.pem
+server/.env
+app/.env
+
+# Backend build output
+server/dist/
+dist/
+build/
+
+# Expo / React Native
+.expo/
+app/.expo/
+app/dist/
+app/web-build/
+*.orig.*
+app/.tamagui
+
+# Native build artifacts (if EAS local builds are ever run)
+app/ios/
+app/android/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Test/coverage output
+coverage/

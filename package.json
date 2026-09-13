@@ -1,0 +1,14 @@
+{
+  "name": "mealvest",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Mealvest — Netlify build orchestration root. serverless-http lives here (not inside server/) because Netlify's function bundler resolves node_modules by walking up from netlify/functions/, and this is the nearest ancestor package.json on that path.",
+  "scripts": {
+    "build:server-check": "cd server && npm install && npm run build",
+    "build:web": "cd app && npm install && npx expo export --platform web",
+    "build": "npm run build:server-check && npm run build:web"
+  },
+  "dependencies": {
+    "serverless-http": "^3.2.0"
+  }
+}

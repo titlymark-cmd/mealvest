@@ -1,0 +1,42 @@
+# Mealvest — Netlify deployment configuration
+#
+# Architecture: this single Netlify site serves BOTH the web-exported
+# Expo frontend (static files) AND the existing Express backend
+# (wrapped, unchanged, as one serverless function via netlify/functions/api.ts).
+# Same-origin means no CORS complexity for the deployed app — a
+# request to /api/... on the site's own domain gets redirected to
+# the function below.
+
+[build]
+  command = "npm run build"
+  publish = "app/dist"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  # bcrypt (used for password hashing — see server/src/lib/password.ts)
+  # has native C++ bindings. esbuild can't bundle native binaries, so
+  # this tells Netlify to install it separately during the function
+  # build rather than trying to bundle it into the JS output —
+  # Netlify's own build environment then compiles it for the correct
+  # target platform, the same way it would for any Node app.
+  external_node_modules = ["bcrypt"]
+
+# All /api/* requests go to the one Express-wrapping function.
+# :splat carries through everything after /api/ (e.g. /api/orders/123
+# arrives at the function with the full original path intact, since
+# the existing Express app's own routing — app.use("/api/orders", ...)
+# etc. — still does the actual route matching internally, unchanged).
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# SPA fallback for the web-exported Expo app — any non-API, non-file
+# route serves index.html so React Navigation's client-side routing
+# (not a real multi-page site) can take over, same as any other
+# single-page app on Netlify.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
