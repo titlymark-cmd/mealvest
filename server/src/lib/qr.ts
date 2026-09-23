@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { ApiError } from "../middleware/errorHandler";
+import { env } from "../config/env";
 
 /**
  * QR payload format: MEALVEST:1:<orderId>:<signature>
@@ -20,16 +21,10 @@ import { ApiError } from "../middleware/errorHandler";
 const PREFIX = "MEALVEST";
 const VERSION = "1";
 
-function getSecret(): string {
-  const secret = process.env.QR_SIGNING_SECRET;
-  if (!secret) {
-    throw new ApiError(500, "QR_NOT_CONFIGURED", "QR_SIGNING_SECRET is not set on the server.");
-  }
-  return secret;
-}
-
 function sign(orderId: string): string {
-  return crypto.createHmac("sha256", getSecret()).update(orderId).digest("hex").slice(0, 24);
+  // env.qrSigningSecret is fail-fast-checked at boot (config/env.ts)
+  // — no missing-secret branch needed here anymore.
+  return crypto.createHmac("sha256", env.qrSigningSecret).update(orderId).digest("hex").slice(0, 24);
 }
 
 export function generateOrderQrPayload(orderId: string): string {

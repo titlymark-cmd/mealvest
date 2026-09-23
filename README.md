@@ -172,15 +172,25 @@ proof-of-life for Day 1.
   tokens (30 days, rotated on every use, revocable server-side)
 - Real `requireAuth` / `requireRole` middleware — proven with live
   403s in `TESTING.md`, not just code review
-- Rate limiting on `/api/auth/login` and `/api/auth/register/*`
+- Rate limiting on `/api/auth/login`, `/api/auth/register/*`, and
+  `/api/auth/pin/verify`; a separate limiter on payment-initiation and
+  order-creation
 - Frontend `AuthContext`/`useAuth`: session in memory, refresh token
   in Expo SecureStore (never AsyncStorage), silent refresh on app
   launch, automatic routing to the correct role stack
+- 4-digit PIN quick-unlock: set during registration (or later via
+  `POST /api/auth/pin`, which re-confirms the current password
+  first), verified via `POST /api/auth/pin/verify` to refresh an
+  existing session without retyping the password. 4 wrong attempts
+  triggers a 15-minute timed lockout on the PIN path only — the
+  account itself stays active and password login keeps working the
+  whole time. See `server/migrations/027_add_pin_auth.sql` and
+  `authService.verifyPinAndRefresh`.
 
 ## What's still NOT here yet
 
-- PIN / biometric / "simulated fingerprint" flows — later polish
-  layer once this session-auth foundation is solid
+- Biometric / "simulated fingerprint" flows — later polish layer once
+  this session-auth foundation is solid
 - Meal plans, wallet, budget engine, QR/order flow
 - Password reset, email verification, Google OAuth (all noted as
   future work; `auth_provider`/`email_verified` columns already exist

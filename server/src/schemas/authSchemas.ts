@@ -7,11 +7,18 @@ const passwordSchema = z.string().min(8, "Password must be at least 8 characters
 const emailSchema = z.string().trim().email("Enter a valid email address.");
 const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.");
 
+// Exactly 4 digits, nothing else — same "simple, non-aggressive" rule
+// as the password above. The 4-attempt lockout (see authService
+// PIN_MAX_ATTEMPTS) is what actually limits brute-forcing a 4-digit
+// space, not a complexity requirement on the PIN itself.
+export const pinSchema = z.string().regex(/^\d{4}$/, "PIN must be exactly 4 digits.");
+
 export const registerStudentSchema = z.object({
   fullName: z.string().trim().min(1, "Full name is required.").max(120),
   email: emailSchema,
   phoneNumber: phoneSchema,
   password: passwordSchema,
+  pin: pinSchema,
   institution: z.string().trim().max(160).optional(),
   admissionNumber: z.string().trim().max(60).optional(),
 });
@@ -34,6 +41,7 @@ export const registerHotelSchema = z.object({
   email: emailSchema,
   phoneNumber: phoneSchema,
   password: passwordSchema,
+  pin: pinSchema,
 
   // Key business identity — required
   hotelName: z.string().trim().min(1, "Hotel name is required.").max(120),
@@ -89,6 +97,26 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(1, "Refresh token is required."),
 });
 
+// Set/replace the caller's PIN — always via an authenticated request
+// (requireAuth), never anonymously. currentPassword is required so a
+// PIN can't be silently swapped by whoever is holding an already-open
+// session (e.g. someone else picks up an unlocked phone) — same
+// re-authentication principle a bank app applies to changing a PIN.
+export const setPinSchema = z.object({
+  pin: pinSchema,
+  currentPassword: z.string().min(1, "Enter your current password to confirm this change."),
+});
+
+// PIN-unlock — trades a still-valid refresh token + PIN for a fresh
+// token pair, without needing the full password again. See
+// authService.verifyPinAndRefresh.
+export const verifyPinSchema = z.object({
+  refreshToken: z.string().min(1, "Refresh token is required."),
+  pin: pinSchema,
+});
+
 export type RegisterStudentInput = z.infer<typeof registerStudentSchema>;
 export type RegisterHotelInput = z.infer<typeof registerHotelSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type SetPinInput = z.infer<typeof setPinSchema>;
+export type VerifyPinInput = z.infer<typeof verifyPinSchema>;

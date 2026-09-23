@@ -9,12 +9,25 @@ import * as orderService from "../services/orderService";
 /**
  * Resolves the hotel_id for the currently authenticated hotel_owner/
  * hotel_staff user via hotel_staff, rather than trusting a hotelId
- * in the request body.
+ * in the request body. Also rejects if that hotel is suspended —
+ * previously only redeemOrderByQr checked this (the most sensitive
+ * single action), which left every OTHER hotel-scoped endpoint
+ * (dashboard, order list, menu view/edit, location edit) reachable
+ * with a still-valid token even after suspension. Centralizing the
+ * check here, in the one function every hotel-scoped controller
+ * already calls, closes that gap in one place rather than needing it
+ * repeated in each controller.
  */
 async function getOwnHotelId(userId: string): Promise<string> {
-  const result = await pool.query("SELECT hotel_id FROM hotel_staff WHERE user_id = $1", [userId]);
+  const result = await pool.query(
+    "SELECT hs.hotel_id, h.status FROM hotel_staff hs JOIN hotels h ON h.id = hs.hotel_id WHERE hs.user_id = $1",
+    [userId]
+  );
   if (result.rows.length === 0) {
     throw new ApiError(403, "NOT_HOTEL_STAFF", "This account is not linked to a hotel.");
+  }
+  if (result.rows[0].status !== "active") {
+    throw new ApiError(403, "HOTEL_SUSPENDED", "This hotel account is not currently active.");
   }
   return result.rows[0].hotel_id;
 }

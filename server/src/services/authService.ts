@@ -8,7 +8,16 @@ import {
   findValidRefreshTokenByHash,
   revokeRefreshTokenByHash,
 } from "../models/refreshTokenModel";
-import { findUserByEmailOrPhone, findUserByGoogleId, UserRow } from "../models/userModel";
+import {
+  findUserByEmailOrPhone,
+  findUserByEmail,
+  findUserByGoogleId,
+  findUserById,
+  setUserPin,
+  resetPinAttempts,
+  recordFailedPinAttempt,
+  UserRow,
+} from "../models/userModel";
 import { GoogleProfile } from "../lib/googleAuth";
 import { Role } from "../types/roles";
 import { RegisterStudentInput, RegisterHotelInput, LoginInput } from "../schemas/authSchemas";
@@ -42,16 +51,17 @@ export async function registerStudent(input: RegisterStudentInput): Promise<Auth
 
   await assertNoDuplicateAccount(input.email, normalizedPhone);
   const passwordHash = await hashPassword(input.password);
+  const pinHash = await hashPassword(input.pin);
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     const userResult = await client.query(
-      `INSERT INTO users (email, phone_number, password_hash, role, auth_provider, email_verified, account_status)
-       VALUES ($1, $2, $3, 'student', 'password', false, 'active')
+      `INSERT INTO users (email, phone_number, password_hash, pin_hash, role, auth_provider, email_verified, account_status)
+       VALUES ($1, $2, $3, $4, 'student', 'password', false, 'active')
        RETURNING id`,
-      [input.email.toLowerCase(), normalizedPhone, passwordHash]
+      [input.email.toLowerCase(), normalizedPhone, passwordHash, pinHash]
     );
     const userId = userResult.rows[0].id as string;
 
@@ -92,6 +102,7 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
 
   await assertNoDuplicateAccount(input.email, normalizedPhone);
   const passwordHash = await hashPassword(input.password);
+  const pinHash = await hashPassword(input.pin);
 
   const client = await pool.connect();
   try {
@@ -120,10 +131,10 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
     const applicationId = `MV-HTL-${String(seqResult.rows[0].n).padStart(6, "0")}`;
 
     const userResult = await client.query(
-      `INSERT INTO users (email, phone_number, password_hash, role, auth_provider, email_verified, account_status)
-       VALUES ($1, $2, $3, 'hotel_owner', 'password', false, 'pending_verification')
+      `INSERT INTO users (email, phone_number, password_hash, pin_hash, role, auth_provider, email_verified, account_status)
+       VALUES ($1, $2, $3, $4, 'hotel_owner', 'password', false, 'pending_verification')
        RETURNING id`,
-      [input.email.toLowerCase(), normalizedPhone, passwordHash]
+      [input.email.toLowerCase(), normalizedPhone, passwordHash, pinHash]
     );
     const userId = userResult.rows[0].id as string;
 
@@ -354,6 +365,91 @@ export async function logout(refreshToken: string): Promise<void> {
 
 export function decodeAccessToken(token: string) {
   return verifyAccessToken(token);
+}
+
+// 4 attempts, then a 15-minute timed lockout — matches the window
+// authRateLimiter already uses for login/register, so the two limits
+// read consistently rather than introducing a second unrelated number.
+const PIN_MAX_ATTEMPTS = 4;
+const PIN_LOCKOUT_MINUTES = 15;
+
+/**
+ * Sets or replaces the caller's PIN. Requires the CURRENT password as
+ * proof of intent — someone who merely has an already-open session
+ * (e.g. picked up an unlocked phone) cannot silently plant their own
+ * PIN for persistent quick-unlock access; they'd need the password
+ * too. Any prior lockout/attempt count is cleared, matching "a fresh
+ * PIN gets a fresh start."
+ */
+export async function setPin(userId: string, pin: string, currentPassword: string): Promise<void> {
+  const user = await findUserById(userId);
+  if (!user || !user.password_hash) {
+    throw new ApiError(400, "PASSWORD_LOGIN_REQUIRED", "This account cannot set a PIN without a password.");
+  }
+  const valid = await verifyPassword(currentPassword, user.password_hash);
+  if (!valid) {
+    throw new ApiError(401, "INVALID_CREDENTIALS", "Incorrect password.");
+  }
+  const pinHash = await hashPassword(pin);
+  await setUserPin(userId, pinHash);
+}
+
+/**
+ * PIN-unlock: trades a still-valid refresh token + correct PIN for a
+ * fresh access/refresh token pair, without asking for the password
+ * again — this is what makes the PIN a quick re-entry into an
+ * EXISTING session rather than a second, weaker login system. The
+ * refresh token itself is only looked up here, never rotated/revoked
+ * on a wrong PIN, so a mistyped PIN can never strand a legitimate
+ * user — they can always fall back to a full password login (which
+ * calls the ordinary /login route, untouched by any of this).
+ */
+export async function verifyPinAndRefresh(refreshToken: string, pin: string): Promise<AuthResult> {
+  const tokenHash = hashRefreshToken(refreshToken);
+  const stored = await findValidRefreshTokenByHash(tokenHash);
+  if (!stored) {
+    throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
+  }
+
+  const user = await findUserById(stored.user_id);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
+  }
+  if (!user.pin_hash) {
+    throw new ApiError(400, "PIN_NOT_SET", "No PIN has been set for this account yet.");
+  }
+
+  if (user.pin_locked_until && new Date(user.pin_locked_until) > new Date()) {
+    const minutesLeft = Math.ceil((new Date(user.pin_locked_until).getTime() - Date.now()) / 60000);
+    throw new ApiError(
+      423,
+      "PIN_LOCKED",
+      `Too many incorrect PIN attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}, or log in with your password.`
+    );
+  }
+
+  const valid = await verifyPassword(pin, user.pin_hash);
+  if (!valid) {
+    const { attempts, lockedUntil } = await recordFailedPinAttempt(user.id, PIN_MAX_ATTEMPTS, PIN_LOCKOUT_MINUTES);
+    if (lockedUntil) {
+      throw new ApiError(
+        423,
+        "PIN_LOCKED",
+        `Too many incorrect PIN attempts. Try again in ${PIN_LOCKOUT_MINUTES} minutes, or log in with your password.`
+      );
+    }
+    const remaining = PIN_MAX_ATTEMPTS - attempts;
+    throw new ApiError(401, "PIN_INCORRECT", `Incorrect PIN. ${remaining} attempt${remaining === 1 ? "" : "s"} left.`);
+  }
+
+  await resetPinAttempts(user.id);
+
+  // Rotate, exactly like the ordinary refresh() path — a PIN-unlock
+  // is still, underneath, a token refresh; it just skips re-asking
+  // for the password.
+  await revokeRefreshTokenByHash(tokenHash);
+  const fullName = await lookupFullName(user);
+  return issueTokens(user.id, user.role, fullName, user.email);
 }
 
 async function assertNoDuplicateAccount(email: string, phoneNumber: string): Promise<void> {

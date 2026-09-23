@@ -1,9 +1,17 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import * as authService from "../services/authService";
-import { registerStudentSchema, registerHotelSchema, loginSchema, refreshSchema } from "../schemas/authSchemas";
+import {
+  registerStudentSchema,
+  registerHotelSchema,
+  loginSchema,
+  refreshSchema,
+  setPinSchema,
+  verifyPinSchema,
+} from "../schemas/authSchemas";
 import { verifyGoogleIdToken } from "../lib/googleAuth";
 import { ApiError } from "../middleware/errorHandler";
+import { AuthedRequest } from "../middleware/auth";
 
 function badRequestFromZod(err: unknown): ApiError {
   const issues = (err as { errors?: { message: string }[] })?.errors;
@@ -91,6 +99,38 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
 
     const profile = await verifyGoogleIdToken(parsed.data.idToken);
     const result = await authService.loginWithGoogle(profile);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Requires a valid access token — see routes/auth.routes.ts (requireAuth applied). */
+export async function setPin(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = setPinSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    await authService.setPin(req.user!.id, parsed.data.pin, parsed.data.currentPassword);
+    res.status(200).json({ pinSet: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * No requireAuth here on purpose — by definition, the client is
+ * calling this because it does NOT currently hold a valid access
+ * token (app was just reopened). Authenticity comes from the
+ * refresh token + PIN pair instead, same as /refresh needing no
+ * bearer token either.
+ */
+export async function verifyPin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = verifyPinSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    const result = await authService.verifyPinAndRefresh(parsed.data.refreshToken, parsed.data.pin);
     res.status(200).json(result);
   } catch (err) {
     next(err);

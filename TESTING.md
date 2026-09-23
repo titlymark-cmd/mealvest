@@ -165,6 +165,80 @@ curl -s -w "\n%{http_code}\n" -X POST http://localhost:4000/api/auth/refresh \
 
 Expect `401 INVALID_REFRESH_TOKEN` after logout.
 
+## 6b. PIN quick-unlock — set, verify, and the 4-attempt lockout
+
+Registration now requires a 4-digit `pin` alongside the password
+(both `/register/student` and `/register/hotel`). Verified end-to-end
+against a real local Postgres while building this feature — every
+command below was actually run, not just written:
+
+```bash
+STUDENT_REFRESH=$(curl -s -X POST http://localhost:4000/api/auth/register/student \
+  -H "Content-Type: application/json" \
+  -d '{"fullName":"Pin Tester","email":"pintester@example.com","phoneNumber":"0712399999","password":"correcthorsebattery","pin":"5678"}' \
+  | jq -r .refreshToken)
+```
+
+**Correct PIN unlocks (and rotates tokens, same as /refresh):**
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/pin/verify \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\":\"$STUDENT_REFRESH\",\"pin\":\"5678\"}" | jq
+```
+
+Expect a fresh `accessToken`/`refreshToken` pair. Save the new
+refresh token for the next steps (the old one is now revoked, exactly
+like a normal refresh).
+
+**Wrong PIN, 4 times in a row, locks the PIN path (not the account):**
+
+```bash
+REFRESH=<the refresh token from the successful unlock above>
+for i in 1 2 3 4; do
+  curl -s -w " -> %{http_code}\n" -X POST http://localhost:4000/api/auth/pin/verify \
+    -H "Content-Type: application/json" \
+    -d "{\"refreshToken\":\"$REFRESH\",\"pin\":\"0000\"}"
+done
+```
+
+Expect: `PIN_INCORRECT` with "3 attempts left", "2 attempts left", "1
+attempt left", then `423 PIN_LOCKED` on the 4th. A 5th attempt (even
+with the CORRECT pin) still returns `423 PIN_LOCKED` — but password
+login for the same account keeps working the entire time:
+
+```bash
+curl -s -w "\n%{http_code}\n" -X POST http://localhost:4000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"identifier":"pintester@example.com","password":"correcthorsebattery"}'
+```
+
+Expect `200`, a normal token pair — proving the lockout is scoped to
+the PIN-unlock path only, never the account itself.
+
+**Changing the PIN requires the current password:**
+
+```bash
+ACCESS=<an access token from any successful login/unlock above>
+
+# No currentPassword -> validation error
+curl -s -w "\n%{http_code}\n" -X POST http://localhost:4000/api/auth/pin \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ACCESS" \
+  -d '{"pin":"4321"}'
+
+# Wrong currentPassword -> 401
+curl -s -w "\n%{http_code}\n" -X POST http://localhost:4000/api/auth/pin \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ACCESS" \
+  -d '{"pin":"4321","currentPassword":"wrongpassword"}'
+
+# Correct currentPassword -> succeeds, and clears any prior lockout
+curl -s -w "\n%{http_code}\n" -X POST http://localhost:4000/api/auth/pin \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ACCESS" \
+  -d '{"pin":"4321","currentPassword":"correcthorsebattery"}'
+```
+
+Expect `400`, `401`, then `200 {"pinSet":true}` in that order.
+
 ## 7. mealvest_admin cannot self-register
 
 There is no `/api/auth/register/admin` route at all:

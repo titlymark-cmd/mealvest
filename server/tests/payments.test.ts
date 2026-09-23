@@ -82,6 +82,7 @@ describe("initializeSchema validation boundaries", () => {
       numberOfDays: 30,
       phone: "0712345678",
       email: "student@example.com",
+      termsAccepted: true,
     });
     assert.equal(result.success, true);
   });

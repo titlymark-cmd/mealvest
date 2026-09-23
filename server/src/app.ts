@@ -35,7 +35,10 @@ export function createApp() {
           callback(new Error("Not allowed by CORS"));
         }
       },
-      credentials: true,
+      // No `credentials: true` — this API is 100% bearer-token
+      // (Authorization header), nothing sets or reads cookies
+      // anywhere in this codebase, so there's no cookie-credentialed
+      // request for the browser to need permission for.
     })
   );
 

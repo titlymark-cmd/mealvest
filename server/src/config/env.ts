@@ -7,7 +7,7 @@ import "dotenv/config";
  * connects, or JWTs silently signed with `undefined` as the secret).
  */
 
-const REQUIRED_VARS = ["DATABASE_URL", "JWT_ACCESS_SECRET"] as const;
+const REQUIRED_VARS = ["DATABASE_URL", "JWT_ACCESS_SECRET", "QR_SIGNING_SECRET"] as const;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -28,6 +28,11 @@ export const env = {
   port: Number(process.env.PORT) || 4000,
   databaseUrl: requireEnv("DATABASE_URL"),
   jwtAccessSecret: requireEnv("JWT_ACCESS_SECRET"),
+  // Was previously read lazily via process.env directly inside
+  // lib/qr.ts — meaning a missing value wouldn't be caught until the
+  // first QR generate/redeem call, in production, mid-order. Fail
+  // fast at boot instead, same as the two secrets above.
+  qrSigningSecret: requireEnv("QR_SIGNING_SECRET"),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "")
     .split(",")
     .map((s) => s.trim())

@@ -1,6 +1,16 @@
 import { Router } from "express";
-import { login, logout, refresh, registerHotel, registerStudent, googleLogin } from "../controllers/auth.controller";
+import {
+  login,
+  logout,
+  refresh,
+  registerHotel,
+  registerStudent,
+  googleLogin,
+  setPin,
+  verifyPin,
+} from "../controllers/auth.controller";
 import { authRateLimiter } from "../middleware/rateLimit";
+import { requireAuth } from "../middleware/auth";
 
 export const authRouter = Router();
 
@@ -14,3 +24,11 @@ authRouter.post("/login", authRateLimiter, login);
 authRouter.post("/google", authRateLimiter, googleLogin);
 authRouter.post("/refresh", refresh);
 authRouter.post("/logout", logout);
+
+// PIN quick-unlock. /pin (set/change) requires a real session +
+// current password; /pin/verify deliberately does not (see
+// controller doc comment) but shares the login/register rate limiter
+// as defense-in-depth on top of the per-account timed lockout that
+// authService.verifyPinAndRefresh already enforces.
+authRouter.post("/pin", requireAuth, setPin);
+authRouter.post("/pin/verify", authRateLimiter, verifyPin);
