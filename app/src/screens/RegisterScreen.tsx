@@ -25,6 +25,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
   const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
+  const [pin, setPin] = useState("");
 
   // Student-only
   const [fullName, setFullName] = useState("");
@@ -47,12 +48,13 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
     setLoading(true);
     try {
       if (mode === "student") {
-        await registerStudent({ fullName, email: email.trim(), phoneNumber, password });
+        await registerStudent({ fullName, email: email.trim(), phoneNumber, password, pin });
       } else {
         await registerHotel({
           email: email.trim(),
           phoneNumber,
           password,
+          pin,
           hotelName,
           businessType,
           location,
@@ -124,6 +126,17 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
         value={password}
         onChangeText={setPassword}
       />
+      <TextInput
+        style={styles.input}
+        placeholder="Create a 4-digit PIN"
+        placeholderTextColor={COLORS.textFaint}
+        secureTextEntry
+        keyboardType="number-pad"
+        maxLength={4}
+        value={pin}
+        onChangeText={(text) => setPin(text.replace(/[^0-9]/g, ""))}
+      />
+      <Text style={styles.pinHint}>Used to quickly unlock the app later without retyping your password.</Text>
 
       {mode === "hotel" && (
         <>
@@ -226,6 +239,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bodyMedium,
     color: COLORS.text,
   },
+  pinHint: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: -6, marginBottom: 12 },
   wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   typePill: { borderWidth: 2, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingVertical: 8, paddingHorizontal: 12 },
   typePillActive: { borderColor: COLORS.primary, backgroundColor: "#EFF9FF" },

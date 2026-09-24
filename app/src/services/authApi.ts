@@ -40,6 +40,7 @@ export async function registerStudent(input: {
   email: string;
   phoneNumber: string;
   password: string;
+  pin: string;
   institution?: string;
   admissionNumber?: string;
 }): Promise<AuthResult> {
@@ -56,6 +57,7 @@ export async function registerHotel(input: {
   email: string;
   phoneNumber: string;
   password: string;
+  pin: string;
   hotelName: string;
   businessType: string;
   location?: string;

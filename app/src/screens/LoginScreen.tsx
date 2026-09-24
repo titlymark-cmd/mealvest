@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../theme/theme";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../services/authApi";
-import { useGoogleAuth } from "../services/googleAuth";
+import { isGoogleAuthConfigured } from "../services/googleAuth";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
 export default function LoginScreen({ navigation }: any) {
   const { loginWithPassword, loginWithGoogle } = useAuth();
@@ -34,7 +35,7 @@ export default function LoginScreen({ navigation }: any) {
     [loginWithGoogle]
   );
 
-  const { ready: googleReady, promptAsync } = useGoogleAuth(handleGoogleIdToken);
+  const googleConfigured = isGoogleAuthConfigured();
 
   const submit = async () => {
     setError(null);
@@ -58,23 +59,16 @@ export default function LoginScreen({ navigation }: any) {
         <Text style={styles.title}>Welcome back</Text>
         <Text style={styles.subtitle}>Sign in to continue.</Text>
 
-        <TouchableOpacity
-          style={styles.googleButton}
-          disabled={!googleReady || googleLoading}
-          onPress={() => promptAsync()}
-        >
-          {googleLoading ? (
-            <ActivityIndicator color={COLORS.primary} />
-          ) : (
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
-        </View>
+        {googleConfigured && (
+          <>
+            <GoogleSignInButton onIdToken={handleGoogleIdToken} loading={googleLoading} />
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+          </>
+        )}
 
         <TextInput
           style={styles.input}
@@ -116,16 +110,6 @@ const styles = StyleSheet.create({
   body: { flex: 1, paddingHorizontal: 24, justifyContent: "center" },
   title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.text },
   subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 24 },
-  googleButton: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  googleButtonText: { fontFamily: FONTS.bodySemibold, fontSize: 15, color: COLORS.text },
   dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 18 },
   dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
   dividerText: { marginHorizontal: 10, fontFamily: FONTS.bodySemibold, fontSize: 11, color: COLORS.textFaint },

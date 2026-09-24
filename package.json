@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "description": "Mealvest — Vercel build orchestration root. Vercel's Node.js runtime invokes api/index.ts directly (a plain Express app export, no serverless-http adapter needed, unlike the earlier Netlify setup); this root package.json exists so `npm install`/`npm run build` at the repo root can orchestrate both server/ (installed so the function bundler can resolve its dependencies, and type-checked as a build-time safety net) and app/ (built to a static web export Vercel serves directly).",
   "scripts": {
-    "build:server-check": "cd server && npm install && npm run build",
-    "build:web": "cd app && npm install && npx expo export --platform web",
+    "build:server-check": "cd server && npm install --include=dev && npm run build",
+    "build:web": "cd app && npm install --include=dev && npx expo export --platform web",
     "build": "npm run build:server-check && npm run build:web"
   }
 }

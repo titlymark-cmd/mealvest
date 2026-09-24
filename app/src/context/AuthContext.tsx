@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
-import * as SecureStore from "expo-secure-store";
+import * as SecureStore from "../services/secureStorage";
 import * as authApi from "../services/authApi";
 import { AuthUser } from "../services/authApi";
 import { API_BASE_URL } from "../services/config";
@@ -34,11 +34,9 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
  *   - accessToken + user live ONLY in React state (memory). They
  *     disappear on app close/reload by design — that's fine, they're
  *     cheap to reobtain via refresh.
- *   - refreshToken is the one thing persisted, and ONLY in
- *     SecureStore (iOS Keychain / Android Keystore-backed), never
- *     AsyncStorage — AsyncStorage is unencrypted plain storage on
- *     disk and is not an acceptable place for a credential that can
- *     mint new sessions.
+ *   - refreshToken is the one thing persisted, via services/secureStorage
+ *     (iOS Keychain / Android Keystore on native; localStorage on web,
+ *     since expo-secure-store has no web backing at all).
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);

@@ -24,6 +24,19 @@ WebBrowser.maybeCompleteAuthSession();
  *      backend's GOOGLE_CLIENT_IDS — verifyGoogleIdToken checks the
  *      token's audience against exactly this list.
  */
+/**
+ * Whether Google Sign-In can actually run on this platform/build.
+ * On web specifically, expo-auth-session's Google provider throws
+ * synchronously (an invariant inside useIdTokenAuthRequest, not
+ * something this codebase added) if webClientId is undefined —
+ * unlike native, where the hook degrades gracefully. Callers must
+ * check this BEFORE mounting anything that calls useGoogleAuth, not
+ * after — see components/GoogleSignInButton.tsx.
+ */
+export function isGoogleAuthConfigured(): boolean {
+  return Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+}
+
 export function useGoogleAuth(onIdToken: (idToken: string) => void) {
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
