@@ -1,137 +1,137 @@
-# Mealvest — Netlify + Supabase + Paystack Deployment
+# Mealvest — Vercel + Supabase + Paystack Deployment
 
-**Update**: an earlier version of this document said the Express
-backend couldn't run on Netlify. That's now resolved — see below.
-The backend runs as a single Netlify Function wrapping the existing,
-unmodified Express app (`netlify/functions/api.ts` + `netlify.toml`).
-No route, controller, or service file was rewritten to make this
-work.
+Netlify has been removed. This document reflects what's actually
+deployed: a single Vercel project serving both the web-exported Expo
+frontend (static files) and the existing Express backend (wrapped,
+unchanged, as one Vercel serverless function via `api/index.ts`).
 
 ---
 
 ## 1. Architecture, as actually built
 
 ```
-Phone browser
-  → https://your-site.netlify.app          (web-exported Expo app, static files)
-  → https://your-site.netlify.app/api/...  (redirected to one Netlify Function
-                                             wrapping the existing Express app)
-  → Supabase Postgres                       (DATABASE_URL, unchanged pg client)
-Paystack ← webhook → https://your-site.netlify.app/api/webhooks/paystack
+Phone / desktop browser
+  → https://<your-project>.vercel.app          (web-exported Expo app, static files)
+  → https://<your-project>.vercel.app/api/...  (rewritten to one Vercel serverless
+                                                  function wrapping the existing Express app)
+  → Supabase Postgres                           (DATABASE_URL, unchanged pg client —
+                                                  Supabase's own Auth product is NOT
+                                                  used; this app has its own JWT auth)
+Paystack ← webhook → https://<your-project>.vercel.app/api/webhooks/paystack
 ```
 
-Frontend and backend are now the **same site, same domain** — this
-actually simplifies CORS versus the earlier separate-hosts plan.
+Frontend and backend are the same site, same domain — no CORS
+complexity for the deployed app.
 
 ---
 
-## 2. What I changed to make this possible
+## 2. What changed from the earlier Netlify setup
 
-- **`netlify/functions/api.ts`** (new) — wraps `createApp()` from
-  `server/src/app.ts` with `serverless-http`. The Express app itself
-  was not touched.
-- **`netlify.toml`** (new) — build command, function directory,
-  `/api/*` redirect, SPA fallback for client-side navigation, and
-  `external_node_modules = ["bcrypt"]` (bcrypt has native C++
-  bindings that can't be bundled by esbuild like pure-JS code — this
-  tells Netlify to install it separately so it's compiled correctly
-  for the deployed environment).
-- **Root `package.json`** (new) — holds `serverless-http` as a
-  dependency (Netlify's function bundler resolves `node_modules` by
-  walking up from the function file, and this is the nearest
-  ancestor `package.json`), plus the orchestrated build script.
-- **`react-dom` and `react-native-web` added to `app/package.json`**
-  — these were missing, and `expo export --platform web` cannot
-  produce any output without them. This was a real gap, not a style
-  choice.
-- **One bug I caught and fixed before it shipped**: Netlify's
-  `/api/*` redirect delivers paths like
-  `/.netlify/functions/api/orders` to the function, but the existing
-  Express app expects `/api/orders` (every route file mounts under
-  `/api/...`). Without a fix, every single request would have 404'd
-  despite all the application code being correct. Fixed with a small
-  path rewrite, isolated entirely inside `netlify/functions/api.ts` —
-  no other file touched.
+- **`api/index.ts`** (new, replaces `netlify/functions/api.ts`) —
+  exports `createApp()` from `server/src/app.ts` directly. Vercel's
+  Node.js runtime calls a plain `(req, res)` handler, and an Express
+  app instance already *is* one — so unlike Netlify, no
+  `serverless-http` adapter or path-rewrite workaround is needed. The
+  Express app itself is still completely untouched.
+- **`vercel.json`** (new, replaces `netlify.toml`) — build command,
+  output directory, `/api/*` rewrite to the function, SPA fallback
+  for client-side navigation.
+- **Root `package.json`** — no longer needs `serverless-http`
+  (Netlify-specific); still orchestrates `server/` (installed so the
+  function bundler can resolve its dependencies, and type-checked as
+  a build-time safety net) and `app/` (built to a static web export).
+- **`netlify.toml` and `netlify/` deleted.**
 
-## 3. What I could NOT verify (being direct about this)
+## 3. Supabase — already provisioned
 
-This sandbox has no network access — I cannot run an actual Netlify
-build or send a real request to a deployed function. The path-rewrite
-logic above matches Netlify's documented behavior, but **the first
-thing to test after your first deploy** is literally: does
-`https://your-site.netlify.app/api/health` return `{"status":"ok"}`?
-If it 404s, tell me the exact response and I'll adjust the rewrite.
+A real Supabase Postgres project already exists for this app
+(created via the Supabase MCP integration, region `us-east-1`,
+Postgres 17) with all 27 migrations applied — the full schema is
+live, currently empty (0 rows). Supabase's own Auth/REST API is not
+used by this app at all; it's purely hosted Postgres reached over a
+plain `pg` connection, exactly like any other managed Postgres.
 
----
+To get the connection string:
 
-## 4. Supabase setup
-
-1. Create a Supabase project.
-2. Project Settings → Database → Connection string.
-3. **Use "Transaction" pooler mode (port 6543), not the direct
-   connection (port 5432).** This matters more here than it would for
-   a normal server: Netlify Functions can spin up multiple concurrent
-   instances under load, each potentially opening its own connection
-   pool. Supabase's direct Postgres connection has a hard connection
-   limit that a burst of concurrent function invocations can exhaust
-   quickly; the pooler is built exactly for this pattern.
-4. Set that connection string as `DATABASE_URL` in Netlify's
-   environment variables (Site settings → Environment variables) —
-   never in a committed file.
-5. Run migrations against it once, from your own machine:
+1. Supabase dashboard → your project → Project Settings → Database →
+   Connection string.
+2. **Use "Transaction" pooler mode (port 6543), not the direct
+   connection (port 5432).** Vercel serverless functions can spin up
+   multiple concurrent instances under load, each potentially opening
+   its own connection pool — Supabase's direct connection has a hard
+   limit a burst of concurrent invocations can exhaust quickly; the
+   pooler is built for exactly this pattern.
+3. Set that connection string as `DATABASE_URL` **directly in
+   Vercel's environment variables** (Project Settings → Environment
+   Variables) — never in a committed file, never pasted into chat.
+   This is the one credential that has to come from you; nothing here
+   can fetch or construct it (Supabase never exposes the database
+   password over its management API, by design).
+4. Migrations are already applied. If you ever add a new migration
+   file locally, run it against this same project with:
    ```bash
    cd server
-   DATABASE_URL="your-supabase-pooler-connection-string" npm run migrate
+   DATABASE_URL="<the same pooler connection string>" npm run migrate
    ```
-6. Supabase's own Auth product is intentionally NOT used — Mealvest
-   already has its own JWT auth system; Supabase here is purely
-   hosted Postgres.
+   The migration runner's own bookkeeping table
+   (`public.schema_migrations`) was backfilled to match exactly what
+   was actually applied, so this stays idempotent going forward.
 
----
-
-## 5. Paystack
+## 4. Paystack
 
 1. Dashboard (Test Mode) → Settings → API Keys & Webhooks → copy Test
    Secret + Public keys.
-2. Set on Netlify: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`.
-3. Once your first deploy is live, set the webhook URL in Paystack to:
-   `https://your-site.netlify.app/api/webhooks/paystack`
+2. Set `PAYSTACK_SECRET_KEY` and `PAYSTACK_PUBLIC_KEY` **directly in
+   Vercel's environment variables** — same reasoning as `DATABASE_URL`
+   above. I do not have access to your Paystack account; there's no
+   integration connecting it to this session, so these two values can
+   only come from you, and the most secure way to hand them over is
+   Vercel's dashboard, not this chat.
+3. Once the first deploy is live, set the webhook URL in Paystack to:
+   `https://<your-project>.vercel.app/api/webhooks/paystack`
 4. `env.ts`'s live-key safety check still applies — a `sk_live_...`
-   key is refused unless `NODE_ENV=production` is set, so confirm
-   that's set in Netlify's environment variables.
+   key is refused unless `NODE_ENV=production`, so confirm that's set
+   in Vercel's environment variables before ever using a live key.
 
----
+## 5. Google Authentication (optional — can be added later)
 
-## 6. Google Authentication
+Not required for a first Paystack money test (email/password
+registration and login work standalone). When you're ready:
 
-Unchanged logic — deployment-readiness is entirely about registering
-your new domain in Google Cloud Console:
+1. Google Cloud Console → APIs & Services → Credentials → create a
+   Web application OAuth client (and iOS/Android clients if the
+   native app needs them).
+2. Add `https://<your-project>.vercel.app` to Authorized JavaScript
+   origins and redirect URIs on the Web client.
+3. Set `GOOGLE_CLIENT_IDS` (server, comma-separated) and the three
+   `EXPO_PUBLIC_GOOGLE_*_CLIENT_ID` values (client-side, baked into
+   the web build) in Vercel's environment variables.
+4. Until these are set, `/api/auth/google` returns a clear
+   `GOOGLE_AUTH_NOT_CONFIGURED` error rather than crashing the
+   server — everything else keeps working.
 
-1. APIs & Services → Credentials → your Web application OAuth client.
-2. Add `https://your-site.netlify.app` to Authorized JavaScript
-   origins and redirect URIs.
-3. iOS/Android client IDs don't need this (they key off bundle
-   ID/package name, not a domain).
+## 6. Environment variables — where each one lives
 
----
-
-## 7. Environment variables — split exactly as requested
-
-**Server-only secrets** (Netlify env vars — never in `app/.env`,
-never committed):
+**Server-only secrets** (Vercel environment variables — never in
+`app/.env`, never committed):
 ```
-DATABASE_URL=<supabase pooler connection string>
-JWT_ACCESS_SECRET=<openssl rand -hex 32>
-QR_SIGNING_SECRET=<openssl rand -hex 32, different from above>
-PAYSTACK_SECRET_KEY=<test key for now>
-GOOGLE_CLIENT_IDS=<web,ios,android — comma-separated>
+DATABASE_URL=<supabase pooler connection string — from you, section 3>
+JWT_ACCESS_SECRET=<generated for you — see note below>
+QR_SIGNING_SECRET=<generated for you — see note below>
+PAYSTACK_SECRET_KEY=<test key for now — from you, section 4>
+GOOGLE_CLIENT_IDS=<optional — from you, section 5>
 NODE_ENV=production
-ALLOWED_ORIGINS=https://your-site.netlify.app
+ALLOWED_ORIGINS=https://<your-project>.vercel.app
 ```
 
-**Public/client-safe** (baked into the Expo web build — these are
-visible in the shipped JS bundle by nature, which is fine, they're
-not secrets):
+`JWT_ACCESS_SECRET` and `QR_SIGNING_SECRET` are app-internal secrets
+(not tied to any external account) — I generated these with
+cryptographically secure randomness and set them directly as Vercel
+environment variables. They were never printed in chat and aren't
+stored anywhere in this repo.
+
+**Public/client-safe** (baked into the Expo web build — visible in
+the shipped JS bundle by nature, which is fine, they're not secrets):
 ```
 EXPO_PUBLIC_API_BASE_URL=          # leave EMPTY — same-origin now, calls go to /api/... on the same domain
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=
@@ -141,53 +141,77 @@ GOOGLE_MAPS_API_KEY=
 PAYSTACK_PUBLIC_KEY=               # public key is meant to be client-visible; this is normal for Paystack
 ```
 
-**Never put `PAYSTACK_SECRET_KEY`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, or `QR_SIGNING_SECRET` in anything under `app/`** — those stay server-only.
+**Never put `PAYSTACK_SECRET_KEY`, `DATABASE_URL`,
+`JWT_ACCESS_SECRET`, or `QR_SIGNING_SECRET` in anything under
+`app/`** — those stay server-only.
 
----
+## 7. Accessing each dashboard securely
 
-## 8. GitHub
+Role-based access control is already fully built — every route is
+gated server-side by `requireAuth` + `requireRole(...)` (see
+`server/src/middleware/auth.ts` and each `*.routes.ts` file), so this
+is about how to actually reach each one, not something that needs
+building:
 
-- `.gitignore` already covers `node_modules/`, both `.env` files,
-  build output (`server/dist`, `app/dist`, `app/.expo`).
-- Confirmed no real `.env` file exists anywhere in this project —
-  only sanitized `.env.example` templates.
-- I cannot push to GitHub myself (no network access here) — from VS
-  Code, use Source Control → Publish to GitHub (private repo), same
-  as before.
+- **Student** — register at `/api/auth/register/student` (or through
+  the app's sign-up screen once deployed). No approval needed;
+  `account_status` starts `active`.
+- **Hotel owner (self-service)** — register at
+  `/api/auth/register/hotel`; `account_status` starts
+  `pending_verification` until an admin reviews it (there's currently
+  no admin-approval *UI* — that's still a known gap, see README "What's
+  still NOT here yet").
+- **Hotel owner (admin-created, instant-active)** — an admin can
+  create an already-active hotel account directly via
+  `POST /api/admin/hotels` (see `admin.controller.ts createHotel`).
+- **Admin (`mealvest_admin`)** — deliberately has **no** self-registration
+  route anywhere in the API, by design. The only way to create one is
+  directly against the database:
+  ```bash
+  cd server
+  DATABASE_URL="<your real pooler connection string>" \
+    npm run seed:admin -- "Your Name" you@example.com 0712345678 "a-strong-password"
+  ```
+  Run this from your own machine (or this session, if you paste the
+  connection string somewhere I can use it once), never as a public
+  API endpoint — that's the actual security boundary for the admin
+  role, not just a permission check.
 
----
+Once you have credentials for each role, `POST /api/auth/login` with
+`{"identifier": "<email or phone>", "password": "..."}` returns an
+access token; the app's `AuthContext` handles routing you to the
+correct role stack automatically based on the token's role claim.
 
-## 9. Real-money testing — staged, per your requirement
+## 8. First real-money test — staged, per your requirement
 
-1. **No money needed**: register/login, browse hotels/menus, terms
-   disclaimer flow, RBAC checks (student hitting hotel/admin routes
-   → 403).
+1. **No money needed**: register/login for each role, browse
+   hotels/menus, terms disclaimer flow, RBAC checks (student hitting
+   hotel/admin routes → 403).
 2. **Paystack TEST mode**: full payment → webhook → budget-funding
    loop, using Paystack's test card/mobile money numbers. No real
-   money moves.
-3. **Requires YOUR decision, not a technical step**: switching
+   money moves. This is the step to do first.
+3. **Requires your decision, not a technical step**: switching
    `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY` to live keys. Do this
-   only after step 2 has been run successfully at least once and
-   you've manually confirmed the webhook fires correctly on the
-   deployed URL.
+   only after step 2 has succeeded at least once and you've manually
+   confirmed the webhook fires correctly on the deployed URL.
 4. Before any real money: confirm the Supabase pooler connection is
    stable under a few concurrent test requests, and confirm the QR
    redemption idempotency check actually blocks a double-scan on the
-   deployed function (not just locally) — both are things that only
-   the deployed environment can truly confirm.
+   deployed function (not just locally) — both are things only the
+   deployed environment can truly confirm.
 
----
+## 9. What I could NOT do myself
 
-## Deployment checklist (your requested format)
-
-1. **Project status**: existing MealVest codebase, unmodified business logic, adapted for Netlify.
-2. **What I fixed**: added the Netlify Function adapter + path-rewrite bug fix, `netlify.toml`, root `package.json` for `serverless-http`, missing `react-dom`/`react-native-web` web-export dependencies, `.gitignore`.
-3. **What remains**: everything in section 3 above (live verification), plus real Google/Paystack credentials only you can generate.
-4. **GitHub**: push from VS Code as described in section 8.
-5. **Netlify setup**: connect the GitHub repo → Netlify auto-detects `netlify.toml` → set env vars from section 7 → deploy.
-6. **Supabase setup**: section 4 — pooler connection string, run migrations once.
-7. **Paystack setup**: section 5 — test keys first, webhook URL after first deploy.
-8. **Required environment variables**: full list in section 7.
-9. **Production build status**: cannot be run in this sandbox (no network) — Netlify will run `npm run build` on its own infrastructure on your first deploy; watch that build log for the actual result.
-10. **Public URL**: assigned by Netlify on first successful deploy (`https://<something>.netlify.app`, or your own custom domain later).
-11. **First testing procedure**: (1) hit `/api/health` directly, confirm it responds — this is the one thing this sandbox couldn't verify for you; (2) register a student through the deployed URL; (3) run one Paystack TEST payment end to end; (4) confirm the webhook actually reaches the deployed function (Paystack's dashboard shows delivery attempts).
+- **Push this repo's latest commits to GitHub** — the Claude GitHub
+  App doesn't currently have access to `titlymark-cmd/mealvest`. Fix:
+  https://github.com/apps/claude/installations/select_target (select
+  `mealvest`), then ask me to retry.
+- **Create the Vercel project and deploy** — needs the GitHub push
+  above to land first (Vercel deploys from the pushed commit), plus
+  Vercel's own GitHub App needs access to this repo (a separate grant
+  from Claude's).
+- **Fetch or generate `DATABASE_URL`, `PAYSTACK_SECRET_KEY`, or
+  `PAYSTACK_PUBLIC_KEY`** — these come from accounts I don't have
+  credentials for (Supabase never exposes the DB password over its
+  API by design; there is no Paystack integration connected to this
+  session at all).
