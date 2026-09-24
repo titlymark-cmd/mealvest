@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
-import { Store, ChevronRight, MapPin, LocateFixed } from "lucide-react-native";
+import { Store, ChevronRight, MapPin, LocateFixed, LogOut } from "lucide-react-native";
 import { Card } from "../../components/Card";
 import { COLORS, FONTS, RADIUS } from "../../theme/theme";
 import { fetchHotels, fetchNearbyHotels, Hotel } from "../../services/hotelsApi";
 import { getCurrentLocation } from "../../services/locationService";
+import { useAuth } from "../../context/AuthContext";
 
 export default function HotelListScreen({ navigation }: any) {
+  const { logout } = useAuth();
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +60,15 @@ export default function HotelListScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Choose a hotel</Text>
-      <Text style={styles.subtitle}>Hotels registered with MEALVEST — pick one to see its menu.</Text>
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Choose a hotel</Text>
+          <Text style={styles.subtitle}>Hotels registered with MEALVEST — pick one to see its menu.</Text>
+        </View>
+        <TouchableOpacity style={styles.logoutIcon} onPress={() => logout()}>
+          <LogOut size={18} color={COLORS.danger} />
+        </TouchableOpacity>
+      </View>
 
       <TouchableOpacity style={styles.nearMeButton} onPress={findNearMe} disabled={locating}>
         <LocateFixed size={16} color="#fff" />
@@ -132,8 +141,20 @@ export default function HotelListScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.text },
   subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 16 },
+  logoutIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
   nearMeButton: {
     flexDirection: "row",
     alignItems: "center",
