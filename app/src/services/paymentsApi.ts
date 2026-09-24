@@ -36,6 +36,31 @@ export async function initializePayment(
   return parseOrError(res, "Could not start payment.");
 }
 
+export interface InitializeBoostInput {
+  amount: number;
+  phone: string;
+  email: string;
+}
+
+/**
+ * Meal Boost — tops up the student's EXISTING active plan instead of
+ * starting a new one. Shares the same checkoutUrl/verify shape as
+ * initializePayment (and reuses verifyPayment below unchanged) — only
+ * the initialize endpoint differs, since the backend needs to know
+ * this is a top-up (see payments.controller.ts initializeBoostPayment).
+ */
+export async function initializeBoostPayment(
+  authFetch: AuthFetch,
+  input: InitializeBoostInput
+): Promise<{ reference: string; checkoutUrl: string }> {
+  const res = await authFetch("/api/payments/paystack/boost/initialize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return parseOrError(res, "Could not start Meal Boost payment.");
+}
+
 export async function verifyPayment(
   authFetch: AuthFetch,
   reference: string

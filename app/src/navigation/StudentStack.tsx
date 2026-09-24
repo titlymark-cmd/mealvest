@@ -6,6 +6,7 @@ import BudgetOnboardingScreen from "../screens/student/BudgetOnboardingScreen";
 import StudentHomeScreen from "../screens/student/StudentHomeScreen";
 import MealPassScreen from "../screens/student/MealPassScreen";
 import OrderHistoryScreen from "../screens/student/OrderHistoryScreen";
+import MealBoostScreen from "../screens/student/MealBoostScreen";
 
 export type StudentStackParamList = {
   HotelList: undefined;
@@ -19,6 +20,7 @@ export type StudentStackParamList = {
   StudentHome: { budget?: unknown; hotelName?: string } | undefined;
   MealPass: { hotelId: string; hotelName: string; itemId: string; itemName: string; itemPrice: string };
   OrderHistory: undefined;
+  MealBoost: undefined;
 };
 
 const Stack = createNativeStackNavigator<StudentStackParamList>();
@@ -32,6 +34,7 @@ export function StudentStack() {
       <Stack.Screen name="StudentHome" component={StudentHomeScreen} />
       <Stack.Screen name="MealPass" component={MealPassScreen} />
       <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} />
+      <Stack.Screen name="MealBoost" component={MealBoostScreen} />
     </Stack.Navigator>
   );
 }

@@ -5,7 +5,7 @@ import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../theme/theme";
 import { useAuth } from "../context/AuthContext";
-import { ApiError } from "../services/authApi";
+import { ApiError, SettlementInput } from "../services/authApi";
 
 type Mode = "student" | "hotel";
 
@@ -16,6 +16,16 @@ const BUSINESS_TYPES = [
   { value: "canteen", label: "Canteen" },
   { value: "food_kiosk", label: "Food Kiosk" },
   { value: "cafe", label: "Café" },
+];
+
+type SettlementMethod = SettlementInput["method"];
+
+const SETTLEMENT_METHODS: { value: SettlementMethod; label: string }[] = [
+  { value: "mpesa_till", label: "M-Pesa Till" },
+  { value: "paybill", label: "Paybill" },
+  { value: "send_money", label: "Send Money" },
+  { value: "pochi_la_biashara", label: "Pochi la Biashara" },
+  { value: "bank", label: "Bank Account" },
 ];
 
 export default function RegisterScreen({ navigation, mode }: any & { mode: Mode }) {
@@ -32,17 +42,80 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
   const [fullName, setFullName] = useState("");
 
   // Hotel-only — key fields only for MVP1; the rest (KRA PIN, hours,
-  // branch count, other settlement methods) are an MVP2 "complete
-  // your hotel profile" flow, per explicit scope decision.
+  // branch count) are an MVP2 "complete your hotel profile" flow, per
+  // explicit scope decision. Settlement method itself covers the
+  // common Kenyan business payout options (see settlementMethodSchema
+  // on the backend), not just M-Pesa Till.
   const [hotelName, setHotelName] = useState("");
   const [businessType, setBusinessType] = useState("hotel");
   const [location, setLocation] = useState("");
   const [contactFullName, setContactFullName] = useState("");
+
+  // Settlement — how the hotel actually gets paid out. Kenyan
+  // businesses use a handful of common collection methods; which
+  // fields are required depends on which one is picked (mirrors
+  // server/src/schemas/settlementMethodSchema.ts exactly).
+  const [settlementMethod, setSettlementMethod] = useState<SettlementMethod>("mpesa_till");
   const [tillNumber, setTillNumber] = useState("");
   const [tillName, setTillName] = useState("");
+  const [paybillNumber, setPaybillNumber] = useState("");
+  const [paybillAccountNumber, setPaybillAccountNumber] = useState("");
+  const [paybillBusinessName, setPaybillBusinessName] = useState("");
+  const [sendMoneyPhone, setSendMoneyPhone] = useState("");
+  const [accountHolderName, setAccountHolderName] = useState("");
+  const [pochiPhoneNumber, setPochiPhoneNumber] = useState("");
+  const [businessAccountName, setBusinessAccountName] = useState("");
+  const [registeredName, setRegisteredName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankBranch, setBankBranch] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const buildSettlement = (): SettlementInput => {
+    switch (settlementMethod) {
+      case "mpesa_till":
+        return {
+          method: "mpesa_till",
+          tillNumber,
+          tillName,
+          // The same phone number used to log in doubles as the
+          // M-Pesa-registered number — one less field to collect.
+          registeredPhoneNumber: phoneNumber,
+        };
+      case "paybill":
+        return {
+          method: "paybill",
+          paybillNumber,
+          accountNumber: paybillAccountNumber,
+          paybillBusinessName,
+          registeredPhoneNumber: phoneNumber,
+        };
+      case "send_money":
+        return {
+          method: "send_money",
+          phoneNumber: sendMoneyPhone,
+          accountHolderName,
+        };
+      case "pochi_la_biashara":
+        return {
+          method: "pochi_la_biashara",
+          pochiPhoneNumber,
+          businessAccountName,
+          registeredName,
+        };
+      case "bank":
+        return {
+          method: "bank",
+          bankName,
+          accountName: bankAccountName,
+          accountNumber: bankAccountNumber,
+          branch: bankBranch || undefined,
+        };
+    }
+  };
 
   const submit = async () => {
     setError(null);
@@ -60,16 +133,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
           businessType,
           location,
           contactFullName,
-          settlement: {
-            method: "mpesa_till",
-            tillNumber,
-            tillName,
-            // The same phone number used to log in doubles as the
-            // M-Pesa-registered number for MVP1 — one less field to
-            // collect. A hotel can register a different number for
-            // this later in the MVP2 profile-completion flow.
-            registeredPhoneNumber: phoneNumber,
-          },
+          settlement: buildSettlement(),
         });
       }
     } catch (err) {
@@ -190,22 +254,152 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
             onChangeText={setContactFullName}
           />
 
-          <Text style={styles.sectionLabel}>Payment details (M-Pesa Till)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Till number"
-            placeholderTextColor={COLORS.textFaint}
-            keyboardType="number-pad"
-            value={tillNumber}
-            onChangeText={setTillNumber}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Name registered on the till"
-            placeholderTextColor={COLORS.textFaint}
-            value={tillName}
-            onChangeText={setTillName}
-          />
+          <Text style={styles.sectionLabel}>How do you get paid?</Text>
+          <View style={styles.wrapRow}>
+            {SETTLEMENT_METHODS.map((m) => (
+              <TouchableOpacity
+                key={m.value}
+                onPress={() => setSettlementMethod(m.value)}
+                style={[styles.typePill, settlementMethod === m.value && styles.typePillActive]}
+              >
+                <Text style={[styles.typePillText, settlementMethod === m.value && styles.typePillTextActive]}>
+                  {m.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {settlementMethod === "mpesa_till" && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Till number"
+                placeholderTextColor={COLORS.textFaint}
+                keyboardType="number-pad"
+                value={tillNumber}
+                onChangeText={setTillNumber}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Name registered on the till"
+                placeholderTextColor={COLORS.textFaint}
+                value={tillName}
+                onChangeText={setTillName}
+              />
+            </>
+          )}
+
+          {settlementMethod === "paybill" && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Paybill number"
+                placeholderTextColor={COLORS.textFaint}
+                keyboardType="number-pad"
+                value={paybillNumber}
+                onChangeText={setPaybillNumber}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Account number"
+                placeholderTextColor={COLORS.textFaint}
+                value={paybillAccountNumber}
+                onChangeText={setPaybillAccountNumber}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Business name registered on the paybill"
+                placeholderTextColor={COLORS.textFaint}
+                value={paybillBusinessName}
+                onChangeText={setPaybillBusinessName}
+              />
+            </>
+          )}
+
+          {settlementMethod === "send_money" && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="M-Pesa phone number to receive payments"
+                placeholderTextColor={COLORS.textFaint}
+                keyboardType="phone-pad"
+                value={sendMoneyPhone}
+                onChangeText={setSendMoneyPhone}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Name on that M-Pesa account"
+                placeholderTextColor={COLORS.textFaint}
+                value={accountHolderName}
+                onChangeText={setAccountHolderName}
+              />
+              <Text style={styles.pinHint}>
+                This number must belong to you or an authorized person at your business — we'll confirm this before
+                activating payouts.
+              </Text>
+            </>
+          )}
+
+          {settlementMethod === "pochi_la_biashara" && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Pochi la Biashara phone number"
+                placeholderTextColor={COLORS.textFaint}
+                keyboardType="phone-pad"
+                value={pochiPhoneNumber}
+                onChangeText={setPochiPhoneNumber}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Business account name"
+                placeholderTextColor={COLORS.textFaint}
+                value={businessAccountName}
+                onChangeText={setBusinessAccountName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Registered name"
+                placeholderTextColor={COLORS.textFaint}
+                value={registeredName}
+                onChangeText={setRegisteredName}
+              />
+            </>
+          )}
+
+          {settlementMethod === "bank" && (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Bank name"
+                placeholderTextColor={COLORS.textFaint}
+                value={bankName}
+                onChangeText={setBankName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Account name"
+                placeholderTextColor={COLORS.textFaint}
+                value={bankAccountName}
+                onChangeText={setBankAccountName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Account number"
+                placeholderTextColor={COLORS.textFaint}
+                keyboardType="number-pad"
+                value={bankAccountNumber}
+                onChangeText={setBankAccountNumber}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Branch (optional)"
+                placeholderTextColor={COLORS.textFaint}
+                value={bankBranch}
+                onChangeText={setBankBranch}
+              />
+            </>
+          )}
 
           <View style={styles.verifyNote}>
             <ShieldCheck size={14} color={COLORS.success} />

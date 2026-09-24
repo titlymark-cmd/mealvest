@@ -4,11 +4,25 @@ import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { normalizeKenyanPhone } from "../lib/phone";
 import { paystackProvider } from "../services/paystackProvider";
-import { generatePaymentReference, createPendingTransaction, activatePaymentIfNeeded } from "../services/paymentService";
+import {
+  generatePaymentReference,
+  createPendingTransaction,
+  createPendingBoostTransaction,
+  activatePaymentIfNeeded,
+} from "../services/paymentService";
+import { getActiveBudget } from "../services/budgetService";
 import { pool } from "../config/db";
 
 const MIN_AMOUNT = 500;
 const MAX_AMOUNT = 50000;
+
+// Meal Boost is a small top-up to an already-active plan, not a new
+// plan purchase — same currency, deliberately lower floor than a
+// fresh plan (the whole point is letting a student add "some small
+// deposit", per spec) and a lower ceiling too, since it's topping up
+// an existing budget rather than funding a new multi-week one.
+const MIN_BOOST_AMOUNT = 100;
+const MAX_BOOST_AMOUNT = 20000;
 
 // No `plans` table exists in this codebase (see migration history) —
 // a student chooses their own amount + day count rather than picking
@@ -59,6 +73,72 @@ export async function initializePaystackPayment(req: AuthedRequest, res: Respons
       provider: "paystack",
       reference,
       numberOfDays,
+    });
+
+    const result = await paystackProvider.initializePayment({
+      userId: req.user!.id,
+      amount,
+      phoneNumber,
+      email,
+      reference,
+    });
+
+    res.status(201).json({
+      reference: result.reference,
+      checkoutUrl: result.checkoutUrl,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export const initializeBoostSchema = z.object({
+  amount: z
+    .number()
+    .min(MIN_BOOST_AMOUNT, `Minimum boost amount is KSh ${MIN_BOOST_AMOUNT}.`)
+    .max(MAX_BOOST_AMOUNT, `Maximum boost amount is KSh ${MAX_BOOST_AMOUNT}.`),
+  phone: z.string().min(9),
+  email: z.string().email(),
+});
+
+/**
+ * Meal Boost — top up the student's EXISTING active plan (raises
+ * remaining_amount, which raises daily_allowance on the next read)
+ * rather than starting a new one. Reuses the same Paystack
+ * initialize/verify/webhook path as a fresh plan purchase — the only
+ * difference is which transaction type gets recorded and what
+ * activatePaymentIfNeeded does once Paystack confirms payment (see
+ * paymentService.ts).
+ */
+export async function initializeBoostPayment(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = initializeBoostSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
+    }
+    const { amount, email } = parsed.data;
+    const phoneNumber = normalizeKenyanPhone(parsed.data.phone);
+    if (!phoneNumber) {
+      throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan phone number.");
+    }
+
+    // A boost only makes sense against a plan that already exists —
+    // checked here, before Paystack is ever contacted, same as every
+    // other guard in this file.
+    const budget = await getActiveBudget(req.user!.id);
+    if (!budget) {
+      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan to boost.");
+    }
+
+    const reference = generatePaymentReference();
+
+    await createPendingBoostTransaction({
+      userId: req.user!.id,
+      budgetId: budget.id,
+      amount,
+      phoneNumber,
+      provider: "paystack",
+      reference,
     });
 
     const result = await paystackProvider.initializePayment({

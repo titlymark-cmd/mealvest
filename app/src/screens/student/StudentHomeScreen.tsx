@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from "react-native";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank } from "lucide-react-native";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap } from "lucide-react-native";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { COLORS, FONTS, RADIUS } from "../../theme/theme";
@@ -170,6 +170,16 @@ export default function StudentHomeScreen({ route, navigation }: any) {
             </Card>
           </View>
 
+          <TouchableOpacity style={styles.boostCard} onPress={() => navigation.navigate("MealBoost")} activeOpacity={0.85}>
+            <View style={styles.boostIconCircle}>
+              <Zap size={16} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.boostTitle}>Meal Boost</Text>
+              <Text style={styles.boostSubtitle}>Feeling short? Add a bit more to raise your daily amount.</Text>
+            </View>
+          </TouchableOpacity>
+
           {hotelName && (
             <Card style={styles.hotelCard}>
               <Text style={styles.hotelLabel}>Your hotel</Text>
@@ -255,6 +265,27 @@ const styles = StyleSheet.create({
   statEmoji: { fontSize: 16 },
   statLabel: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 8 },
   statValue: { fontSize: 14, fontFamily: FONTS.displayBold, color: COLORS.text, marginTop: 2 },
+  boostCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 12,
+    backgroundColor: "#fff",
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+  },
+  boostIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  boostTitle: { fontSize: 14, fontFamily: FONTS.bodySemibold, color: COLORS.text },
+  boostSubtitle: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 2 },
   hotelCard: { marginTop: 12 },
   hotelLabel: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, textTransform: "uppercase" },
   hotelValue: { fontSize: 15, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginTop: 2 },

@@ -53,6 +53,16 @@ export async function registerStudent(input: {
   return res.json();
 }
 
+// Mirrors server/src/schemas/settlementMethodSchema.ts exactly — the
+// backend is the source of truth for which fields each method needs;
+// this type just keeps the frontend request shape honest against it.
+export type SettlementInput =
+  | { method: "mpesa_till"; tillNumber: string; tillName: string; registeredPhoneNumber: string }
+  | { method: "paybill"; paybillNumber: string; accountNumber: string; paybillBusinessName: string; registeredPhoneNumber: string }
+  | { method: "send_money"; phoneNumber: string; accountHolderName: string }
+  | { method: "pochi_la_biashara"; pochiPhoneNumber: string; businessAccountName: string; registeredName: string }
+  | { method: "bank"; bankName: string; accountName: string; accountNumber: string; branch?: string; branchCode?: string };
+
 export async function registerHotel(input: {
   email: string;
   phoneNumber: string;
@@ -62,12 +72,7 @@ export async function registerHotel(input: {
   businessType: string;
   location?: string;
   contactFullName: string;
-  settlement: {
-    method: "mpesa_till";
-    tillNumber: string;
-    tillName: string;
-    registeredPhoneNumber: string;
-  };
+  settlement: SettlementInput;
 }): Promise<AuthResult & { applicationId: string }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/hotel`, {
     method: "POST",

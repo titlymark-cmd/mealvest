@@ -343,6 +343,50 @@ export async function deductFromBudget(userId: string, amount: number): Promise<
 }
 
 /**
+ * Meal Boost — adds money to an ALREADY ACTIVE budget, paid for via
+ * its own Paystack transaction (see paymentService.activatePaymentIfNeeded,
+ * type='plan_boost'). Deliberately minimal: only total_amount and
+ * remaining_amount move. daily_allowance is NOT recomputed here —
+ * getActiveBudget already recalculates it fresh on every read
+ * (remaining_amount / remainingDays), so the next time the student's
+ * dashboard loads, the boosted amount is already reflected in a
+ * higher daily rate without this function needing to duplicate that
+ * logic. Today's already-spent/banked/pending-tomorrow figures are
+ * untouched — a boost adds to what's left for the rest of the plan,
+ * it doesn't rewrite today.
+ */
+export async function applyBoost(budgetId: string, amount: number): Promise<BudgetRow> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<BudgetRow>(
+      "SELECT * FROM budgets WHERE id = $1 AND status = 'active' FOR UPDATE",
+      [budgetId]
+    );
+    const budget = result.rows[0];
+    if (!budget) {
+      throw new ApiError(404, "BUDGET_NOT_FOUND", "This meal plan is no longer active.");
+    }
+
+    const newTotal = Math.round((Number(budget.total_amount) + amount) * 100) / 100;
+    const newRemaining = Math.round((Number(budget.remaining_amount) + amount) * 100) / 100;
+
+    const updated = await client.query<BudgetRow>(
+      `UPDATE budgets SET total_amount = $1, remaining_amount = $2, updated_at = now()
+       WHERE id = $3 RETURNING *`,
+      [newTotal, newRemaining, budgetId]
+    );
+    await client.query("COMMIT");
+    return updated.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Savings withdrawal — locked until the budget's contract period has
  * actually ended, checked server-side against the DB's own
  * CURRENT_DATE, never a client-supplied date. The student receives
