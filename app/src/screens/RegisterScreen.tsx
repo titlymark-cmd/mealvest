@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
-import { ShieldCheck, Store, User } from "lucide-react-native";
+import { ShieldCheck, Store, User, Eye, EyeOff } from "lucide-react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../theme/theme";
@@ -25,6 +25,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
   const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [pin, setPin] = useState("");
 
   // Student-only
@@ -118,14 +119,27 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
         value={phoneNumber}
         onChangeText={setPhoneNumber}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Password (at least 8 characters)"
-        placeholderTextColor={COLORS.textFaint}
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={styles.passwordRow}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="Password (at least 8 characters)"
+          placeholderTextColor={COLORS.textFaint}
+          secureTextEntry={!showPassword}
+          value={password}
+          onChangeText={setPassword}
+        />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword((v) => !v)}
+          accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? (
+            <EyeOff size={18} color={COLORS.textMuted} />
+          ) : (
+            <Eye size={18} color={COLORS.textMuted} />
+          )}
+        </TouchableOpacity>
+      </View>
       <TextInput
         style={styles.input}
         placeholder="Create a 4-digit PIN"
@@ -240,6 +254,9 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   pinHint: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: -6, marginBottom: 12 },
+  passwordRow: { position: "relative", justifyContent: "center" },
+  passwordInput: { paddingRight: 44 },
+  eyeButton: { position: "absolute", right: 14, height: "100%", justifyContent: "center", alignItems: "center" },
   wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   typePill: { borderWidth: 2, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingVertical: 8, paddingHorizontal: 12 },
   typePillActive: { borderColor: COLORS.primary, backgroundColor: "#EFF9FF" },
