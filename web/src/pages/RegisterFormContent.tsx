@@ -59,6 +59,7 @@ export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onS
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
 
   // Student-only
   const [fullName, setFullName] = useState("");
@@ -216,15 +217,25 @@ export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onS
           {showPassword ? <EyeOff size={18} color={COLORS.textOnDarkMuted} /> : <Eye size={18} color={COLORS.textOnDarkMuted} />}
         </button>
       </div>
-      <input
-        style={styles.input}
-        placeholder="Create a 4-digit PIN"
-        type="password"
-        inputMode="numeric"
-        maxLength={4}
-        value={pin}
-        onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
-      />
+      <div style={styles.passwordRow}>
+        <input
+          style={{ ...styles.input, ...styles.passwordInput }}
+          placeholder="Create a 4-digit PIN"
+          type={showPin ? "text" : "password"}
+          inputMode="numeric"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
+        />
+        <button
+          type="button"
+          style={styles.eyeButton}
+          onClick={() => setShowPin((v) => !v)}
+          aria-label={showPin ? "Hide PIN" : "Show PIN"}
+        >
+          {showPin ? <EyeOff size={18} color={COLORS.textOnDarkMuted} /> : <Eye size={18} color={COLORS.textOnDarkMuted} />}
+        </button>
+      </div>
       <p style={styles.pinHint}>Used to quickly unlock the app later without retyping your password.</p>
 
       {mode === "hotel" && (

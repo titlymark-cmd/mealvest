@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../styles/theme";
@@ -24,6 +25,7 @@ export function LoginFormContent({
   const { loginWithPassword, loginWithGoogle } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +87,23 @@ export function LoginFormContent({
         value={identifier}
         onChange={(e) => setIdentifier(e.target.value)}
       />
-      <input
-        style={styles.input}
-        placeholder="Password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+      <div style={styles.passwordRow}>
+        <input
+          style={{ ...styles.input, ...styles.passwordInput }}
+          placeholder="Password"
+          type={showPassword ? "text" : "password"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <button
+          type="button"
+          style={styles.eyeButton}
+          onClick={() => setShowPassword((v) => !v)}
+          aria-label={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? <EyeOff size={18} color={COLORS.textOnDarkMuted} /> : <Eye size={18} color={COLORS.textOnDarkMuted} />}
+        </button>
+      </div>
 
       {error && <p style={styles.error}>{error}</p>}
 
@@ -132,6 +144,9 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     width: "100%",
   },
+  passwordRow: { position: "relative", display: "flex", flexDirection: "column", justifyContent: "center" },
+  passwordInput: { paddingRight: 44 },
+  eyeButton: { position: "absolute", right: 14, height: "100%", display: "flex", justifyContent: "center", alignItems: "center" },
   error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, marginTop: 0, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
   linkButton: { marginTop: 16, alignSelf: "center" },
   link: {
