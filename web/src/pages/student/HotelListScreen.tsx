@@ -81,7 +81,7 @@ export default function HotelListScreen() {
       <button
         onClick={findNearMe}
         disabled={locating}
-        className={locating ? undefined : "mv-action"}
+        className={locating ? undefined : "mv-action mv-action-no-ring"}
         style={{ ...styles.nearMeButtonWrap, ...glow(COLORS.primary, 10) }}
       >
         <div style={styles.nearMeButton}>
@@ -121,7 +121,7 @@ export default function HotelListScreen() {
         {hotels.map((item) => (
           <Card key={item.id} style={styles.card}>
             <button
-              className="mv-action"
+              className="mv-action mv-action-no-ring"
               style={styles.cardMain}
               onClick={() => navigate(`/student/hotels/${item.id}/menu`, { state: { hotelName: item.name } })}
             >

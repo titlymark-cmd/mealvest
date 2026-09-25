@@ -75,6 +75,14 @@
   transform: scale(1.01);
 }
 
+/* Opt-out modifier: keeps the scale-up hover feel but drops the
+   rotating ring entirely — for spots where the ring read as too busy
+   (the "Find hotels near me" button, hotel list rows). Combine with
+   .mv-action: className="mv-action mv-action-no-ring". */
+.mv-action-no-ring::before {
+  content: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mv-action {
     transition: none;
