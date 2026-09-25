@@ -114,7 +114,7 @@ export function LoginFormContent({
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: "100%", maxWidth: 380 },
+  wrap: { width: "100%", maxWidth: 420 },
   title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, marginTop: 22 },
   subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
   dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 18 },
