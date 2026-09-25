@@ -22,13 +22,21 @@ const EASE = "cubic-bezier(.65,0,.35,1)";
 const FORM_PADDING = 64;
 const FORM_SAFE_EDGE = FORM_PADDING + 420;
 
+// Login keeps the original ~45-degree diagonal; the signup side of the
+// split uses a shallower angle (15 degrees less, i.e. more vertical —
+// a less dramatic slant) per explicit design feedback. Angle is
+// measured from vertical, so 45 reproduces the original geometry
+// exactly (tan(45deg) = 1, giving half = height/2 as before).
+const LOGIN_ANGLE_DEG = 45;
+const REGISTER_ANGLE_DEG = 30;
+
 /**
  * The diagonal boundary spans the FULL screen (not just the hero image),
  * and is computed from the viewport's own height rather than a fixed
  * percentage of its width — over one screen-height of vertical travel it
- * moves exactly one screen-height sideways, so the line stays a genuine
- * ~45 degrees at any desktop window size instead of drifting flatter or
- * steeper as the window gets wider or narrower.
+ * moves a fixed multiple of that height sideways (tan(angle) * height),
+ * so the line holds its angle at any desktop window size instead of
+ * drifting flatter or steeper as the window gets wider or narrower.
  *
  * `formTopOffset` is solved directly from that same boundary equation: the
  * minimum distance from the top of the screen at which a form's content
@@ -36,8 +44,8 @@ const FORM_SAFE_EDGE = FORM_PADDING + 420;
  * own trapezoid — at any window size and for a form of any length (a long
  * hotel registration form just scrolls further before it's fully visible).
  */
-function diagonalGeometry(width: number, height: number) {
-  const half = height / 2;
+function diagonalGeometry(width: number, height: number, angleFromVerticalDeg: number) {
+  const half = (height * Math.tan((angleFromVerticalDeg * Math.PI) / 180)) / 2;
   const center = width / 2;
   const narrowX = center - half;
   const wideX = center + half;
@@ -143,14 +151,22 @@ function FormPanel({ visible, align, topOffset, children }: any) {
 
 function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwitchToLogin }: any) {
   const { width, height } = useWindowSize();
-  const { narrowX, wideX, formTopOffset } = diagonalGeometry(width, height);
+  // Two independent geometries — login's boundary/form-offset always
+  // come from the 45deg one, register's from the shallower 30deg one,
+  // so each screen keeps its own angle rather than sharing a single
+  // mirrored shape. The clip-path below picks whichever is currently
+  // active, and CSS smoothly interpolates the polygon between the two
+  // angles during the login<->register slide.
+  const loginGeom = diagonalGeometry(width, height, LOGIN_ANGLE_DEG);
+  const registerGeom = diagonalGeometry(width, height, REGISTER_ANGLE_DEG);
+  const activeGeom = isRegister ? registerGeom : loginGeom;
 
   // Login: left region (the form) is narrow at the top, wide at the
   // bottom. Register mirrors it: left region (the hero) wide at the top,
   // narrow at the bottom. The right region is always the complement, so
   // it's built from the exact same two numbers.
-  const leftTopX = isRegister ? wideX : narrowX;
-  const leftBottomX = isRegister ? narrowX : wideX;
+  const leftTopX = isRegister ? activeGeom.wideX : activeGeom.narrowX;
+  const leftBottomX = isRegister ? activeGeom.narrowX : activeGeom.wideX;
 
   const clipTransition: React.CSSProperties = {
     // This is what actually slides the diagonal seam across the
@@ -177,7 +193,7 @@ function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwi
             subtitle="Create an account and start funding meals at hotels you already trust."
             align="left"
           />
-          <FormPanel visible={!isRegister} align="left" topOffset={formTopOffset}>
+          <FormPanel visible={!isRegister} align="left" topOffset={loginGeom.formTopOffset}>
             <LoginFormContent onSwitchToRegister={onSwitchToRegister} />
           </FormPanel>
         </div>
@@ -200,7 +216,7 @@ function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwi
             subtitle="Fund a meal plan with hotels you trust and eat well every single day."
             align="right"
           />
-          <FormPanel visible={isRegister} align="right" topOffset={formTopOffset}>
+          <FormPanel visible={isRegister} align="right" topOffset={registerGeom.formTopOffset}>
             <RegisterFormContent mode={registerRole} onSwitchToLogin={onSwitchToLogin} />
           </FormPanel>
         </div>
