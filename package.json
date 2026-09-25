@@ -2,10 +2,10 @@
   "name": "mealvest",
   "private": true,
   "version": "1.0.0",
-  "description": "Mealvest — Vercel build orchestration root. Vercel's Node.js runtime invokes api/index.ts directly (a plain Express app export, no serverless-http adapter needed, unlike the earlier Netlify setup); this root package.json exists so `npm install`/`npm run build` at the repo root can orchestrate both server/ (installed so the function bundler can resolve its dependencies, and type-checked as a build-time safety net) and app/ (built to a static web export Vercel serves directly).",
+  "description": "Mealvest — Vercel build orchestration root. Vercel's Node.js runtime invokes api/index.ts directly (a plain Express app export, no serverless-http adapter needed, unlike the earlier Netlify setup); this root package.json exists so `npm install`/`npm run build` at the repo root can orchestrate both server/ (installed so the function bundler can resolve its dependencies, and type-checked as a build-time safety net) and web/ (a Create React App build served as the static frontend Vercel serves directly). The frontend was migrated from the Expo/React Native app in app/ to plain React + CRA — app/ is kept in the repo unbuilt/undeployed rather than deleted, in case a rollback is ever needed.",
   "scripts": {
     "build:server-check": "cd server && npm install --include=dev && npm run build",
-    "build:web": "cd app && npm install --include=dev && npx expo export --platform web",
+    "build:web": "cd web && npm install --include=dev && npm run build",
     "build": "npm run build:server-check && npm run build:web"
   }
 }
