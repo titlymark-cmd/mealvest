@@ -117,8 +117,8 @@ export default function MealPassScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, display: "flex", flexDirection: "column" },
-  center: { flex: 1, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
+  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, display: "flex", flexDirection: "column" },
+  center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
   statusText: { fontFamily: FONTS.bodyMedium, fontWeight: 500, fontSize: 14, color: COLORS.textOnDarkMuted, marginTop: 16 },
   errorTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
   errorBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },

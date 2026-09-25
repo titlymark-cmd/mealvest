@@ -102,7 +102,7 @@ export default function HotelStaffHomeScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, paddingBottom: 40, display: "flex", flexDirection: "column" },
+  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, paddingBottom: 40, display: "flex", flexDirection: "column" },
   headerRow: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   greeting: { display: "block", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, margin: 0, marginTop: 2 },

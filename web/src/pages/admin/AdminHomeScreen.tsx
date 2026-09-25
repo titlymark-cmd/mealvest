@@ -216,8 +216,8 @@ export default function AdminHomeScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
-  center: { flex: 1, width: "100%", minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
+  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
+  center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
   headerRow: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
   greeting: { display: "block", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, margin: 0, marginTop: 2 },

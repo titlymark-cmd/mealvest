@@ -217,8 +217,8 @@ export default function HotelScannerScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: "#03060F", display: "flex", flexDirection: "column" },
-  center: { flex: 1, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
+  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: "#03060F", display: "flex", flexDirection: "column" },
+  center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
   permTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
   permBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },
   headerRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 54, paddingLeft: 18, paddingRight: 18, paddingBottom: 14 },

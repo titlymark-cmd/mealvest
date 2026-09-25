@@ -21,6 +21,11 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Matches COLORS.bg (theme.ts) — a safety net so ANY unpainted gap
+     (a scrollbar gutter reserving width, a stray layout mismatch,
+     etc.) shows the app's own dark canvas instead of the browser's
+     bare default, rather than reading as a broken "chipped" edge. */
+  background-color: #1d1511;
 }
 
 #root {
@@ -28,6 +33,7 @@ body {
   flex-direction: column; /* RN's implicit View default; CSS's is "row" */
   height: 100%;
   flex: 1;
+  background-color: #1d1511;
   /* Every screen's own container uses `minHeight: "100%"` (grows to
      fit its content) rather than a fixed `height`, expecting ITS OWN
      box to be the scrollable region — but with no `overflowY` set on
