@@ -1,12 +1,20 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { PlaceholderScreen } from "../components/PlaceholderScreen";
+import HotelOwnerHomeScreen from "../pages/hotelOwner/HotelOwnerHomeScreen";
+import HotelScannerScreen from "../pages/hotel/HotelScannerScreen";
+import HotelOrdersScreen from "../pages/hotel/HotelOrdersScreen";
+import HotelMenuManageScreen from "../pages/hotelOwner/HotelMenuManageScreen";
+import HotelProfileScreen from "../pages/hotelOwner/HotelProfileScreen";
 
-/** Stub for Phase 3 — real hotel-owner screens land here. */
+/** Web port of navigation/HotelOwnerStack.tsx. */
 export function HotelOwnerRoutes() {
   return (
     <Routes>
-      <Route path="/hotel-owner/*" element={<PlaceholderScreen label="Hotel Owner" note="Migrating in Phase 3." />} />
+      <Route path="/hotel-owner/home" element={<HotelOwnerHomeScreen />} />
+      <Route path="/hotel-owner/scanner" element={<HotelScannerScreen />} />
+      <Route path="/hotel-owner/orders" element={<HotelOrdersScreen />} />
+      <Route path="/hotel-owner/menu" element={<HotelMenuManageScreen />} />
+      <Route path="/hotel-owner/profile" element={<HotelProfileScreen />} />
       <Route path="*" element={<Navigate to="/hotel-owner/home" replace />} />
     </Routes>
   );

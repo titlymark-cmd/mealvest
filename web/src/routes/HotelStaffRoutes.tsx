@@ -1,12 +1,16 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { PlaceholderScreen } from "../components/PlaceholderScreen";
+import HotelStaffHomeScreen from "../pages/hotelStaff/HotelStaffHomeScreen";
+import HotelScannerScreen from "../pages/hotel/HotelScannerScreen";
+import HotelOrdersScreen from "../pages/hotel/HotelOrdersScreen";
 
-/** Stub for Phase 3 — real hotel-staff screens land here. */
+/** Web port of navigation/HotelStaffStack.tsx. */
 export function HotelStaffRoutes() {
   return (
     <Routes>
-      <Route path="/hotel-staff/*" element={<PlaceholderScreen label="Hotel Staff" note="Migrating in Phase 3." />} />
+      <Route path="/hotel-staff/home" element={<HotelStaffHomeScreen />} />
+      <Route path="/hotel-staff/scanner" element={<HotelScannerScreen />} />
+      <Route path="/hotel-staff/orders" element={<HotelOrdersScreen />} />
       <Route path="*" element={<Navigate to="/hotel-staff/home" replace />} />
     </Routes>
   );

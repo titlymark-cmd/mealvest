@@ -249,7 +249,7 @@ const styles: Record<string, React.CSSProperties> = {
   heroPanel: { display: "flex", flexDirection: "column", justifyContent: "flex-start", padding: 56, overflow: "hidden" },
   heroScrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(29,21,17,0.55)" },
   heroContent: { display: "flex", flexDirection: "column", marginTop: 40, maxWidth: 380, position: "relative" },
-  heroHeading: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 32, lineHeight: "40px", color: "#fff", marginTop: 22, margin: 0 },
+  heroHeading: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 32, lineHeight: "40px", color: "#fff", margin: 0, marginTop: 22 },
   heroSubtitle: { fontFamily: FONTS.body, fontSize: 14, color: "rgba(255,255,255,0.85)", marginTop: 12, lineHeight: "21px" },
   formPanel: { display: "flex", flexDirection: "column", paddingLeft: FORM_PADDING, paddingRight: FORM_PADDING, paddingBottom: 40 },
   mobileRoot: { flex: 1, width: "100%", height: "100%", position: "relative", backgroundColor: COLORS.bg },

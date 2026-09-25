@@ -1,34 +1,37 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ShoppingBag } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Card } from "../../components/Card";
+import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { listMyOrders, Order } from "../../services/ordersApi";
+import { fetchHotelOrders, markOrderReady, HotelOrder } from "../../services/hotelStaffApi";
 
-const STATUS_LABEL: Record<string, { label: string; color: string }> = {
+const STATUS_META: Record<string, { label: string; color: string }> = {
   pending_payment: { label: "Pending payment", color: COLORS.warning },
-  paid: { label: "Paid", color: COLORS.primary },
-  ready: { label: "Ready", color: COLORS.primary },
-  redeemed: { label: "Redeemed", color: COLORS.success },
+  paid: { label: "Paid — awaiting prep", color: COLORS.primary },
+  ready: { label: "Ready for pickup", color: COLORS.success },
+  redeemed: { label: "Redeemed", color: COLORS.textFaint },
   cancelled: { label: "Cancelled", color: COLORS.textFaint },
   refunded: { label: "Refunded", color: COLORS.textFaint },
 };
 
-export default function OrderHistoryScreen() {
+/** Shared by Hotel Staff and Hotel Owner — byte-identical originally. */
+export default function HotelOrdersScreen() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<HotelOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await listMyOrders(authFetch);
+      const data = await fetchHotelOrders(authFetch);
       setOrders(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load your orders.");
+      setError(err instanceof Error ? err.message : "Could not load orders.");
     } finally {
       setLoading(false);
     }
@@ -38,14 +41,25 @@ export default function OrderHistoryScreen() {
     load();
   }, [load]);
 
+  const handleMarkReady = async (orderId: string) => {
+    setUpdatingId(orderId);
+    try {
+      await markOrderReady(authFetch, orderId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update this order.");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   return (
     <div style={styles.container}>
       <button onClick={() => navigate(-1)} style={styles.backRow}>
         <ArrowLeft size={16} color={COLORS.primary} />
         <span style={styles.backText}>Back</span>
       </button>
-
-      <h1 style={styles.title}>My Orders</h1>
+      <h1 style={styles.title}>Orders</h1>
 
       {loading && (
         <div style={{ marginTop: 30, display: "flex" }}>
@@ -53,29 +67,31 @@ export default function OrderHistoryScreen() {
         </div>
       )}
       {!loading && error && <p style={styles.errorText}>{error}</p>}
-      {!loading && !error && orders.length === 0 && (
-        <div style={styles.emptyState}>
-          <ShoppingBag size={28} color={COLORS.textOnDarkMuted} />
-          <span style={styles.emptyText}>No orders yet.</span>
-        </div>
-      )}
+      {!loading && !error && orders.length === 0 && <p style={styles.emptyText}>No orders yet.</p>}
 
       <div style={styles.list}>
         {orders.map((item) => {
-          const statusMeta = STATUS_LABEL[item.status] || { label: item.status, color: COLORS.textFaint };
+          const meta = STATUS_META[item.status] || { label: item.status, color: COLORS.textFaint };
           return (
             <Card key={item.id} style={styles.orderCard}>
-              <div style={{ flex: 1 }}>
-                {item.items.map((it, i) => (
-                  <span key={i} style={styles.itemLine}>
-                    {it.quantity}× {it.name}
-                  </span>
-                ))}
+              <div style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+                <div style={{ flex: 1 }}>
+                  {item.items.map((it, i) => (
+                    <span key={i} style={styles.itemLine}>
+                      {it.quantity}× {it.name}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                  <span style={styles.amount}>KSh {Number(item.amount).toLocaleString()}</span>
+                  <span style={{ ...styles.statusText, color: meta.color }}>{meta.label}</span>
+                </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                <span style={styles.amount}>KSh {Number(item.amount).toLocaleString()}</span>
-                <span style={{ ...styles.statusText, color: statusMeta.color }}>{statusMeta.label}</span>
-              </div>
+              {item.status === "paid" && (
+                <PrimaryButton onPress={() => handleMarkReady(item.id)} loading={updatingId === item.id} showArrow={false} style={{ marginTop: 10 }}>
+                  Mark as ready
+                </PrimaryButton>
+              )}
             </Card>
           );
         })}
@@ -90,10 +106,9 @@ const styles: Record<string, React.CSSProperties> = {
   backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, margin: 0, marginBottom: 16 },
   errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, textAlign: "center", marginTop: 20 },
-  emptyState: { display: "flex", flexDirection: "column", alignItems: "center", marginTop: 40, gap: 8 },
-  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted },
+  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center", marginTop: 30 },
   list: { display: "flex", flexDirection: "column", gap: 10, paddingBottom: 24, marginTop: 16 },
-  orderCard: { display: "flex", flexDirection: "row", alignItems: "flex-start", padding: 14 },
+  orderCard: { padding: 14, display: "flex", flexDirection: "column" },
   itemLine: { display: "block", fontFamily: FONTS.bodyMedium, fontWeight: 500, fontSize: 13, color: COLORS.text, marginBottom: 2 },
   amount: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 14, color: COLORS.text },
   statusText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, marginTop: 4 },
