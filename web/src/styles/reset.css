@@ -28,6 +28,21 @@ body {
   flex-direction: column; /* RN's implicit View default; CSS's is "row" */
   height: 100%;
   flex: 1;
+  /* Every screen's own container uses `minHeight: "100%"` (grows to
+     fit its content) rather than a fixed `height`, expecting ITS OWN
+     box to be the scrollable region — but with no `overflowY` set on
+     that box either, content taller than the viewport had nowhere to
+     go: #root (this element) had no overflow rule (default: visible)
+     and body has `overflow: hidden`, so anything past 100vh was
+     simply clipped and unreachable, not scrollable. #root is the one
+     shared ancestor every screen renders inside, so making IT the
+     scroll container fixes every screen at once instead of touching
+     each one's inline styles individually. AuthScreen is unaffected —
+     its own root explicitly sets height:100% + overflow:hidden and
+     manages its own internal scroll region already, so it never
+     overflows this box in the first place. */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 button {
