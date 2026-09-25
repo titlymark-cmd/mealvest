@@ -42,7 +42,7 @@ export async function getHotelMenu(req: Request, res: Response, next: NextFuncti
     }
 
     const menuResult = await pool.query(
-      `SELECT id, name, description, price, category, available
+      `SELECT id, name, description, price, category, available, image_url
        FROM menu_items
        WHERE hotel_id = $1 AND available = true
        ORDER BY category, name ASC`,
