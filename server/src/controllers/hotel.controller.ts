@@ -70,7 +70,8 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
 
     const hotelResult = await pool.query(
       `SELECT id, name, status, contract_start_date, contract_end_date,
-              commission_percent, registration_fee, payment_method, payment_details
+              commission_percent, registration_fee, payment_method, payment_details,
+              image_url, description
        FROM hotels WHERE id = $1`,
       [hotelId]
     );
@@ -117,10 +118,11 @@ export async function updateHotelLocation(req: AuthedRequest, res: Response, nex
          helpline = COALESCE($4, helpline),
          opening_hours = COALESCE($5, opening_hours),
          services = COALESCE($6, services),
-         description = COALESCE($7, description)
-       WHERE id = $8
-       RETURNING id, name, latitude, longitude, address, helpline, opening_hours, services, description`,
-      [d.latitude, d.longitude, d.address, d.helpline, d.openingHours, d.services, d.description, hotelId]
+         description = COALESCE($7, description),
+         image_url = COALESCE($8, image_url)
+       WHERE id = $9
+       RETURNING id, name, latitude, longitude, address, helpline, opening_hours, services, description, image_url`,
+      [d.latitude, d.longitude, d.address, d.helpline, d.openingHours, d.services, d.description, d.imageUrl, hotelId]
     );
 
     res.json({ hotel: result.rows[0] });

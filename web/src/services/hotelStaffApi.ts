@@ -14,6 +14,8 @@ export interface HotelDashboard {
     commission_percent: string;
     registration_fee: string;
     payment_method: string | null;
+    image_url: string | null;
+    description: string | null;
   };
   stats: {
     today_orders: string;
@@ -28,6 +30,26 @@ export interface HotelDashboard {
 export async function fetchHotelDashboard(authFetch: AuthFetch): Promise<HotelDashboard> {
   const res = await authFetch("/api/hotel/dashboard");
   return parseOrError(res, "Could not load your dashboard.");
+}
+
+export interface HotelLocationUpdate {
+  id: string;
+  name: string;
+  image_url: string | null;
+  description: string | null;
+}
+
+export async function updateHotelProfile(
+  authFetch: AuthFetch,
+  input: { imageUrl?: string; description?: string }
+): Promise<HotelLocationUpdate> {
+  const res = await authFetch("/api/hotel/location", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ hotel: HotelLocationUpdate }>(res, "Could not update your hotel banner.");
+  return data.hotel;
 }
 
 export interface HotelOrder {

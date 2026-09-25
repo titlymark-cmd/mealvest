@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ImagePlus } from "lucide-react";
 import { Card } from "../../components/Card";
+import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS } from "../../styles/theme";
+import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { fetchHotelDashboard, HotelDashboard } from "../../services/hotelStaffApi";
+import { fetchHotelDashboard, HotelDashboard, updateHotelProfile } from "../../services/hotelStaffApi";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -40,10 +41,16 @@ export default function HotelProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [bannerUrl, setBannerUrl] = useState("");
+  const [savingBanner, setSavingBanner] = useState(false);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+  const [bannerSaved, setBannerSaved] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const data = await fetchHotelDashboard(authFetch);
       setDashboard(data);
+      setBannerUrl(data.hotel.image_url || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load your profile.");
     } finally {
@@ -54,6 +61,22 @@ export default function HotelProfileScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleSaveBanner = async () => {
+    if (!bannerUrl.trim()) return;
+    setSavingBanner(true);
+    setBannerError(null);
+    setBannerSaved(false);
+    try {
+      const hotel = await updateHotelProfile(authFetch, { imageUrl: bannerUrl.trim() });
+      setDashboard((prev) => (prev ? { ...prev, hotel: { ...prev.hotel, image_url: hotel.image_url } } : prev));
+      setBannerSaved(true);
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : "Could not save your hotel banner.");
+    } finally {
+      setSavingBanner(false);
+    }
+  };
 
   return (
     <div style={styles.container}>
@@ -75,6 +98,35 @@ export default function HotelProfileScreen() {
           <Card style={{ marginBottom: 14, display: "flex", flexDirection: "column" }}>
             <Row label="Hotel name" value={dashboard.hotel.name} />
             <Row label="Status" value={dashboard.hotel.status.replace("_", " ")} />
+          </Card>
+
+          <Card style={{ marginBottom: 14, display: "flex", flexDirection: "column" }}>
+            <span style={styles.sectionLabel}>HOTEL BANNER</span>
+            {dashboard.hotel.image_url ? (
+              <img src={dashboard.hotel.image_url} alt="" style={styles.bannerPreview} />
+            ) : (
+              <div style={styles.bannerPreviewFallback}>
+                <ImagePlus size={20} color={COLORS.textFaint} />
+              </div>
+            )}
+            <div style={styles.imageInputRow}>
+              <ImagePlus size={14} color={COLORS.textMuted} />
+              <input
+                style={styles.imageInput}
+                placeholder="Paste a banner image URL"
+                value={bannerUrl}
+                onChange={(e) => {
+                  setBannerUrl(e.target.value);
+                  setBannerSaved(false);
+                }}
+                autoCapitalize="none"
+              />
+            </div>
+            {bannerError && <p style={styles.bannerFeedbackError}>{bannerError}</p>}
+            {bannerSaved && !bannerError && <p style={styles.bannerFeedbackOk}>Banner updated — students will see it on the hotel list.</p>}
+            <PrimaryButton onPress={handleSaveBanner} loading={savingBanner} disabled={!bannerUrl.trim()} showArrow={false}>
+              Save banner
+            </PrimaryButton>
           </Card>
 
           <Card style={{ marginBottom: 14, display: "flex", flexDirection: "column" }}>
@@ -108,4 +160,16 @@ const styles: Record<string, React.CSSProperties> = {
   rowLabel: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted },
   rowValue: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text, textTransform: "capitalize" },
   note: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, margin: "10px 0 0 0", lineHeight: "16px" },
+  bannerPreview: { width: "100%", height: 140, borderRadius: RADIUS.sm, objectFit: "cover", backgroundColor: COLORS.borderSoft, marginBottom: 10 },
+  bannerPreviewFallback: {
+    width: "100%", height: 140, borderRadius: RADIUS.sm, backgroundColor: COLORS.accentSoft,
+    display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${COLORS.borderSoft}`, marginBottom: 10,
+  },
+  imageInputRow: {
+    display: "flex", flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: COLORS.cardWhite, borderRadius: RADIUS.sm,
+    border: `1px solid ${COLORS.borderSoft}`, paddingLeft: 14, paddingRight: 14, marginBottom: 10,
+  },
+  imageInput: { flex: 1, paddingTop: 12, paddingBottom: 12, fontSize: 13, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.text, outline: "none", backgroundColor: "transparent" },
+  bannerFeedbackError: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.danger, margin: "0 0 10px 0" },
+  bannerFeedbackOk: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.success, margin: "0 0 10px 0" },
 };

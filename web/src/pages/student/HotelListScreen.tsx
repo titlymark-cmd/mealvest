@@ -1,12 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Store, ChevronRight, MapPin, LocateFixed, LogOut } from "lucide-react";
-import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT, glow } from "../../styles/theme";
 import { fetchHotels, fetchNearbyHotels, Hotel } from "../../services/hotelsApi";
 import { getCurrentLocation } from "../../services/locationService";
 import { useAuth } from "../../context/AuthContext";
+
+// Deterministic (not random) badge color per hotel, so the same hotel
+// always gets the same color across renders/reloads — hashes the id
+// string against a small fixed palette drawn from the app's own brand
+// colors, rather than picking randomly per render.
+const BADGE_COLORS = [COLORS.primary, COLORS.accent, COLORS.success, COLORS.primaryLight, COLORS.primaryDark];
+function badgeColorFor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return BADGE_COLORS[Math.abs(hash) % BADGE_COLORS.length];
+}
 
 export default function HotelListScreen() {
   const { logout } = useAuth();
@@ -117,25 +129,43 @@ export default function HotelListScreen() {
         </div>
       )}
 
-      <div style={styles.list}>
+      <div style={styles.grid}>
         {hotels.map((item) => (
-          <Card key={item.id} style={styles.card}>
+          <div key={item.id} style={styles.gridCard}>
             <button
               className="mv-action mv-action-no-ring"
               style={styles.cardMain}
               onClick={() => navigate(`/student/hotels/${item.id}/menu`, { state: { hotelName: item.name } })}
             >
-              <div style={styles.iconCircle}>
-                <Store size={20} color={COLORS.primary} />
+              <div style={styles.bannerWrap}>
+                <div style={styles.bannerClip}>
+                  {item.image_url ? (
+                    <img src={item.image_url} alt="" style={styles.banner} />
+                  ) : (
+                    <div style={styles.bannerFallback}>
+                      <Store size={28} color={COLORS.textFaint} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ ...styles.initialBadge, backgroundColor: badgeColorFor(item.id) }}>
+                  <span style={styles.initialBadgeText}>{item.name.trim().charAt(0).toUpperCase()}</span>
+                </div>
               </div>
-              <div style={{ flex: 1, textAlign: "left" }}>
-                <span style={styles.hotelName}>{item.name}</span>
-                <span style={styles.hotelLocation}>
-                  {item.location}
-                  {typeof item.distance_km === "number" ? ` · ${item.distance_km.toFixed(1)} km` : ""}
-                </span>
+
+              <div style={styles.cardBody}>
+                <div style={styles.nameRow}>
+                  <span style={styles.hotelName}>{item.name}</span>
+                  <ChevronRight size={18} color={COLORS.textFaint} />
+                </div>
+                <div style={styles.locationRow}>
+                  <MapPin size={12} color={COLORS.textMuted} />
+                  <span style={styles.hotelLocation}>
+                    {item.location}
+                    {typeof item.distance_km === "number" ? ` · ${item.distance_km.toFixed(1)} km` : ""}
+                  </span>
+                </div>
+                {item.description && <p style={styles.hotelDescription}>{item.description}</p>}
               </div>
-              <ChevronRight size={18} color={COLORS.textFaint} />
             </button>
 
             {typeof item.latitude === "number" && (
@@ -144,7 +174,7 @@ export default function HotelListScreen() {
                 <span style={styles.mapLinkText}>View on Google Maps</span>
               </button>
             )}
-          </Card>
+          </div>
         ))}
       </div>
     </div>
@@ -201,29 +231,79 @@ const styles: Record<string, React.CSSProperties> = {
   center: { display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 40, paddingBottom: 40 },
   error: { color: COLORS.danger, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
   empty: { color: COLORS.textOnDarkMuted, textAlign: "center", fontFamily: FONTS.body },
-  list: { display: "flex", flexDirection: "column", gap: 10, paddingBottom: 24 },
-  card: { padding: 14 },
-  cardMain: { display: "flex", flexDirection: "row", alignItems: "center", width: "100%", borderRadius: RADIUS.sm },
-  iconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: RADIUS.pill,
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: 16,
+    paddingBottom: 24,
+    maxWidth: 1100,
+    width: "100%",
+    margin: "0 auto",
+  },
+  // Card surface matches components/Card.tsx (bg/border/shadow) but
+  // has no padding of its own and, crucially, no overflow:hidden — the
+  // banner clips its own corners locally (bannerClip below) so the
+  // .mv-action hover-scale on cardMain and the initial badge (which
+  // deliberately overlaps outside the banner's box) are never clipped.
+  gridCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.sm,
+    border: `1px solid ${COLORS.borderSoft}`,
+    boxShadow: "0 1px 2px rgba(29,21,17,0.12), 0 8px 20px rgba(29,21,17,0.16)",
+    display: "flex",
+    flexDirection: "column",
+  },
+  cardMain: { display: "flex", flexDirection: "column", alignItems: "stretch", width: "100%", borderRadius: RADIUS.sm, textAlign: "left" },
+  bannerWrap: { position: "relative", width: "100%" },
+  bannerClip: { width: "100%", height: 130, borderTopLeftRadius: RADIUS.sm, borderTopRightRadius: RADIUS.sm, overflow: "hidden" },
+  banner: { width: "100%", height: "100%", objectFit: "cover", display: "block" },
+  bannerFallback: {
+    width: "100%",
+    height: "100%",
     backgroundColor: COLORS.accentSoft,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
-    flexShrink: 0,
   },
-  hotelName: { display: "block", fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text },
-  hotelLocation: { display: "block", fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 2 },
+  initialBadge: {
+    position: "absolute",
+    left: 14,
+    bottom: -16,
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.sm,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: `2px solid ${COLORS.card}`,
+    boxShadow: "0 2px 6px rgba(29,21,17,0.25)",
+    zIndex: 1,
+  },
+  initialBadgeText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: "#fff" },
+  cardBody: { padding: 14, paddingTop: 22, display: "flex", flexDirection: "column" },
+  nameRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
+  hotelName: { display: "block", fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text, flex: 1 },
+  locationRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  hotelLocation: { display: "block", fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted },
+  hotelDescription: {
+    fontSize: 12,
+    fontFamily: FONTS.body,
+    color: COLORS.textMuted,
+    margin: "8px 0 0 0",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
   mapLink: {
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    marginTop: 10,
+    marginTop: 0,
     paddingTop: 10,
+    paddingBottom: 12,
+    paddingLeft: 14,
     borderTop: `1px solid ${COLORS.borderSoft}`,
     width: "100%",
   },

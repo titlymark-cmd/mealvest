@@ -15,7 +15,7 @@ import { isValidCoordinate } from "../lib/geo";
 export async function listHotels(_req: Request, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
-      `SELECT id, name, location, contact_phone, latitude, longitude
+      `SELECT id, name, location, contact_phone, latitude, longitude, image_url, description
        FROM hotels
        WHERE status = 'active'
        ORDER BY name ASC`
@@ -100,7 +100,7 @@ export async function getNearbyHotels(req: Request, res: Response, next: NextFun
     // being aggregated).
     const result = await pool.query(
       `SELECT * FROM (
-         SELECT id, name, location, address, contact_phone, helpline, latitude, longitude, image_url,
+         SELECT id, name, location, address, contact_phone, helpline, latitude, longitude, image_url, description,
                 (
                   6371 * acos(
                     LEAST(1.0, GREATEST(-1.0,

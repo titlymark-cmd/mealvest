@@ -12,6 +12,7 @@ export const updateHotelLocationSchema = z.object({
   openingHours: z.string().trim().max(200).optional(),
   services: z.array(z.string().trim().max(60)).max(20).optional(),
   description: z.string().trim().max(500).optional(),
+  imageUrl: z.string().trim().url("Enter a valid image URL.").max(2000).optional(),
 });
 
 export type UpdateHotelLocationInput = z.infer<typeof updateHotelLocationSchema>;
