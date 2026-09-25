@@ -41,7 +41,11 @@ export default function HotelOwnerHomeScreen() {
         </button>
       </div>
 
-      <button onClick={() => navigate("/hotel-owner/scanner")} style={{ width: "100%" }}>
+      <button
+        className="mv-action"
+        onClick={() => navigate("/hotel-owner/scanner")}
+        style={{ width: "100%", borderRadius: RADIUS.lg }}
+      >
         <div style={styles.scanBtn}>
           <div style={styles.scanIcon}>
             <QrCode size={22} color="#fff" />
@@ -54,19 +58,19 @@ export default function HotelOwnerHomeScreen() {
         </div>
       </button>
 
-      <button onClick={() => navigate("/hotel-owner/orders")} style={styles.linkRow}>
+      <button className="mv-action" onClick={() => navigate("/hotel-owner/orders")} style={styles.linkRow}>
         <ClipboardList size={16} color={COLORS.primary} />
         <span style={styles.linkText}>View all orders</span>
         <ChevronRight size={16} color={COLORS.textFaint} style={{ marginLeft: "auto" }} />
       </button>
 
-      <button onClick={() => navigate("/hotel-owner/menu")} style={styles.linkRow}>
+      <button className="mv-action" onClick={() => navigate("/hotel-owner/menu")} style={styles.linkRow}>
         <ClipboardList size={16} color={COLORS.primary} />
         <span style={styles.linkText}>Manage menu</span>
         <ChevronRight size={16} color={COLORS.textFaint} style={{ marginLeft: "auto" }} />
       </button>
 
-      <button onClick={() => navigate("/hotel-owner/profile")} style={styles.linkRow}>
+      <button className="mv-action" onClick={() => navigate("/hotel-owner/profile")} style={styles.linkRow}>
         <ClipboardList size={16} color={COLORS.primary} />
         <span style={styles.linkText}>Hotel profile</span>
         <ChevronRight size={16} color={COLORS.textFaint} style={{ marginLeft: "auto" }} />

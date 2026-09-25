@@ -78,7 +78,12 @@ export default function HotelListScreen() {
         </button>
       </div>
 
-      <button onClick={findNearMe} disabled={locating} style={{ ...styles.nearMeButtonWrap, ...glow(COLORS.primary, 10) }}>
+      <button
+        onClick={findNearMe}
+        disabled={locating}
+        className={locating ? undefined : "mv-action"}
+        style={{ ...styles.nearMeButtonWrap, ...glow(COLORS.primary, 10) }}
+      >
         <div style={styles.nearMeButton}>
           <LocateFixed size={16} color="#fff" />
           <span style={styles.nearMeText}>{locating ? "Finding hotels near you…" : "Find hotels near me"}</span>
@@ -116,6 +121,7 @@ export default function HotelListScreen() {
         {hotels.map((item) => (
           <Card key={item.id} style={styles.card}>
             <button
+              className="mv-action"
               style={styles.cardMain}
               onClick={() => navigate(`/student/hotels/${item.id}/menu`, { state: { hotelName: item.name } })}
             >
@@ -197,7 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
   empty: { color: COLORS.textOnDarkMuted, textAlign: "center", fontFamily: FONTS.body },
   list: { display: "flex", flexDirection: "column", gap: 10, paddingBottom: 24 },
   card: { padding: 14 },
-  cardMain: { display: "flex", flexDirection: "row", alignItems: "center", width: "100%" },
+  cardMain: { display: "flex", flexDirection: "row", alignItems: "center", width: "100%", borderRadius: RADIUS.sm },
   iconCircle: {
     width: 44,
     height: 44,

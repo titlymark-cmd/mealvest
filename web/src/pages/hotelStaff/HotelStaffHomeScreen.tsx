@@ -41,7 +41,11 @@ export default function HotelStaffHomeScreen() {
         </button>
       </div>
 
-      <button onClick={() => navigate("/hotel-staff/scanner")} style={{ width: "100%" }}>
+      <button
+        className="mv-action"
+        onClick={() => navigate("/hotel-staff/scanner")}
+        style={{ width: "100%", borderRadius: RADIUS.lg }}
+      >
         <div style={styles.scanBtn}>
           <div style={styles.scanIcon}>
             <QrCode size={22} color="#fff" />
@@ -54,7 +58,7 @@ export default function HotelStaffHomeScreen() {
         </div>
       </button>
 
-      <button onClick={() => navigate("/hotel-staff/orders")} style={styles.linkRow}>
+      <button className="mv-action" onClick={() => navigate("/hotel-staff/orders")} style={styles.linkRow}>
         <ClipboardList size={16} color={COLORS.primary} />
         <span style={styles.linkText}>View all orders</span>
         <ChevronRight size={16} color={COLORS.textFaint} style={{ marginLeft: "auto" }} />

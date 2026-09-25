@@ -37,12 +37,22 @@ button {
   border: none;
   padding: 0;
   cursor: pointer;
+  /* Smooths out every state change (disabled/enabled, background
+     tweaks, etc.) even on buttons that don't opt into .mv-action's
+     hover ring — a small thing that makes the whole app feel less
+     "instant-snap" and more considered. */
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+button:disabled {
+  cursor: default;
 }
 
 input,
 textarea {
   font: inherit;
   color: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 /* RN's placeholderTextColor has no inline-style DOM equivalent —

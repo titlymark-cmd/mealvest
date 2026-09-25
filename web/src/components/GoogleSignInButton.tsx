@@ -24,7 +24,12 @@ export function GoogleSignInButton({ onIdToken, loading }: Props) {
           services/googleAuth.ts for why this exists instead of
           calling accounts.id.prompt() directly. */}
       <div ref={hiddenButtonRef} style={{ position: "absolute", top: -9999, left: -9999, opacity: 0 }} />
-      <button style={styles.googleButton} disabled={!ready || loading} onClick={() => promptAsync()}>
+      <button
+        style={styles.googleButton}
+        disabled={!ready || loading}
+        className={!ready || loading ? undefined : "mv-action"}
+        onClick={() => promptAsync()}
+      >
         {loading ? <Spinner color={COLORS.primary} /> : <span style={styles.googleButtonText}>Continue with Google</span>}
       </button>
     </>

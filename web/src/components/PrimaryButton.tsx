@@ -23,6 +23,7 @@ export function PrimaryButton({
     <button
       onClick={onPress}
       disabled={isDisabled}
+      className={isDisabled ? undefined : "mv-action"}
       style={{
         ...styles.wrapper,
         ...(isDisabled ? styles.disabled : null),

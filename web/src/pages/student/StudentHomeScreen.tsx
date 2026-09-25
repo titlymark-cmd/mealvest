@@ -171,7 +171,7 @@ export default function StudentHomeScreen() {
             </Card>
           </div>
 
-          <button style={styles.boostCard} onClick={() => navigate("/student/meal-boost")}>
+          <button className="mv-action" style={styles.boostCard} onClick={() => navigate("/student/meal-boost")}>
             <div style={styles.boostIconCircle}>
               <Zap size={16} color="#fff" />
             </div>

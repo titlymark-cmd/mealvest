@@ -109,7 +109,7 @@ export default function AdminHomeScreen() {
           <h1 style={styles.title}>Mealvest Admin</h1>
         </div>
         <div style={{ display: "flex", flexDirection: "row", gap: 8 }}>
-          <button onClick={() => navigate("/admin/create-hotel")} style={styles.addBtn}>
+          <button className="mv-action" onClick={() => navigate("/admin/create-hotel")} style={styles.addBtn}>
             <Plus size={14} color={COLORS.primary} />
             <span style={styles.addBtnText}>Add hotel</span>
           </button>

@@ -11,6 +11,9 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: RADIUS.sm,
     border: `1px solid ${COLORS.borderSoft}`,
     padding: 16,
-    boxShadow: "0 4px 12px rgba(29,21,17,0.18)",
+    // Two-layer shadow (a tight contact shadow + a softer ambient
+    // one) reads as more considered than a single flat blur — same
+    // trick real design systems use for card depth.
+    boxShadow: "0 1px 2px rgba(29,21,17,0.12), 0 8px 20px rgba(29,21,17,0.16)",
   },
 };

@@ -75,7 +75,7 @@ export default function HotelMenuManageScreen() {
 
       <div style={styles.headerRow}>
         <h1 style={styles.title}>Menu</h1>
-        <button onClick={() => setShowForm((v) => !v)} style={styles.addBtn}>
+        <button className="mv-action" onClick={() => setShowForm((v) => !v)} style={styles.addBtn}>
           <Plus size={14} color={COLORS.primary} />
           <span style={styles.addBtnText}>{showForm ? "Cancel" : "Add item"}</span>
         </button>
