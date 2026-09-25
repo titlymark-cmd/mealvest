@@ -1,10 +1,10 @@
 import React, { useEffect } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, Image, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { UtensilsCrossed } from "lucide-react-native";
-import { COLORS, FONTS, GRADIENT, glow } from "../theme/theme";
+import { COLORS, FONTS, glow } from "../theme/theme";
 
 const MIN_SPLASH_MS = 1400;
+const LOGO_SOURCE = require("../../assets/mealvest-logo.png");
 
 export function SplashScreen({ onFinished }: { onFinished: () => void }) {
   useEffect(() => {
@@ -14,9 +14,9 @@ export function SplashScreen({ onFinished }: { onFinished: () => void }) {
 
   return (
     <LinearGradient colors={[COLORS.bgDeep, COLORS.bg]} style={styles.container}>
-      <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.badge, glow(COLORS.primary, 24)]}>
-        <UtensilsCrossed size={34} color="#fff" />
-      </LinearGradient>
+      <View style={[styles.badge, glow(COLORS.primary, 24)]}>
+        <Image source={LOGO_SOURCE} style={styles.badgeImage} resizeMode="contain" />
+      </View>
       <Text style={styles.wordmark}>MEALVEST</Text>
       <Text style={styles.tagline}>Your food money, already planned.</Text>
     </LinearGradient>
@@ -26,13 +26,13 @@ export function SplashScreen({ onFinished }: { onFinished: () => void }) {
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: "center", justifyContent: "center" },
   badge: {
-    width: 84,
-    height: 84,
-    borderRadius: 24,
+    width: 96,
+    height: 96,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
   },
+  badgeImage: { width: 96, height: 96 },
   wordmark: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, letterSpacing: 2 },
   tagline: {
     fontSize: 11,

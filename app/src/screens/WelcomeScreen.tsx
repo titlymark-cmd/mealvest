@@ -1,10 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { UtensilsCrossed } from "lucide-react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { COLORS, FONTS, RADIUS, GRADIENT, glow } from "../theme/theme";
+import { COLORS, FONTS, RADIUS } from "../theme/theme";
 import { useHealthCheck } from "../hooks/useHealthCheck";
 
 export default function WelcomeScreen({ navigation }: any) {
@@ -12,9 +10,6 @@ export default function WelcomeScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.badge, glow(COLORS.primary, 16)]}>
-        <UtensilsCrossed size={28} color="#fff" />
-      </LinearGradient>
       <Logo size="lg" />
       <Text style={styles.subtitle}>Your food money, already planned.</Text>
 
@@ -49,14 +44,6 @@ export default function WelcomeScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center", padding: 24 },
-  badge: {
-    width: 60,
-    height: 60,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
   subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 6, marginBottom: 28 },
   statusCard: {
     backgroundColor: COLORS.card,

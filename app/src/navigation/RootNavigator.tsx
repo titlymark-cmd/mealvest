@@ -2,12 +2,11 @@ import React, { useState, useCallback } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
+import { COLORS } from "../theme/theme";
 
 import { SplashScreen } from "../screens/SplashScreen";
 import WelcomeScreen from "../screens/WelcomeScreen";
-import LoginScreen from "../screens/LoginScreen";
-import RegisterStudentScreen from "../screens/RegisterStudentScreen";
-import RegisterHotelScreen from "../screens/RegisterHotelScreen";
+import AuthScreen from "../screens/AuthScreen";
 
 import { StudentStack } from "./StudentStack";
 import { HotelStaffStack } from "./HotelStaffStack";
@@ -25,23 +24,18 @@ const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 
 function UnauthenticatedNavigator() {
   return (
-    // Login is the initial route now — splash leads straight into it
-    // per the requested flow. Welcome (with the backend health-check
-    // display) stays reachable as a secondary screen rather than
-    // being removed, since it's still useful during development.
+    // Login, RegisterStudent and RegisterHotel all render the SAME
+    // AuthScreen component (differing only by initialParams.mode) —
+    // that's what lets the Login<->Register toggle inside AuthScreen
+    // animate as one persistent diagonal-split screen instead of a
+    // hard navigation cut between three separate screens. Each route
+    // name stays real and navigable (Welcome still links to them by
+    // name), it just always lands on the same underlying screen.
     <AuthStack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
-      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="Login" component={AuthScreen} initialParams={{ mode: "login" }} />
       <AuthStack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: true, title: "" }} />
-      <AuthStack.Screen
-        name="RegisterStudent"
-        component={RegisterStudentScreen}
-        options={{ headerShown: true, title: "" }}
-      />
-      <AuthStack.Screen
-        name="RegisterHotel"
-        component={RegisterHotelScreen}
-        options={{ headerShown: true, title: "" }}
-      />
+      <AuthStack.Screen name="RegisterStudent" component={AuthScreen} initialParams={{ mode: "register-student" }} />
+      <AuthStack.Screen name="RegisterHotel" component={AuthScreen} initialParams={{ mode: "register-hotel" }} />
     </AuthStack.Navigator>
   );
 }
@@ -71,7 +65,7 @@ export function RootNavigator() {
     // second splash.
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#0C8CE9" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
   }
@@ -95,5 +89,5 @@ export function RootNavigator() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F0F9FF" },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
 });

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity } from "react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../theme/theme";
@@ -8,7 +8,21 @@ import { ApiError } from "../services/authApi";
 import { isGoogleAuthConfigured } from "../services/googleAuth";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
-export default function LoginScreen({ navigation }: any) {
+/**
+ * The actual login form and its logic — unchanged from the previous
+ * standalone LoginScreen, just extracted so AuthScreen can embed it
+ * inside the diagonal split layout. Every API call, validation rule,
+ * and piece of auth state here is identical to before; only the
+ * outer chrome (full-screen background/positioning) moved to
+ * AuthScreen, and navigation.navigate("RegisterStudent"/"RegisterHotel")
+ * became a local callback so switching to Register animates within
+ * the same mounted AuthScreen instead of pushing a new stack screen.
+ */
+export function LoginFormContent({
+  onSwitchToRegister,
+}: {
+  onSwitchToRegister: (role: "student" | "hotel") => void;
+}) {
   const { loginWithPassword, loginWithGoogle } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -50,65 +64,58 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={styles.header}>
-        <Logo />
-      </View>
+    <View style={styles.wrap}>
+      <Logo />
+      <Text style={styles.title}>Welcome back</Text>
+      <Text style={styles.subtitle}>Sign in to continue.</Text>
 
-      <View style={styles.body}>
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>Sign in to continue.</Text>
+      {googleConfigured && (
+        <>
+          <GoogleSignInButton onIdToken={handleGoogleIdToken} loading={googleLoading} />
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
+        </>
+      )}
 
-        {googleConfigured && (
-          <>
-            <GoogleSignInButton onIdToken={handleGoogleIdToken} loading={googleLoading} />
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>OR</Text>
-              <View style={styles.dividerLine} />
-            </View>
-          </>
-        )}
+      <TextInput
+        style={styles.input}
+        placeholder="Email or phone number"
+        placeholderTextColor={COLORS.textOnDarkMuted}
+        autoCapitalize="none"
+        value={identifier}
+        onChangeText={setIdentifier}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        placeholderTextColor={COLORS.textOnDarkMuted}
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+      />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Email or phone number"
-          placeholderTextColor={COLORS.textOnDarkMuted}
-          autoCapitalize="none"
-          value={identifier}
-          onChangeText={setIdentifier}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor={COLORS.textOnDarkMuted}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
+      {error && <Text style={styles.error}>{error}</Text>}
 
-        {error && <Text style={styles.error}>{error}</Text>}
+      <PrimaryButton onPress={submit} loading={loading} showArrow={false} style={{ marginTop: 8 }}>
+        Sign in
+      </PrimaryButton>
 
-        <PrimaryButton onPress={submit} loading={loading} showArrow={false} style={{ marginTop: 8 }}>
-          Sign in
-        </PrimaryButton>
-
-        <TouchableOpacity onPress={() => navigation.navigate("RegisterStudent")}>
-          <Text style={styles.link}>New student? Create an account</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate("RegisterHotel")}>
-          <Text style={styles.link}>Registering a hotel? Sign up here</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+      <TouchableOpacity onPress={() => onSwitchToRegister("student")}>
+        <Text style={styles.link}>New student? Create an account</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => onSwitchToRegister("hotel")}>
+        <Text style={styles.link}>Registering a hotel? Sign up here</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { paddingTop: 60, paddingHorizontal: 24, paddingBottom: 8 },
-  body: { flex: 1, paddingHorizontal: 24, justifyContent: "center" },
-  title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  wrap: { width: "100%", maxWidth: 380 },
+  title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, marginTop: 22 },
   subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
   dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 18 },
   dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },

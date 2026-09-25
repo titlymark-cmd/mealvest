@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { ShieldCheck, Store, User, Eye, EyeOff } from "lucide-react-native";
 import { Logo } from "../components/Logo";
@@ -47,7 +47,16 @@ const SETTLEMENT_METHODS: { value: SettlementMethod; label: string }[] = [
   { value: "bank", label: "Bank Account" },
 ];
 
-export default function RegisterScreen({ navigation, mode }: any & { mode: Mode }) {
+/**
+ * The actual registration form and its logic — unchanged from the
+ * previous standalone RegisterScreen (same fields, same validation,
+ * same registerStudent/registerHotel calls, same settlement-method
+ * handling), just extracted so AuthScreen can embed it inside the
+ * diagonal split layout. navigation.navigate("Login") became a local
+ * callback so switching back to Login animates within the same
+ * mounted AuthScreen instead of pushing a new stack screen.
+ */
+export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onSwitchToLogin: () => void }) {
   const { registerStudent, registerHotel } = useAuth();
 
   // Shared
@@ -163,7 +172,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.wrap}>
       <Logo size="sm" />
       <View style={styles.iconRow}>
         <View style={styles.modeIcon}>
@@ -419,15 +428,15 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
         Create account
       </PrimaryButton>
 
-      <TouchableOpacity onPress={() => navigation.navigate("Login")}>
+      <TouchableOpacity onPress={onSwitchToLogin}>
         <Text style={styles.link}>Already have an account? Log in</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: COLORS.bg, padding: 24, paddingTop: 56 },
+  wrap: { width: "100%", maxWidth: 420 },
   iconRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 22 },
   modeIcon: {
     width: 26,

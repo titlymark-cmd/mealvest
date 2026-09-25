@@ -34,13 +34,17 @@ module.exports = {
     version: "1.0.0",
     orientation: "portrait",
     userInterfaceStyle: "light",
+    icon: "./assets/mealvest-logo.png",
     splash: {
-      backgroundColor: "#F0F9FF",
+      backgroundColor: "#1D1511",
+      image: "./assets/mealvest-logo.png",
+      resizeMode: "contain",
     },
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.mealvest.app",
+      icon: "./assets/mealvest-logo.png",
       config: {
         googleMapsApiKey: GOOGLE_MAPS_API_KEY,
       },
@@ -53,6 +57,10 @@ module.exports = {
     },
     android: {
       package: "com.mealvest.app",
+      adaptiveIcon: {
+        foregroundImage: "./assets/mealvest-logo.png",
+        backgroundColor: "#1D1511",
+      },
       config: {
         googleMaps: {
           apiKey: GOOGLE_MAPS_API_KEY,
@@ -62,6 +70,7 @@ module.exports = {
     },
     web: {
       bundler: "metro",
+      favicon: "./assets/mealvest-logo.png",
     },
     plugins: [
       [
