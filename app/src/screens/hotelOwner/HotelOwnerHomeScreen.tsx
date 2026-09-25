@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { QrCode, LogOut, ChevronRight, ClipboardList, DollarSign } from "lucide-react-native";
 import { Card } from "../../components/Card";
-import { COLORS, FONTS, RADIUS } from "../../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT } from "../../theme/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchHotelDashboard, HotelDashboard } from "../../services/hotelStaffApi";
 
@@ -39,15 +40,17 @@ export default function HotelStaffHomeScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity onPress={() => navigation.navigate("HotelScanner")} style={styles.scanBtn}>
-        <View style={styles.scanIcon}>
-          <QrCode size={22} color="#fff" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.scanTitle}>Scan meal QR code</Text>
-          <Text style={styles.scanSubtitle}>Redeem a student's meal</Text>
-        </View>
-        <ChevronRight size={18} color="#fff" />
+      <TouchableOpacity onPress={() => navigation.navigate("HotelScanner")}>
+        <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.scanBtn}>
+          <View style={styles.scanIcon}>
+            <QrCode size={22} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.scanTitle}>Scan meal QR code</Text>
+            <Text style={styles.scanSubtitle}>Redeem a student's meal</Text>
+          </View>
+          <ChevronRight size={18} color="#fff" />
+        </LinearGradient>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => navigation.navigate("HotelOrders")} style={styles.linkRow}>
@@ -104,14 +107,33 @@ export default function HotelStaffHomeScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  greeting: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted },
-  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.text, marginTop: 2 },
-  logoutBtn: { width: 36, height: 36, borderRadius: RADIUS.pill, borderWidth: 1, borderColor: COLORS.border, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
-  scanBtn: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 16, marginTop: 18, marginBottom: 18 },
+  greeting: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted },
+  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.textOnDark, marginTop: 2 },
+  logoutBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: RADIUS.pill,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scanBtn: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: RADIUS.lg, padding: 16, marginTop: 18, marginBottom: 18 },
   scanIcon: { width: 42, height: 42, borderRadius: RADIUS.md, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   scanTitle: { fontFamily: FONTS.bodySemibold, fontSize: 14, color: "#fff" },
   scanSubtitle: { fontFamily: FONTS.body, fontSize: 11, color: "rgba(255,255,255,0.85)" },
-  linkRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#fff", borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, padding: 14, marginBottom: 16 },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    padding: 14,
+    marginBottom: 16,
+  },
   linkText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.text },
   statsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   statCard: { flex: 1 },

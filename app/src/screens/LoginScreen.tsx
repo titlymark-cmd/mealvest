@@ -73,7 +73,7 @@ export default function LoginScreen({ navigation }: any) {
         <TextInput
           style={styles.input}
           placeholder="Email or phone number"
-          placeholderTextColor={COLORS.textFaint}
+          placeholderTextColor={COLORS.textOnDarkMuted}
           autoCapitalize="none"
           value={identifier}
           onChangeText={setIdentifier}
@@ -81,7 +81,7 @@ export default function LoginScreen({ navigation }: any) {
         <TextInput
           style={styles.input}
           placeholder="Password"
-          placeholderTextColor={COLORS.textFaint}
+          placeholderTextColor={COLORS.textOnDarkMuted}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
@@ -108,22 +108,22 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: { paddingTop: 60, paddingHorizontal: 24, paddingBottom: 8 },
   body: { flex: 1, paddingHorizontal: 24, justifyContent: "center" },
-  title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.text },
-  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 24 },
+  title: { fontSize: 24, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
   dividerRow: { flexDirection: "row", alignItems: "center", marginVertical: 18 },
   dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
-  dividerText: { marginHorizontal: 10, fontFamily: FONTS.bodySemibold, fontSize: 11, color: COLORS.textFaint },
+  dividerText: { marginHorizontal: 10, fontFamily: FONTS.bodySemibold, fontSize: 11, color: COLORS.textOnDarkMuted },
   input: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginBottom: 12,
     fontSize: 15,
     fontFamily: FONTS.bodyMedium,
-    color: COLORS.text,
+    color: COLORS.textOnDark,
   },
   error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, fontFamily: FONTS.bodySemibold },
   link: {

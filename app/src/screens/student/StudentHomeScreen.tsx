@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap } from "lucide-react-native";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
-import { COLORS, FONTS, RADIUS } from "../../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT } from "../../theme/theme";
 import { useAuth } from "../../context/AuthContext";
 import { getActiveBudget, transferToNextDay, Budget } from "../../services/budgetApi";
 
@@ -171,9 +172,9 @@ export default function StudentHomeScreen({ route, navigation }: any) {
           </View>
 
           <TouchableOpacity style={styles.boostCard} onPress={() => navigation.navigate("MealBoost")} activeOpacity={0.85}>
-            <View style={styles.boostIconCircle}>
+            <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.boostIconCircle}>
               <Zap size={16} color="#fff" />
-            </View>
+            </LinearGradient>
             <View style={{ flex: 1 }}>
               <Text style={styles.boostTitle}>Meal Boost</Text>
               <Text style={styles.boostSubtitle}>Feeling short? Add a bit more to raise your daily amount.</Text>
@@ -187,7 +188,7 @@ export default function StudentHomeScreen({ route, navigation }: any) {
             </Card>
           )}
 
-          <Card style={styles.aiCard}>
+          <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.aiCard}>
             <View style={styles.aiHeader}>
               <Sparkles size={15} color="#fff" />
               <Text style={styles.aiHeaderText}>MEALVEST AI</Text>
@@ -195,7 +196,7 @@ export default function StudentHomeScreen({ route, navigation }: any) {
             <Text style={styles.aiText}>
               You're all set for today — KSh {dailyCredit.toLocaleString()} is ready whenever you're hungry.
             </Text>
-          </Card>
+          </LinearGradient>
         </>
       )}
 
@@ -213,15 +214,15 @@ export default function StudentHomeScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  greeting: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted },
-  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.text, marginTop: 2 },
+  greeting: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted },
+  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, marginTop: 2 },
   logoutIcon: {
     width: 36,
     height: 36,
     borderRadius: RADIUS.pill,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(252,244,234,0.06)",
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
@@ -235,20 +236,20 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: COLORS.danger,
     borderWidth: 1.5,
-    borderColor: "#fff",
+    borderColor: COLORS.bg,
   },
   rolloverBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     marginTop: 12,
-    backgroundColor: "#EFF9FF",
+    backgroundColor: COLORS.accentSoft,
     borderRadius: RADIUS.sm,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
   rolloverBannerText: { fontSize: 11, fontFamily: FONTS.bodySemibold, color: COLORS.primary },
-  welcome: { fontSize: 12, fontFamily: FONTS.bodyMedium, color: COLORS.primary, marginTop: 6, marginBottom: 16 },
+  welcome: { fontSize: 12, fontFamily: FONTS.bodyMedium, color: COLORS.accent, marginTop: 6, marginBottom: 16 },
   center: { alignItems: "center", paddingVertical: 40 },
   note: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, textAlign: "center" },
   errorText: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.danger, textAlign: "center" },
@@ -259,7 +260,7 @@ const styles = StyleSheet.create({
   ringFooterItem: { flex: 1, alignItems: "center" },
   ringFooterLabel: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted },
   ringFooterValue: { fontSize: 14, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginTop: 2 },
-  ringDivider: { width: 1, backgroundColor: COLORS.border },
+  ringDivider: { width: 1, backgroundColor: COLORS.borderSoft },
   statsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
   statCard: { flex: 1 },
   statEmoji: { fontSize: 16 },
@@ -270,17 +271,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     marginTop: 12,
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderSoft,
     padding: 14,
   },
   boostIconCircle: {
     width: 36,
     height: 36,
     borderRadius: RADIUS.pill,
-    backgroundColor: COLORS.primary,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
   hotelCard: { marginTop: 12 },
   hotelLabel: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, textTransform: "uppercase" },
   hotelValue: { fontSize: 15, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginTop: 2 },
-  aiCard: { marginTop: 12, backgroundColor: COLORS.primary, borderWidth: 0 },
+  aiCard: { marginTop: 12, borderRadius: RADIUS.sm, padding: 16 },
   aiHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   aiHeaderText: { color: "#fff", fontSize: 11, fontFamily: FONTS.bodySemibold, letterSpacing: 0.5 },
   aiText: { color: "#fff", fontSize: 13, fontFamily: FONTS.body, lineHeight: 19 },

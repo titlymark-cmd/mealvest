@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Store, ChevronRight, MapPin, LocateFixed, LogOut } from "lucide-react-native";
 import { Card } from "../../components/Card";
-import { COLORS, FONTS, RADIUS } from "../../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT, glow } from "../../theme/theme";
 import { fetchHotels, fetchNearbyHotels, Hotel } from "../../services/hotelsApi";
 import { getCurrentLocation } from "../../services/locationService";
 import { useAuth } from "../../context/AuthContext";
@@ -70,9 +71,11 @@ export default function HotelListScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.nearMeButton} onPress={findNearMe} disabled={locating}>
-        <LocateFixed size={16} color="#fff" />
-        <Text style={styles.nearMeText}>{locating ? "Finding hotels near you…" : "Find hotels near me"}</Text>
+      <TouchableOpacity onPress={findNearMe} disabled={locating} style={glow(COLORS.primary, 10)}>
+        <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.nearMeButton}>
+          <LocateFixed size={16} color="#fff" />
+          <Text style={styles.nearMeText}>{locating ? "Finding hotels near you…" : "Find hotels near me"}</Text>
+        </LinearGradient>
       </TouchableOpacity>
 
       {locationNotice && <Text style={styles.notice}>{locationNotice}</Text>}
@@ -142,15 +145,15 @@ export default function HotelListScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.text },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 16 },
+  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 16 },
   logoutIcon: {
     width: 36,
     height: 36,
     borderRadius: RADIUS.pill,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: "#fff",
+    backgroundColor: "rgba(252,244,234,0.06)",
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 12,
@@ -160,18 +163,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.md,
+    borderRadius: RADIUS.sm,
     paddingVertical: 12,
     marginBottom: 10,
   },
   nearMeText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontSize: 13 },
-  notice: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.warning, marginBottom: 10 },
+  notice: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.accent, marginBottom: 10 },
   nearestBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "#EFF9FF",
+    backgroundColor: "rgba(229,72,46,0.15)",
     borderRadius: RADIUS.sm,
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -181,14 +183,14 @@ const styles = StyleSheet.create({
   nearestBadgeText: { fontFamily: FONTS.bodySemibold, fontSize: 11, color: COLORS.primary },
   center: { alignItems: "center", paddingVertical: 40 },
   error: { color: COLORS.danger, fontFamily: FONTS.bodySemibold },
-  empty: { color: COLORS.textMuted, textAlign: "center", fontFamily: FONTS.body },
+  empty: { color: COLORS.textOnDarkMuted, textAlign: "center", fontFamily: FONTS.body },
   card: { padding: 14 },
   cardMain: { flexDirection: "row", alignItems: "center" },
   iconCircle: {
     width: 44,
     height: 44,
     borderRadius: RADIUS.pill,
-    backgroundColor: "#EFF9FF",
+    backgroundColor: COLORS.accentSoft,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -202,7 +204,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: COLORS.borderSoft,
   },
   mapLinkText: { fontFamily: FONTS.bodySemibold, fontSize: 12, color: COLORS.primary },
 });

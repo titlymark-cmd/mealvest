@@ -28,9 +28,9 @@ export function PlaceholderScreen({ label, note }: { label: string; note?: strin
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 24, paddingTop: 60 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  label: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.text },
-  welcome: { fontSize: 13, fontFamily: FONTS.bodyMedium, color: COLORS.primary, marginTop: 10 },
-  note: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 8, textAlign: "center", maxWidth: 260 },
+  label: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  welcome: { fontSize: 13, fontFamily: FONTS.bodyMedium, color: COLORS.accent, marginTop: 10 },
+  note: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 8, textAlign: "center", maxWidth: 260 },
   logoutButton: {
     flexDirection: "row",
     alignItems: "center",

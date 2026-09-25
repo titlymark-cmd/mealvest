@@ -9,14 +9,14 @@ export function Card({ children, style }: { children: React.ReactNode; style?: V
 const styles = StyleSheet.create({
   card: {
     backgroundColor: COLORS.card,
-    borderRadius: RADIUS.xl,
+    borderRadius: RADIUS.sm,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 18,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
+    borderColor: COLORS.borderSoft,
+    padding: 16,
+    shadowColor: "#1D1511",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    elevation: 3,
   },
 });

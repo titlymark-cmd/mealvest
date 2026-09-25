@@ -96,7 +96,7 @@ export default function HotelMenuManageScreen({ navigation }: any) {
             onChangeText={setPrice}
           />
           <View style={styles.imageInputRow}>
-            <ImagePlus size={14} color={COLORS.textFaint} />
+            <ImagePlus size={14} color={COLORS.textMuted} />
             <TextInput
               style={styles.imageInput}
               placeholder="Image URL (optional — direct upload isn't available yet)"
@@ -156,26 +156,34 @@ const styles = StyleSheet.create({
   backRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
   backText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.primary },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
-  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.text },
-  addBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#EFF9FF", borderRadius: RADIUS.sm, paddingVertical: 7, paddingHorizontal: 12 },
+  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.textOnDark },
+  addBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(252,244,234,0.08)",
+    borderRadius: RADIUS.sm,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+  },
   addBtnText: { fontFamily: FONTS.bodySemibold, fontSize: 12, color: COLORS.primary },
   input: {
-    backgroundColor: "#fff", borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.cardWhite, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.borderSoft,
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10, fontSize: 14, fontFamily: FONTS.bodyMedium, color: COLORS.text,
   },
   imageInputRow: {
-    flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fff", borderRadius: RADIUS.md,
-    borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 14, marginBottom: 10,
+    flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: COLORS.cardWhite, borderRadius: RADIUS.sm,
+    borderWidth: 1, borderColor: COLORS.borderSoft, paddingHorizontal: 14, marginBottom: 10,
   },
   imageInput: { flex: 1, paddingVertical: 12, fontSize: 13, fontFamily: FONTS.bodyMedium, color: COLORS.text },
-  thumb: { width: 40, height: 40, borderRadius: RADIUS.sm, marginRight: 10, backgroundColor: COLORS.border },
+  thumb: { width: 40, height: 40, borderRadius: RADIUS.sm, marginRight: 10, backgroundColor: COLORS.borderSoft },
   thumbFallback: {
-    width: 40, height: 40, borderRadius: RADIUS.sm, marginRight: 10, backgroundColor: COLORS.bg,
-    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.border,
+    width: 40, height: 40, borderRadius: RADIUS.sm, marginRight: 10, backgroundColor: COLORS.accentSoft,
+    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: COLORS.borderSoft,
   },
   categoryRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
-  categoryPill: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },
-  categoryPillActive: { borderColor: COLORS.primary, backgroundColor: "#EFF9FF" },
+  categoryPill: { borderWidth: 1, borderColor: COLORS.borderSoft, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },
+  categoryPillActive: { borderColor: COLORS.primary, backgroundColor: COLORS.accentSoft },
   categoryText: { fontFamily: FONTS.bodyMedium, fontSize: 11, color: COLORS.textMuted, textTransform: "capitalize" },
   categoryTextActive: { color: COLORS.primary, fontFamily: FONTS.bodySemibold },
   errorText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.danger, textAlign: "center", marginTop: 16 },

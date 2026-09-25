@@ -150,14 +150,14 @@ export default function MealBoostScreen({ navigation }: any) {
         style={styles.input}
         keyboardType="phone-pad"
         placeholder="07XX XXX XXX"
-        placeholderTextColor={COLORS.textFaint}
+        placeholderTextColor={COLORS.textOnDarkMuted}
         value={phone}
         onChangeText={setPhone}
       />
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <PrimaryButton onPress={startPayment} style={{ marginTop: 20, backgroundColor: COLORS.primaryDark }}>
+      <PrimaryButton onPress={startPayment} style={{ marginTop: 20 }}>
         Boost my plan
       </PrimaryButton>
 
@@ -171,45 +171,51 @@ export default function MealBoostScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  statusText: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.text, marginTop: 16, textAlign: "center" },
-  statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, marginTop: 6, textAlign: "center" },
+  statusText: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.textOnDark, marginTop: 16, textAlign: "center" },
+  statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 6, textAlign: "center" },
   iconRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   modeIcon: {
     width: 26,
     height: 26,
     borderRadius: 8,
-    backgroundColor: "#EFF9FF",
+    backgroundColor: "rgba(252,244,234,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.text },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 12, marginBottom: 22, lineHeight: 19 },
-  label: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginBottom: 8 },
+  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 12, marginBottom: 22, lineHeight: 19 },
+  label: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.textOnDark, marginBottom: 8 },
   amountRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
   },
-  currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, color: COLORS.primary, marginRight: 8 },
-  amountInput: { flex: 1, fontSize: 18, fontFamily: FONTS.displayBold, color: COLORS.text, paddingVertical: 14 },
+  currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, color: COLORS.primaryLight, marginRight: 8 },
+  amountInput: { flex: 1, fontSize: 18, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, paddingVertical: 14 },
   input: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     fontFamily: FONTS.displayBold,
-    color: COLORS.text,
+    color: COLORS.textOnDark,
   },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  presetPill: { borderWidth: 1, borderColor: COLORS.primary, borderRadius: RADIUS.pill, paddingVertical: 6, paddingHorizontal: 12 },
-  presetPillText: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontSize: 12 },
+  presetPill: {
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryLight,
+    borderRadius: RADIUS.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  presetPillText: { color: COLORS.primaryLight, fontFamily: FONTS.bodySemibold, fontSize: 12 },
   error: { color: COLORS.danger, fontSize: 13, marginTop: 14, fontFamily: FONTS.bodySemibold, textAlign: "center" },
-  cancelLink: { color: COLORS.textMuted, fontFamily: FONTS.bodySemibold, fontSize: 13, textAlign: "center", marginTop: 18 },
+  cancelLink: { color: COLORS.textOnDarkMuted, fontFamily: FONTS.bodySemibold, fontSize: 13, textAlign: "center", marginTop: 18 },
 });

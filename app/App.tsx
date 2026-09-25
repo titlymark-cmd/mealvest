@@ -1,26 +1,31 @@
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import { useFonts, Sora_500Medium, Sora_600SemiBold, Sora_700Bold, Sora_800ExtraBold } from "@expo-google-fonts/sora";
-import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from "@expo-google-fonts/inter";
+import {
+  useFonts,
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+  Poppins_800ExtraBold,
+} from "@expo-google-fonts/poppins";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { AuthProvider } from "./src/context/AuthContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { COLORS } from "./src/theme/theme";
 
 export default function App() {
-  // Sora for display/headline weight (numbers, titles — matches the
-  // original web app's identity), Inter for body copy. Everything
-  // downstream references these by family name via src/theme/theme.ts
-  // rather than hardcoding font strings per-screen.
+  // Poppins throughout, matching the "warm espresso kitchen" design
+  // reference — display and body copy share one family, differing
+  // only by weight. Everything downstream references these by family
+  // name via src/theme/theme.ts rather than hardcoding font strings
+  // per-screen.
   const [fontsLoaded] = useFonts({
-    Sora_500Medium,
-    Sora_600SemiBold,
-    Sora_700Bold,
-    Sora_800ExtraBold,
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    Poppins_800ExtraBold,
   });
 
   if (!fontsLoaded) {

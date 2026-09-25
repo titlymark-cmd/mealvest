@@ -1,13 +1,32 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { ShieldCheck, Store, User, Eye, EyeOff } from "lucide-react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { COLORS, FONTS, RADIUS } from "../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT } from "../theme/theme";
 import { useAuth } from "../context/AuthContext";
 import { ApiError, SettlementInput } from "../services/authApi";
 
 type Mode = "student" | "hotel";
+
+/** A selectable chip — gradient when active, translucent outline otherwise. */
+function SelectPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  if (active) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.85}>
+        <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.typePillActive}>
+          <Text style={styles.typePillTextActive}>{label}</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    );
+  }
+  return (
+    <TouchableOpacity onPress={onPress} style={styles.typePill} activeOpacity={0.85}>
+      <Text style={styles.typePillText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 const BUSINESS_TYPES = [
   { value: "hotel", label: "Hotel" },
@@ -160,7 +179,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
         <TextInput
           style={styles.input}
           placeholder="Full name"
-          placeholderTextColor={COLORS.textFaint}
+          placeholderTextColor={COLORS.textOnDarkMuted}
           value={fullName}
           onChangeText={setFullName}
         />
@@ -169,7 +188,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
       <TextInput
         style={styles.input}
         placeholder="Email address"
-        placeholderTextColor={COLORS.textFaint}
+        placeholderTextColor={COLORS.textOnDarkMuted}
         autoCapitalize="none"
         keyboardType="email-address"
         value={email}
@@ -178,7 +197,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
       <TextInput
         style={styles.input}
         placeholder="Phone number (07xx xxx xxx)"
-        placeholderTextColor={COLORS.textFaint}
+        placeholderTextColor={COLORS.textOnDarkMuted}
         keyboardType="phone-pad"
         value={phoneNumber}
         onChangeText={setPhoneNumber}
@@ -187,7 +206,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
         <TextInput
           style={[styles.input, styles.passwordInput]}
           placeholder="Password (at least 8 characters)"
-          placeholderTextColor={COLORS.textFaint}
+          placeholderTextColor={COLORS.textOnDarkMuted}
           secureTextEntry={!showPassword}
           value={password}
           onChangeText={setPassword}
@@ -198,16 +217,16 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
           accessibilityLabel={showPassword ? "Hide password" : "Show password"}
         >
           {showPassword ? (
-            <EyeOff size={18} color={COLORS.textMuted} />
+            <EyeOff size={18} color={COLORS.textOnDarkMuted} />
           ) : (
-            <Eye size={18} color={COLORS.textMuted} />
+            <Eye size={18} color={COLORS.textOnDarkMuted} />
           )}
         </TouchableOpacity>
       </View>
       <TextInput
         style={styles.input}
         placeholder="Create a 4-digit PIN"
-        placeholderTextColor={COLORS.textFaint}
+        placeholderTextColor={COLORS.textOnDarkMuted}
         secureTextEntry
         keyboardType="number-pad"
         maxLength={4}
@@ -222,25 +241,19 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
           <TextInput
             style={styles.input}
             placeholder="Hotel / restaurant name"
-            placeholderTextColor={COLORS.textFaint}
+            placeholderTextColor={COLORS.textOnDarkMuted}
             value={hotelName}
             onChangeText={setHotelName}
           />
           <View style={styles.wrapRow}>
             {BUSINESS_TYPES.map((t) => (
-              <TouchableOpacity
-                key={t.value}
-                onPress={() => setBusinessType(t.value)}
-                style={[styles.typePill, businessType === t.value && styles.typePillActive]}
-              >
-                <Text style={[styles.typePillText, businessType === t.value && styles.typePillTextActive]}>{t.label}</Text>
-              </TouchableOpacity>
+              <SelectPill key={t.value} label={t.label} active={businessType === t.value} onPress={() => setBusinessType(t.value)} />
             ))}
           </View>
           <TextInput
             style={styles.input}
             placeholder="Location / area"
-            placeholderTextColor={COLORS.textFaint}
+            placeholderTextColor={COLORS.textOnDarkMuted}
             value={location}
             onChangeText={setLocation}
           />
@@ -249,7 +262,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
           <TextInput
             style={styles.input}
             placeholder="Owner's full name"
-            placeholderTextColor={COLORS.textFaint}
+            placeholderTextColor={COLORS.textOnDarkMuted}
             value={contactFullName}
             onChangeText={setContactFullName}
           />
@@ -257,15 +270,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
           <Text style={styles.sectionLabel}>How do you get paid?</Text>
           <View style={styles.wrapRow}>
             {SETTLEMENT_METHODS.map((m) => (
-              <TouchableOpacity
-                key={m.value}
-                onPress={() => setSettlementMethod(m.value)}
-                style={[styles.typePill, settlementMethod === m.value && styles.typePillActive]}
-              >
-                <Text style={[styles.typePillText, settlementMethod === m.value && styles.typePillTextActive]}>
-                  {m.label}
-                </Text>
-              </TouchableOpacity>
+              <SelectPill key={m.value} label={m.label} active={settlementMethod === m.value} onPress={() => setSettlementMethod(m.value)} />
             ))}
           </View>
 
@@ -274,7 +279,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Till number"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 keyboardType="number-pad"
                 value={tillNumber}
                 onChangeText={setTillNumber}
@@ -282,7 +287,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Name registered on the till"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={tillName}
                 onChangeText={setTillName}
               />
@@ -294,7 +299,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Paybill number"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 keyboardType="number-pad"
                 value={paybillNumber}
                 onChangeText={setPaybillNumber}
@@ -302,14 +307,14 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Account number"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={paybillAccountNumber}
                 onChangeText={setPaybillAccountNumber}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Business name registered on the paybill"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={paybillBusinessName}
                 onChangeText={setPaybillBusinessName}
               />
@@ -321,7 +326,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="M-Pesa phone number to receive payments"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 keyboardType="phone-pad"
                 value={sendMoneyPhone}
                 onChangeText={setSendMoneyPhone}
@@ -329,7 +334,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Name on that M-Pesa account"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={accountHolderName}
                 onChangeText={setAccountHolderName}
               />
@@ -345,7 +350,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Pochi la Biashara phone number"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 keyboardType="phone-pad"
                 value={pochiPhoneNumber}
                 onChangeText={setPochiPhoneNumber}
@@ -353,14 +358,14 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Business account name"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={businessAccountName}
                 onChangeText={setBusinessAccountName}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Registered name"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={registeredName}
                 onChangeText={setRegisteredName}
               />
@@ -372,21 +377,21 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Bank name"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={bankName}
                 onChangeText={setBankName}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Account name"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={bankAccountName}
                 onChangeText={setBankAccountName}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Account number"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 keyboardType="number-pad"
                 value={bankAccountNumber}
                 onChangeText={setBankAccountNumber}
@@ -394,7 +399,7 @@ export default function RegisterScreen({ navigation, mode }: any & { mode: Mode 
               <TextInput
                 style={styles.input}
                 placeholder="Branch (optional)"
-                placeholderTextColor={COLORS.textFaint}
+                placeholderTextColor={COLORS.textOnDarkMuted}
                 value={bankBranch}
                 onChangeText={setBankBranch}
               />
@@ -428,36 +433,50 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 8,
-    backgroundColor: "#EFF9FF",
+    backgroundColor: "rgba(252,244,234,0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.text, flexShrink: 1 },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 22 },
-  sectionLabel: { fontSize: 11, fontFamily: FONTS.bodySemibold, color: COLORS.textMuted, textTransform: "uppercase", marginBottom: 8, marginTop: 6 },
+  title: { fontSize: 21, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, flexShrink: 1 },
+  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 22 },
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: FONTS.bodySemibold,
+    color: COLORS.textOnDarkMuted,
+    textTransform: "uppercase",
+    marginBottom: 8,
+    marginTop: 6,
+  },
   input: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginBottom: 12,
     fontSize: 15,
     fontFamily: FONTS.bodyMedium,
-    color: COLORS.text,
+    color: COLORS.textOnDark,
   },
-  pinHint: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: -6, marginBottom: 12 },
+  pinHint: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: -6, marginBottom: 12 },
   passwordRow: { position: "relative", justifyContent: "center" },
   passwordInput: { paddingRight: 44 },
   eyeButton: { position: "absolute", right: 14, height: "100%", justifyContent: "center", alignItems: "center" },
   wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
-  typePill: { borderWidth: 2, borderColor: COLORS.border, borderRadius: RADIUS.sm, paddingVertical: 8, paddingHorizontal: 12 },
-  typePillActive: { borderColor: COLORS.primary, backgroundColor: "#EFF9FF" },
-  typePillText: { color: COLORS.text, fontFamily: FONTS.bodySemibold, fontSize: 12 },
-  typePillTextActive: { color: COLORS.primary },
+  typePill: {
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.pill,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(252,244,234,0.05)",
+  },
+  typePillActive: { borderRadius: RADIUS.pill, paddingVertical: 8, paddingHorizontal: 14 },
+  typePillText: { color: COLORS.textOnDarkMuted, fontFamily: FONTS.bodySemibold, fontSize: 12 },
+  typePillTextActive: { color: "#fff", fontFamily: FONTS.bodySemibold, fontSize: 12 },
   verifyNote: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
-  verifyNoteText: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, flexShrink: 1 },
+  verifyNoteText: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, flexShrink: 1 },
   error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, fontFamily: FONTS.bodySemibold },
   link: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontSize: 13, textAlign: "center", marginTop: 20, marginBottom: 20 },
 });

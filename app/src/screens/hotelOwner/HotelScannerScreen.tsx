@@ -191,8 +191,8 @@ export default function HotelScannerScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#03060F" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  permTitle: { fontFamily: FONTS.displayBold, fontSize: 17, color: COLORS.text, marginBottom: 8, textAlign: "center" },
-  permBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, textAlign: "center" },
+  permTitle: { fontFamily: FONTS.displayBold, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
+  permBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },
   link: { fontFamily: FONTS.bodySemibold, fontSize: 14, color: COLORS.primary },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 54, paddingHorizontal: 18, paddingBottom: 14 },
   backBtn: { width: 34, height: 34, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
@@ -210,6 +210,6 @@ const styles = StyleSheet.create({
   amountText: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.text, marginTop: 8, marginBottom: 4 },
   redeemedText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.success, marginTop: 10 },
   buttonRow: { flexDirection: "row", gap: 10, marginTop: 14 },
-  cancelBtn: { flex: 1, borderWidth: 1.5, borderColor: COLORS.border, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center" },
+  cancelBtn: { flex: 1, borderWidth: 1.5, borderColor: COLORS.borderSoft, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center" },
   cancelText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.text },
 });

@@ -97,10 +97,10 @@ export default function MealPassScreen({ route, navigation }: any) {
 
         {order?.qr_token ? (
           <View style={styles.qrWrap}>
-            <QRCode value={order.qr_token} size={200} backgroundColor="#fff" color={COLORS.primaryDark} />
+            <QRCode value={order.qr_token} size={200} backgroundColor="#fff" color={COLORS.text} />
           </View>
         ) : (
-          <Text style={styles.errorBody}>No QR code was returned for this order.</Text>
+          <Text style={styles.qrMissingText}>No QR code was returned for this order.</Text>
         )}
 
         <View style={styles.verifiedRow}>
@@ -121,19 +121,20 @@ export default function MealPassScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  statusText: { fontFamily: FONTS.bodyMedium, fontSize: 14, color: COLORS.textMuted, marginTop: 16 },
-  errorTitle: { fontFamily: FONTS.displayBold, fontSize: 17, color: COLORS.text, marginBottom: 8, textAlign: "center" },
-  errorBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, textAlign: "center" },
+  statusText: { fontFamily: FONTS.bodyMedium, fontSize: 14, color: COLORS.textOnDarkMuted, marginTop: 16 },
+  errorTitle: { fontFamily: FONTS.displayBold, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
+  errorBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },
+  qrMissingText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, textAlign: "center" },
   link: { fontFamily: FONTS.bodySemibold, fontSize: 14, color: COLORS.primary },
   backRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 20 },
   backText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.primary },
-  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.text, textAlign: "center" },
-  subtitle: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, textAlign: "center", marginTop: 4, marginBottom: 20 },
+  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.textOnDark, textAlign: "center" },
+  subtitle: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center", marginTop: 4, marginBottom: 20 },
   qrCard: { alignItems: "center", padding: 24 },
   itemName: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.text },
   itemPrice: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, marginBottom: 18 },
-  qrWrap: { padding: 14, backgroundColor: "#fff", borderRadius: RADIUS.md },
+  qrWrap: { padding: 14, backgroundColor: "#fff", borderRadius: RADIUS.sm },
   verifiedRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 },
   verifiedText: { fontFamily: FONTS.bodySemibold, fontSize: 11, color: COLORS.success },
-  hint: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, textAlign: "center", marginTop: 16 },
+  hint: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textOnDarkMuted, textAlign: "center", marginTop: 16 },
 });

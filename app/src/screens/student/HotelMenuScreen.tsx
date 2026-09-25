@@ -108,8 +108,7 @@ export default function HotelMenuScreen({ route, navigation }: any) {
         <PrimaryButton
           onPress={() => navigation.navigate("BudgetOnboarding", { hotelId, hotelName })}
           showArrow={false}
-          style={styles.continueButton}
-        >
+          >
           Continue without picking a meal yet
         </PrimaryButton>
       </View>
@@ -119,25 +118,24 @@ export default function HotelMenuScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
-  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.text },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 16 },
+  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 16 },
   center: { alignItems: "center", paddingVertical: 40 },
   error: { color: COLORS.danger, fontFamily: FONTS.bodySemibold },
-  empty: { color: COLORS.textMuted, textAlign: "center", fontFamily: FONTS.body },
+  empty: { color: COLORS.textOnDarkMuted, textAlign: "center", fontFamily: FONTS.body },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8, marginTop: 4 },
-  sectionTitle: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.text },
+  sectionTitle: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.textOnDark },
   card: { flexDirection: "row", padding: 14, alignItems: "flex-start" },
-  thumb: { width: 48, height: 48, borderRadius: RADIUS.sm, marginRight: 12, backgroundColor: COLORS.border },
+  thumb: { width: 48, height: 48, borderRadius: RADIUS.sm, marginRight: 12, backgroundColor: COLORS.borderSoft },
   thumbFallback: {
     width: 48, height: 48, borderRadius: RADIUS.sm, marginRight: 12,
-    backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.accentSoft, alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: COLORS.borderSoft,
   },
   itemName: { fontSize: 15, fontFamily: FONTS.bodySemibold, color: COLORS.text },
   itemDesc: { fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 2 },
   price: { fontSize: 14, fontFamily: FONTS.displayBold, color: COLORS.text, marginBottom: 6 },
-  requestButton: { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingVertical: 6, paddingHorizontal: 12 },
+  requestButton: { backgroundColor: COLORS.primary, borderRadius: RADIUS.pill, paddingVertical: 6, paddingHorizontal: 12 },
   requestButtonText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontSize: 11 },
   footer: { position: "absolute", bottom: 16, left: 20, right: 20 },
-  continueButton: { backgroundColor: COLORS.primaryDark },
 });

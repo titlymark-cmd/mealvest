@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 56 },
   backRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
   backText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.primary },
-  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.text, marginBottom: 16 },
+  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.textOnDark, marginBottom: 16 },
   errorText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.danger, textAlign: "center", marginTop: 20 },
   sectionLabel: { fontFamily: FONTS.bodySemibold, fontSize: 10, color: COLORS.textFaint, letterSpacing: 0.5, marginBottom: 8 },
   row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },

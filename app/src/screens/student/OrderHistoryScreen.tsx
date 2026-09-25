@@ -49,7 +49,7 @@ export default function OrderHistoryScreen({ navigation }: any) {
       {!loading && error && <Text style={styles.errorText}>{error}</Text>}
       {!loading && !error && orders.length === 0 && (
         <View style={styles.emptyState}>
-          <ShoppingBag size={28} color={COLORS.textFaint} />
+          <ShoppingBag size={28} color={COLORS.textOnDarkMuted} />
           <Text style={styles.emptyText}>No orders yet.</Text>
         </View>
       )}
@@ -83,10 +83,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 56 },
   backRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
   backText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.primary },
-  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.text, marginBottom: 16 },
+  title: { fontFamily: FONTS.displayBold, fontSize: 20, color: COLORS.textOnDark, marginBottom: 16 },
   errorText: { fontFamily: FONTS.bodySemibold, fontSize: 13, color: COLORS.danger, textAlign: "center", marginTop: 20 },
   emptyState: { alignItems: "center", marginTop: 40, gap: 8 },
-  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted },
+  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted },
   orderCard: { flexDirection: "row", alignItems: "flex-start", padding: 14 },
   itemLine: { fontFamily: FONTS.bodyMedium, fontSize: 13, color: COLORS.text, marginBottom: 2 },
   amount: { fontFamily: FONTS.displayBold, fontSize: 14, color: COLORS.text },

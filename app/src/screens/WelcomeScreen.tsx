@@ -1,9 +1,10 @@
 import React from "react";
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { UtensilsCrossed } from "lucide-react-native";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { COLORS, FONTS, RADIUS } from "../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT, glow } from "../theme/theme";
 import { useHealthCheck } from "../hooks/useHealthCheck";
 
 export default function WelcomeScreen({ navigation }: any) {
@@ -11,9 +12,9 @@ export default function WelcomeScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.badge}>
+      <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.badge, glow(COLORS.primary, 16)]}>
         <UtensilsCrossed size={28} color="#fff" />
-      </View>
+      </LinearGradient>
       <Logo size="lg" />
       <Text style={styles.subtitle}>Your food money, already planned.</Text>
 
@@ -52,19 +53,18 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 18,
-    backgroundColor: COLORS.primary,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
   },
-  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 6, marginBottom: 28 },
+  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 6, marginBottom: 28 },
   statusCard: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.sm,
     padding: 20,
     width: "100%",
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.borderSoft,
   },
   statusLabel: { fontSize: 12, fontFamily: FONTS.bodySemibold, color: COLORS.textMuted, marginBottom: 8 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -82,6 +82,6 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
   },
-  secondaryButtonText: { color: COLORS.text, fontFamily: FONTS.bodySemibold, fontSize: 14 },
+  secondaryButtonText: { color: COLORS.textOnDark, fontFamily: FONTS.bodySemibold, fontSize: 14 },
   link: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontSize: 13, marginTop: 18 },
 });

@@ -1,10 +1,11 @@
 import React, { useState, useRef } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import { LinearGradient } from "expo-linear-gradient";
 import { Sparkles, Check } from "lucide-react-native";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
-import { COLORS, FONTS, RADIUS } from "../../theme/theme";
+import { COLORS, FONTS, RADIUS, GRADIENT } from "../../theme/theme";
 import { useAuth } from "../../context/AuthContext";
 import { initializePayment, verifyPayment } from "../../services/paymentsApi";
 
@@ -194,19 +195,19 @@ export default function BudgetOnboardingScreen({ route, navigation }: any) {
         style={styles.input}
         keyboardType="phone-pad"
         placeholder="07XX XXX XXX"
-        placeholderTextColor={COLORS.textFaint}
+        placeholderTextColor={COLORS.textOnDarkMuted}
         value={phone}
         onChangeText={setPhone}
       />
 
       {dailyAllowance !== null && (
-        <View style={styles.summaryCard}>
+        <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
             <Sparkles size={14} color="#fff" />
             <Text style={styles.summaryLabel}>DAILY MEAL CREDIT</Text>
           </View>
           <Text style={styles.summaryValue}>KSh {dailyAllowance.toLocaleString()}/day</Text>
-        </View>
+        </LinearGradient>
       )}
 
       {error && <Text style={styles.error}>{error}</Text>}
@@ -223,7 +224,7 @@ export default function BudgetOnboardingScreen({ route, navigation }: any) {
         <Text style={styles.checkboxLabel}>I have read and understand the Mealvest payment and contract terms.</Text>
       </TouchableOpacity>
 
-      <PrimaryButton onPress={startPayment} disabled={!termsAccepted} style={{ marginTop: 14, backgroundColor: COLORS.primaryDark }}>
+      <PrimaryButton onPress={startPayment} disabled={!termsAccepted} style={{ marginTop: 14 }}>
         Pay with M-Pesa
       </PrimaryButton>
     </ScrollView>
@@ -233,46 +234,52 @@ export default function BudgetOnboardingScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: COLORS.bg, padding: 20, paddingTop: 60 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  statusText: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.text, marginTop: 16, textAlign: "center" },
-  statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, marginTop: 6, textAlign: "center" },
-  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.text },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 4, marginBottom: 24 },
-  chosenCard: { marginBottom: 20, backgroundColor: "#EFF9FF" },
+  statusText: { fontFamily: FONTS.displayBold, fontSize: 16, color: COLORS.textOnDark, marginTop: 16, textAlign: "center" },
+  statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 6, textAlign: "center" },
+  title: { fontSize: 22, fontFamily: FONTS.displayBold, color: COLORS.textOnDark },
+  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
+  chosenCard: { marginBottom: 20, backgroundColor: COLORS.accentSoft },
   chosenLabel: { fontSize: 11, fontFamily: FONTS.bodySemibold, color: COLORS.textMuted, textTransform: "uppercase" },
   chosenItem: { fontSize: 14, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginTop: 2 },
-  label: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.text, marginBottom: 8 },
+  label: { fontSize: 13, fontFamily: FONTS.bodySemibold, color: COLORS.textOnDark, marginBottom: 8 },
   amountRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
   },
-  currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, color: COLORS.primary, marginRight: 8 },
-  amountInput: { flex: 1, fontSize: 18, fontFamily: FONTS.displayBold, color: COLORS.text, paddingVertical: 14 },
+  currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, color: COLORS.primaryLight, marginRight: 8 },
+  amountInput: { flex: 1, fontSize: 18, fontFamily: FONTS.displayBold, color: COLORS.textOnDark, paddingVertical: 14 },
   input: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    borderWidth: 1,
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.sm,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     fontFamily: FONTS.displayBold,
-    color: COLORS.text,
+    color: COLORS.textOnDark,
   },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  presetPill: { borderWidth: 1, borderColor: COLORS.primary, borderRadius: RADIUS.pill, paddingVertical: 6, paddingHorizontal: 12 },
-  presetPillText: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontSize: 12 },
-  summaryCard: { backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 16, marginTop: 24, alignItems: "center" },
+  presetPill: {
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryLight,
+    borderRadius: RADIUS.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  presetPillText: { color: COLORS.primaryLight, fontFamily: FONTS.bodySemibold, fontSize: 12 },
+  summaryCard: { borderRadius: RADIUS.lg, padding: 16, marginTop: 24, alignItems: "center" },
   summaryHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
-  summaryLabel: { color: "#E0F2FE", fontSize: 11, fontFamily: FONTS.bodySemibold, letterSpacing: 0.5 },
+  summaryLabel: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontFamily: FONTS.bodySemibold, letterSpacing: 0.5 },
   summaryValue: { color: "#fff", fontSize: 20, fontFamily: FONTS.displayBold },
   error: { color: COLORS.danger, fontSize: 13, marginTop: 14, fontFamily: FONTS.bodySemibold, textAlign: "center" },
-  disclaimerCard: { marginTop: 22, backgroundColor: "#FFF8EB", borderColor: "#FDE9C0" },
-  disclaimerTitle: { fontFamily: FONTS.bodySemibold, fontSize: 11, color: "#92620A", letterSpacing: 0.5, marginBottom: 8 },
+  disclaimerCard: { marginTop: 22, backgroundColor: COLORS.accentSoft, borderColor: "#F4C79E" },
+  disclaimerTitle: { fontFamily: FONTS.bodySemibold, fontSize: 11, color: "#8A4416", letterSpacing: 0.5, marginBottom: 8 },
   disclaimerBody: { fontFamily: FONTS.body, fontSize: 12, color: "#6B4A08", lineHeight: 18 },
   checkboxRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 14 },
   checkbox: {
@@ -280,5 +287,5 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", marginTop: 1,
   },
   checkboxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  checkboxLabel: { flex: 1, fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, lineHeight: 17 },
+  checkboxLabel: { flex: 1, fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, lineHeight: 17 },
 });
