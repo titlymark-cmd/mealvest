@@ -1,0 +1,67 @@
+/* Matches the reset the original app shipped via react-native-web's
+   recommended setup (see the exported index.html's #expo-reset style):
+   full-height html/body, no default margin, and the page itself never
+   scrolls — every screen was built as a full-viewport container that
+   scrolls its OWN content (RN's ScrollView pattern), not the browser
+   document. Preserved as-is rather than switching to normal page
+   scrolling, since that's a behavior change the migration shouldn't
+   make on its own. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  display: flex;
+  flex-direction: column; /* RN's implicit View default; CSS's is "row" */
+  height: 100%;
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* RN's placeholderTextColor has no inline-style DOM equivalent —
+   every form input across the migrated app used the same muted
+   on-dark tone for placeholders, so one global rule covers all of
+   them instead of repeating a ::placeholder selector per component. */
+input::placeholder,
+textarea::placeholder {
+  color: rgba(252, 244, 234, 0.62); /* COLORS.textOnDarkMuted */
+  opacity: 1;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@keyframes mv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
