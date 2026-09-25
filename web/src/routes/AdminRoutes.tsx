@@ -1,12 +1,14 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { PlaceholderScreen } from "../components/PlaceholderScreen";
+import AdminHomeScreen from "../pages/admin/AdminHomeScreen";
+import AdminCreateHotelScreen from "../pages/admin/AdminCreateHotelScreen";
 
-/** Stub for Phase 4 — real admin screens land here. */
+/** Web port of navigation/AdminStack.tsx. */
 export function AdminRoutes() {
   return (
     <Routes>
-      <Route path="/admin/*" element={<PlaceholderScreen label="Admin" note="Migrating in Phase 4." />} />
+      <Route path="/admin/home" element={<AdminHomeScreen />} />
+      <Route path="/admin/create-hotel" element={<AdminCreateHotelScreen />} />
       <Route path="*" element={<Navigate to="/admin/home" replace />} />
     </Routes>
   );
