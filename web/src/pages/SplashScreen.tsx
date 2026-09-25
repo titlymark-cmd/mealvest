@@ -2,7 +2,10 @@ import React, { useEffect } from "react";
 import { COLORS, FONTS, glow } from "../styles/theme";
 import logoSrc from "../assets/mealvest-logo.png";
 
-const MIN_SPLASH_MS = 1400;
+// Bumped from 1400ms so the logo-reveal animation (1500ms) plus the
+// staggered wordmark/tagline fade have room to finish before the app
+// navigates away, instead of getting cut off mid-animation.
+const MIN_SPLASH_MS = 1900;
 
 export function SplashScreen({ onFinished }: { onFinished: () => void }) {
   useEffect(() => {
@@ -12,11 +15,18 @@ export function SplashScreen({ onFinished }: { onFinished: () => void }) {
 
   return (
     <div style={styles.container}>
-      <div style={{ ...styles.badge, ...glow(COLORS.primary, 24) }}>
+      <div
+        className="mv-logo-reveal-wrap"
+        style={{ ...styles.badge, ...glow(COLORS.primary, 24), ["--mv-logo-url" as string]: `url(${logoSrc})` } as React.CSSProperties}
+      >
         <img src={logoSrc} alt="" style={styles.badgeImage} />
       </div>
-      <span style={styles.wordmark}>MEALVEST</span>
-      <span style={styles.tagline}>Your food money, already planned.</span>
+      <span className="mv-wordmark-reveal" style={styles.wordmark}>
+        MEALVEST
+      </span>
+      <span className="mv-wordmark-reveal" style={{ ...styles.tagline, animationDelay: "1150ms" }}>
+        Your food money, already planned.
+      </span>
     </div>
   );
 }

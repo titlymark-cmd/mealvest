@@ -12,7 +12,7 @@ export default function WelcomeScreen() {
 
   return (
     <div style={styles.container}>
-      <Logo size="lg" />
+      <Logo size="lg" animated />
       <span style={styles.subtitle}>Your food money, already planned.</span>
 
       <div style={styles.statusCard}>

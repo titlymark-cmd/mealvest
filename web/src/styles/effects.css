@@ -122,3 +122,121 @@ textarea:focus-visible {
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ============================================================
+   MEALVEST — logo reveal
+   ------------------------------------------------------------
+   Recreates a "dark → glowing outline → full color + shine sweep"
+   cinematic logo-reveal, matching the style of the reference clip the
+   user shared, applied to the real (raster) mealvest-logo.png instead
+   of hand-traced vector art:
+
+     1. `drop-shadow` is what actually sells the "emerging from
+        blackness" phase — it renders a soft glow that follows the
+        PNG's alpha silhouette even while the pixels themselves are
+        still near-black (brightness(0)), which is exactly the
+        "glowing outline visible before the shape fills in with
+        color" look from the reference, without needing an SVG
+        outline to trace.
+     2. A `::after` shine band, masked to the same PNG's silhouette
+        (`mask-image`) so it only lights up pixels the logo actually
+        occupies, sweeps across once as the color settles in — the
+        "metallic highlight" pass from the reference.
+
+   Used for first-impression moments only (splash screen, the Welcome
+   screen's big logo) — not on every small header logo, which would
+   make it noise rather than an entrance.
+   ============================================================ */
+
+@keyframes mv-logo-reveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+    filter: brightness(0) saturate(0) drop-shadow(0 0 0 rgba(245, 166, 35, 0));
+  }
+  38% {
+    opacity: 1;
+    transform: scale(0.9);
+    filter: brightness(0.3) saturate(0.35) drop-shadow(0 0 18px rgba(245, 166, 35, 0.6));
+  }
+  72% {
+    opacity: 1;
+    transform: scale(1.06);
+    filter: brightness(1) saturate(1) drop-shadow(0 0 22px rgba(229, 72, 46, 0.55));
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1) saturate(1) drop-shadow(0 6px 16px rgba(229, 72, 46, 0.32));
+  }
+}
+
+@keyframes mv-logo-shine {
+  0%,
+  58% {
+    opacity: 0;
+    background-position: -60% -60%;
+  }
+  68% {
+    opacity: 0.85;
+  }
+  88% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+    background-position: 160% 160%;
+  }
+}
+
+@keyframes mv-wordmark-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mv-logo-reveal-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.mv-logo-reveal-wrap img {
+  animation: mv-logo-reveal 1500ms cubic-bezier(0.16, 0.9, 0.28, 1) both;
+}
+
+.mv-logo-reveal-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.95) 50%, transparent 58%);
+  background-size: 320% 320%;
+  -webkit-mask-image: var(--mv-logo-url);
+  mask-image: var(--mv-logo-url);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  animation: mv-logo-shine 1500ms cubic-bezier(0.16, 0.9, 0.28, 1) both;
+}
+
+.mv-wordmark-reveal {
+  animation: mv-wordmark-reveal 500ms ease both;
+  animation-delay: 950ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-logo-reveal-wrap img,
+  .mv-logo-reveal-wrap::after,
+  .mv-wordmark-reveal {
+    animation: none;
+  }
+}
