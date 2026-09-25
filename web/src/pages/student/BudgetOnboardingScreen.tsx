@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Sparkles, Check } from "lucide-react";
+import { ArrowLeft, Sparkles, Check } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
@@ -52,7 +52,9 @@ export default function BudgetOnboardingScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const referenceRef = useRef<string | null>(null);
+  const checkoutUrlRef = useRef<string | null>(null);
   const pollAttemptsRef = useRef(0);
 
   const dailyAllowance = (() => {
@@ -84,9 +86,17 @@ export default function BudgetOnboardingScreen() {
         termsAccepted: true,
       });
       referenceRef.current = reference;
+      checkoutUrlRef.current = checkoutUrl;
 
       setStage("waiting");
-      window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+      // A browser can silently block this popup because it fires after
+      // the `await initializePayment(...)` above — outside the direct
+      // click-handler call stack most browsers require to allow
+      // window.open() without a user gesture. When that happens, fall
+      // back to a manual "Open payment page" button below (a real click
+      // on that button is its own gesture, so it always works).
+      const win = window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+      setPopupBlocked(!win);
       pollForConfirmation();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
@@ -144,6 +154,24 @@ export default function BudgetOnboardingScreen() {
           {stage === "confirming" && "Confirming your payment…"}
         </p>
         <p style={styles.statusSubtext}>{stage === "confirming" && "This can take up to a minute — don't close the app."}</p>
+
+        {popupBlocked && checkoutUrlRef.current && (stage === "waiting" || stage === "confirming") && (
+          <>
+            <p style={styles.statusSubtext}>Your browser blocked the checkout popup.</p>
+            <button
+              onClick={() => window.open(checkoutUrlRef.current!, "_blank", "noopener,noreferrer")}
+              style={styles.secondaryLinkBtn}
+            >
+              <span style={styles.secondaryLinkText}>Open payment page</span>
+            </button>
+          </>
+        )}
+
+        {stage === "confirming" && (
+          <button onClick={() => navigate("/student/home")} style={styles.secondaryLinkBtn}>
+            <span style={styles.secondaryLinkText}>View my dashboard now</span>
+          </button>
+        )}
       </div>
     );
   }
@@ -160,6 +188,11 @@ export default function BudgetOnboardingScreen() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate(-1)} style={styles.backRow}>
+        <ArrowLeft size={16} color={COLORS.primary} />
+        <span style={styles.backText}>Back</span>
+      </button>
+
       <h1 style={styles.title}>Set up your plan</h1>
       <p style={styles.subtitle}>
         {hotelName ? `For ${hotelName}. ` : ""}
@@ -205,6 +238,11 @@ export default function BudgetOnboardingScreen() {
       )}
 
       {error && <p style={styles.error}>{error}</p>}
+      {stage === "error" && (
+        <button onClick={() => navigate("/student/home")} style={{ ...styles.secondaryLinkBtn, alignSelf: "center" }}>
+          <span style={styles.secondaryLinkText}>Check my dashboard instead — a payment may still confirm</span>
+        </button>
+      )}
 
       <Card style={styles.disclaimerCard}>
         <span style={styles.disclaimerTitle}>IMPORTANT MEALVEST TERMS</span>
@@ -226,10 +264,14 @@ export default function BudgetOnboardingScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, display: "flex", flexDirection: "column" },
+  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
+  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
   center: { flex: 1, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
   statusText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.textOnDark, marginTop: 16, textAlign: "center" },
   statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 6, textAlign: "center" },
+  secondaryLinkBtn: { marginTop: 18 },
+  secondaryLinkText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textAlign: "center" },
   title: { fontSize: 22, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0 },
   subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
   chosenCard: { marginBottom: 20, backgroundColor: COLORS.accentSoft, display: "flex", flexDirection: "column" },

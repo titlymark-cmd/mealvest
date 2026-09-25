@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { COLORS, FONTS } from "../styles/theme";
 import { LoginFormContent } from "./LoginFormContent";
@@ -89,6 +91,18 @@ export default function AuthScreen({ mode: initialMode }: { mode: Mode }) {
   );
 }
 
+// Shared top-left back button, overlaid above both the desktop split
+// and the mobile hero — navigate(-1) returns to WelcomeScreen, the
+// only screen either layout is ever reached from.
+function BackButton() {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate(-1)} style={styles.backBtn} aria-label="Back">
+      <ArrowLeft size={18} color="#fff" />
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // DESKTOP — diagonal split (CSS clip-path animates the slide; opacity
 // cross-fades which content is on top of each side).
@@ -160,6 +174,7 @@ function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwi
 
   return (
     <div style={styles.desktopRoot}>
+      <BackButton />
       {/* LEFT: Register hero (visible when registering) OR Login form
           (visible when logging in). */}
       <div
@@ -218,6 +233,7 @@ function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwi
 function AuthScreenMobile({ isRegister, registerRole, onSwitchToRegister, onSwitchToLogin }: any) {
   return (
     <div style={styles.mobileRoot}>
+      <BackButton />
       <img
         src={IMG_LOGIN_HERO}
         alt=""
@@ -243,6 +259,20 @@ function AuthScreenMobile({ isRegister, registerRole, onSwitchToRegister, onSwit
 
 const styles: Record<string, React.CSSProperties> = {
   absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  backBtn: {
+    position: "absolute",
+    top: 20,
+    left: 20,
+    zIndex: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(29,21,17,0.55)",
+    border: "1px solid rgba(255,255,255,0.25)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   absoluteFillObject: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
   desktopRoot: { flex: 1, width: "100%", height: "100%", position: "relative", backgroundColor: COLORS.bg, overflow: "hidden" },
   panelInner: { position: "relative", width: "100%", height: "100%" },

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Zap, Check } from "lucide-react";
+import { ArrowLeft, Zap, Check } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
@@ -27,7 +27,9 @@ export default function MealBoostScreen() {
   const [phone, setPhone] = useState("");
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const referenceRef = useRef<string | null>(null);
+  const checkoutUrlRef = useRef<string | null>(null);
   const pollAttemptsRef = useRef(0);
 
   const startPayment = async () => {
@@ -46,9 +48,14 @@ export default function MealBoostScreen() {
         email: user.email,
       });
       referenceRef.current = reference;
+      checkoutUrlRef.current = checkoutUrl;
 
       setStage("waiting");
-      window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+      // See BudgetOnboardingScreen's identical comment: this call fires
+      // after an await, so a browser can block it as a popup; fall back
+      // to a manual "Open payment page" button when that happens.
+      const win = window.open(checkoutUrl, "_blank", "noopener,noreferrer");
+      setPopupBlocked(!win);
       pollForConfirmation();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
@@ -104,6 +111,24 @@ export default function MealBoostScreen() {
           {stage === "confirming" && "Confirming your payment…"}
         </p>
         <p style={styles.statusSubtext}>{stage === "confirming" && "This can take up to a minute — don't close the app."}</p>
+
+        {popupBlocked && checkoutUrlRef.current && (stage === "waiting" || stage === "confirming") && (
+          <>
+            <p style={styles.statusSubtext}>Your browser blocked the checkout popup.</p>
+            <button
+              onClick={() => window.open(checkoutUrlRef.current!, "_blank", "noopener,noreferrer")}
+              style={styles.secondaryLinkBtn}
+            >
+              <span style={styles.secondaryLinkText}>Open payment page</span>
+            </button>
+          </>
+        )}
+
+        {stage === "confirming" && (
+          <button onClick={() => navigate("/student/home")} style={styles.secondaryLinkBtn}>
+            <span style={styles.secondaryLinkText}>View my dashboard now</span>
+          </button>
+        )}
       </div>
     );
   }
@@ -120,6 +145,11 @@ export default function MealBoostScreen() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate(-1)} style={styles.backRow}>
+        <ArrowLeft size={16} color={COLORS.primary} />
+        <span style={styles.backText}>Back</span>
+      </button>
+
       <div style={styles.iconRow}>
         <div style={styles.modeIcon}>
           <Zap size={16} color={COLORS.primary} />
@@ -148,6 +178,11 @@ export default function MealBoostScreen() {
       <input style={styles.input} type="tel" inputMode="tel" placeholder="07XX XXX XXX" value={phone} onChange={(e) => setPhone(e.target.value)} />
 
       {error && <p style={styles.error}>{error}</p>}
+      {stage === "error" && (
+        <button onClick={() => navigate("/student/home")} style={{ ...styles.secondaryLinkBtn, alignSelf: "center" }}>
+          <span style={styles.secondaryLinkText}>Check my dashboard instead — a payment may still confirm</span>
+        </button>
+      )}
 
       <PrimaryButton onPress={startPayment} style={{ marginTop: 20 }}>
         Boost my plan
@@ -161,10 +196,14 @@ export default function MealBoostScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, display: "flex", flexDirection: "column" },
+  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
+  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
   center: { flex: 1, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
   statusText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.textOnDark, marginTop: 16, textAlign: "center" },
   statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 6, textAlign: "center" },
+  secondaryLinkBtn: { marginTop: 18 },
+  secondaryLinkText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textAlign: "center" },
   iconRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8 },
   modeIcon: {
     width: 26,

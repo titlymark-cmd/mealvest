@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { Coffee, Sun, Moon, Cookie, GlassWater, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, Coffee, Sun, Moon, Cookie, GlassWater, UtensilsCrossed } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
@@ -51,6 +51,11 @@ export default function HotelMenuScreen() {
 
   return (
     <div style={styles.container}>
+      <button onClick={() => navigate(-1)} style={styles.backRow}>
+        <ArrowLeft size={16} color={COLORS.primary} />
+        <span style={styles.backText}>Back</span>
+      </button>
+
       <h1 style={styles.title}>{hotelName}</h1>
       <p style={styles.subtitle}>Pick a meal to request, or continue to set up your plan.</p>
 
@@ -114,7 +119,9 @@ export default function HotelMenuScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, paddingBottom: 100, position: "relative", display: "flex", flexDirection: "column" },
+  container: { flex: 1, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, paddingBottom: 100, position: "relative", display: "flex", flexDirection: "column" },
+  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
   title: { fontSize: 22, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0 },
   subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 16 },
   center: { display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 40, paddingBottom: 40 },
