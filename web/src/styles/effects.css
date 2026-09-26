@@ -108,6 +108,18 @@ textarea:focus-visible {
   border-color: #ff8a3d !important;
 }
 
+/* Opt-out for a borderless input nested inside its own pill/card
+   container (e.g. AdminStudentsScreen's search bar) — the focus ring
+   above reads as a stray inner "groove" there, since the container
+   already draws the border. The container itself takes the focus
+   color instead (its own inline style, driven by the input's onFocus/
+   onBlur), so this just silences the input's own ring. */
+input.mv-input-plain:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border-color: transparent !important;
+}
+
 /* Thin, on-brand scrollbars in the app's own scroll containers
    (screens scroll themselves, not the page — see reset.css), instead
    of the browser's bulky default. Firefox + WebKit only; unsupported

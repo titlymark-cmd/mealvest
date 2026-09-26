@@ -18,6 +18,9 @@ export default function AdminStudentsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+
+  const DISPLAY_LIMIT = 30;
 
   const load = useCallback(async () => {
     try {
@@ -34,11 +37,14 @@ export default function AdminStudentsScreen() {
     load();
   }, [load]);
 
-  const filtered = useMemo(() => {
+  const matched = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return students;
     return students.filter((s) => s.full_name.toLowerCase().includes(q));
   }, [students, query]);
+
+  const filtered = matched.slice(0, DISPLAY_LIMIT);
+  const hiddenCount = matched.length - filtered.length;
 
   if (loading) {
     return (
@@ -57,16 +63,25 @@ export default function AdminStudentsScreen() {
 
       {error && <p style={styles.errorText}>{error}</p>}
 
-      <div style={styles.searchBar}>
-        <Search size={16} color={COLORS.textMuted} />
+      <div style={{ ...styles.searchBar, borderColor: searchFocused ? "#ff8a3d" : COLORS.borderSoft }}>
+        <Search size={16} color={searchFocused ? "#ff8a3d" : COLORS.textMuted} />
         <input
+          className="mv-input-plain"
           style={styles.searchInput}
           placeholder="Search students by name"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
           autoCapitalize="none"
         />
       </div>
+
+      {hiddenCount > 0 && (
+        <p style={styles.cropNote}>
+          Showing {filtered.length} of {matched.length}{query ? " matching" : ""} students — search to find someone specific.
+        </p>
+      )}
 
       {filtered.length === 0 ? (
         <Card style={styles.emptyCard}>
@@ -135,11 +150,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
     backgroundColor: COLORS.cardWhite,
-    border: `1px solid ${COLORS.borderSoft}`,
+    border: "1px solid",
     borderRadius: RADIUS.pill,
     padding: "10px 16px",
-    marginBottom: 18,
+    marginBottom: 12,
     maxWidth: 360,
+    transition: "border-color 160ms ease",
   },
   searchInput: {
     flex: 1,
@@ -147,9 +163,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     fontSize: 13,
     color: COLORS.text,
+    border: "none",
     outline: "none",
     backgroundColor: "transparent",
   },
+  cropNote: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textOnDarkMuted, marginTop: -4, marginBottom: 16 },
   emptyCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 40 },
   emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textFaint, margin: 0, textAlign: "center" },
   grid: { display: "grid", gap: 16, paddingBottom: 24 },
