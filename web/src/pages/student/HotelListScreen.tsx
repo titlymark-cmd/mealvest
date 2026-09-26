@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Store, ChevronRight, MapPin, LocateFixed, LogOut } from "lucide-react";
+import { Store, ChevronRight, MapPin, Search, LogOut } from "lucide-react";
 import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT, glow } from "../../styles/theme";
-import { fetchHotels, fetchNearbyHotels, Hotel } from "../../services/hotelsApi";
-import { getCurrentLocation } from "../../services/locationService";
+import { COLORS, FONTS, RADIUS } from "../../styles/theme";
+import { fetchHotels, Hotel } from "../../services/hotelsApi";
 import { useAuth } from "../../context/AuthContext";
+import { useWindowSize } from "../../hooks/useWindowSize";
+
+const MOBILE_BREAKPOINT = 768;
 
 // Deterministic (not random) badge color per hotel, so the same hotel
 // always gets the same color across renders/reloads — hashes the id
@@ -23,16 +25,12 @@ function badgeColorFor(id: string): string {
 export default function HotelListScreen() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const { width } = useWindowSize();
+  const isMobile = width < MOBILE_BREAKPOINT;
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Nearby-search state — additive to the existing manual browse
-  // list below, per "do not redesign existing UI/flow", just extends it.
-  const [locating, setLocating] = useState(false);
-  const [locationNotice, setLocationNotice] = useState<string | null>(null);
-  const [studentLocation, setStudentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [nearestHotel, setNearestHotel] = useState<Hotel | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     fetchHotels()
@@ -41,32 +39,11 @@ export default function HotelListScreen() {
       .finally(() => setLoading(false));
   }, []);
 
-  const findNearMe = async () => {
-    setLocating(true);
-    setLocationNotice(null);
-    try {
-      const result = await getCurrentLocation();
-      if (result.status !== "granted" || !result.coords) {
-        // Spec requirement: denial/unavailable/timeout must never
-        // crash the app — just show a message and let the student
-        // keep using the manual list below.
-        setLocationNotice(result.message);
-        return;
-      }
-      setStudentLocation(result.coords);
-      const nearby = await fetchNearbyHotels(result.coords.latitude, result.coords.longitude);
-      setNearestHotel(nearby.nearestHotel);
-      if (nearby.hotels.length > 0) {
-        setHotels(nearby.hotels); // replace the plain list with distance-sorted results
-      } else {
-        setLocationNotice("No MEALVEST hotels with a set location were found near you yet.");
-      }
-    } catch (err) {
-      setLocationNotice(err instanceof Error ? err.message : "Could not search nearby hotels.");
-    } finally {
-      setLocating(false);
-    }
-  };
+  const filteredHotels = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return hotels;
+    return hotels.filter((h) => h.name.toLowerCase().includes(q));
+  }, [hotels, query]);
 
   const openOnMap = (hotel: Hotel) => {
     // HotelMapScreen is carried over unwired in this migration (it
@@ -75,7 +52,7 @@ export default function HotelListScreen() {
     // it never shipped in the original web bundle either). This link
     // matches that exact do-nothing status rather than building out
     // new map functionality.
-    navigate("/student/hotels/map", { state: { hotel, studentLocation } });
+    navigate("/student/hotels/map", { state: { hotel, studentLocation: null } });
   };
 
   return (
@@ -90,28 +67,16 @@ export default function HotelListScreen() {
         </button>
       </div>
 
-      <button
-        onClick={findNearMe}
-        disabled={locating}
-        className={locating ? undefined : "mv-action mv-action-no-ring"}
-        style={{ ...styles.nearMeButtonWrap, ...glow(COLORS.primary, 10) }}
-      >
-        <div style={styles.nearMeButton}>
-          <LocateFixed size={16} color="#fff" />
-          <span style={styles.nearMeText}>{locating ? "Finding hotels near you…" : "Find hotels near me"}</span>
-        </div>
-      </button>
-
-      {locationNotice && <p style={styles.notice}>{locationNotice}</p>}
-
-      {nearestHotel && (
-        <div style={styles.nearestBadge}>
-          <MapPin size={12} color={COLORS.primary} />
-          <span style={styles.nearestBadgeText}>
-            Nearest: {nearestHotel.name} · {nearestHotel.distance_km?.toFixed(1)} km
-          </span>
-        </div>
-      )}
+      <div style={styles.searchWrap}>
+        <Search size={16} color={COLORS.textOnDarkMuted} style={styles.searchIcon} />
+        <input
+          style={styles.searchInput}
+          placeholder="Search hotels by name"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoCapitalize="none"
+        />
+      </div>
 
       {loading && (
         <div style={styles.center}>
@@ -128,12 +93,17 @@ export default function HotelListScreen() {
           <p style={styles.empty}>No hotels are registered yet. Check back soon.</p>
         </div>
       )}
+      {!loading && !error && hotels.length > 0 && filteredHotels.length === 0 && (
+        <div style={styles.center}>
+          <p style={styles.empty}>No hotels match "{query}".</p>
+        </div>
+      )}
 
-      <div style={styles.grid}>
-        {hotels.map((item) => (
+      <div style={{ ...styles.grid, gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)" }}>
+        {filteredHotels.map((item) => (
           <div key={item.id} style={styles.gridCard}>
             <button
-              className="mv-action mv-action-no-ring"
+              className="mv-card-lift"
               style={styles.cardMain}
               onClick={() => navigate(`/student/hotels/${item.id}/menu`, { state: { hotelName: item.name } })}
             >
@@ -159,10 +129,7 @@ export default function HotelListScreen() {
                 </div>
                 <div style={styles.locationRow}>
                   <MapPin size={12} color={COLORS.textMuted} />
-                  <span style={styles.hotelLocation}>
-                    {item.location}
-                    {typeof item.distance_km === "number" ? ` · ${item.distance_km.toFixed(1)} km` : ""}
-                  </span>
+                  <span style={styles.hotelLocation}>{item.location}</span>
                 </div>
                 {item.description && <p style={styles.hotelDescription}>{item.description}</p>}
               </div>
@@ -198,52 +165,38 @@ const styles: Record<string, React.CSSProperties> = {
     marginLeft: 12,
     flexShrink: 0,
   },
-  nearMeButtonWrap: { borderRadius: RADIUS.sm, width: "100%" },
-  nearMeButton: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderRadius: RADIUS.sm,
-    paddingTop: 12,
-    paddingBottom: 12,
-    marginBottom: 10,
-    background: `linear-gradient(90deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
+  searchWrap: { position: "relative", display: "flex", alignItems: "center", marginBottom: 20 },
+  searchIcon: { position: "absolute", left: 16, pointerEvents: "none" },
+  searchInput: {
+    width: "100%",
+    backgroundColor: "rgba(252,244,234,0.06)",
+    borderRadius: RADIUS.pill,
+    border: `1.5px solid ${COLORS.border}`,
+    paddingTop: 14,
+    paddingBottom: 14,
+    paddingLeft: 44,
+    paddingRight: 16,
+    fontSize: 14,
+    fontFamily: FONTS.bodyMedium,
+    fontWeight: 500,
+    color: COLORS.textOnDark,
+    outline: "none",
   },
-  nearMeText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13 },
-  notice: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.accent, marginBottom: 10, marginTop: 0 },
-  nearestBadge: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "rgba(229,72,46,0.15)",
-    borderRadius: RADIUS.sm,
-    paddingTop: 6,
-    paddingBottom: 6,
-    paddingLeft: 10,
-    paddingRight: 10,
-    marginBottom: 12,
-    alignSelf: "flex-start",
-  },
-  nearestBadgeText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.primary },
   center: { display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 40, paddingBottom: 40 },
   error: { color: COLORS.danger, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
   empty: { color: COLORS.textOnDarkMuted, textAlign: "center", fontFamily: FONTS.body },
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
     gap: 16,
     paddingBottom: 24,
-    maxWidth: 1100,
+    maxWidth: 1320,
     width: "100%",
     margin: "0 auto",
   },
   // Card surface matches components/Card.tsx (bg/border/shadow) but
   // has no padding of its own and, crucially, no overflow:hidden — the
   // banner clips its own corners locally (bannerClip below) so the
-  // .mv-action hover-scale on cardMain and the initial badge (which
+  // .mv-card-lift hover-lift on cardMain and the initial badge (which
   // deliberately overlaps outside the banner's box) are never clipped.
   gridCard: {
     backgroundColor: COLORS.card,
@@ -252,6 +205,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 1px 2px rgba(29,21,17,0.12), 0 8px 20px rgba(29,21,17,0.16)",
     display: "flex",
     flexDirection: "column",
+    minWidth: 0,
   },
   cardMain: { display: "flex", flexDirection: "column", alignItems: "stretch", width: "100%", borderRadius: RADIUS.sm, textAlign: "left" },
   bannerWrap: { position: "relative", width: "100%" },

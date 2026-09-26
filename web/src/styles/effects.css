@@ -98,6 +98,28 @@
   }
 }
 
+/* Card-lift hover: no scale, no ring — just a gentle upward shift and
+   a deeper shadow. Used for browsing grids (e.g. the student hotel
+   list) where a scale-up made cards overlap their neighbors. */
+.mv-card-lift {
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.mv-card-lift:hover,
+.mv-card-lift:focus-visible {
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-card-lift {
+    transition: none;
+  }
+  .mv-card-lift:hover,
+  .mv-card-lift:focus-visible {
+    transform: none;
+  }
+}
+
 /* Keyboard/focus polish for form inputs — there was no visible focus
    ring anywhere before this (every input sets outline:none inline),
    which is both an accessibility gap and read as unfinished. */
