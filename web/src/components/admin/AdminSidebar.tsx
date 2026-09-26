@@ -17,6 +17,12 @@ const NAV_ITEMS = [
 // same breakpoint spirit as AuthScreen's own desktop/mobile split.
 export const ADMIN_MOBILE_BREAKPOINT = 768;
 
+// Matches styles.sidebar.width below — exported so AdminRoutes' shell
+// can offset the scrollable content by exactly this much, since the
+// sidebar is position:fixed (out of normal flow) and won't push
+// content over on its own.
+export const ADMIN_SIDEBAR_WIDTH = 232;
+
 export function AdminSidebar() {
   const { logout } = useAuth();
   const { width } = useWindowSize();
@@ -82,9 +88,12 @@ export function AdminSidebar() {
 
 const styles: Record<string, React.CSSProperties> = {
   sidebar: {
-    width: 232,
-    flexShrink: 0,
-    minHeight: "100vh",
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: ADMIN_SIDEBAR_WIDTH,
+    height: "100vh",
+    zIndex: 40,
     backgroundColor: COLORS.bgDeep,
     borderRight: `1px solid ${COLORS.border}`,
     display: "flex",
