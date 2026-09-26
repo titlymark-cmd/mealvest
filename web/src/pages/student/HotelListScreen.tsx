@@ -101,9 +101,8 @@ export default function HotelListScreen() {
 
       <div style={{ ...styles.grid, gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)" }}>
         {filteredHotels.map((item) => (
-          <div key={item.id} style={styles.gridCard}>
+          <div key={item.id} className="mv-card-lift" style={styles.gridCard}>
             <button
-              className="mv-card-lift"
               style={styles.cardMain}
               onClick={() => navigate(`/student/hotels/${item.id}/menu`, { state: { hotelName: item.name } })}
             >
@@ -196,8 +195,10 @@ const styles: Record<string, React.CSSProperties> = {
   // Card surface matches components/Card.tsx (bg/border/shadow) but
   // has no padding of its own and, crucially, no overflow:hidden — the
   // banner clips its own corners locally (bannerClip below) so the
-  // .mv-card-lift hover-lift on cardMain and the initial badge (which
-  // deliberately overlaps outside the banner's box) are never clipped.
+  // initial badge (which deliberately overlaps outside the banner's
+  // box) is never clipped. .mv-card-lift lives on this whole div (not
+  // the inner button) so hover lifts the entire card — border, shadow
+  // and all — as one piece, not just the content inside it.
   gridCard: {
     backgroundColor: COLORS.card,
     borderRadius: RADIUS.sm,

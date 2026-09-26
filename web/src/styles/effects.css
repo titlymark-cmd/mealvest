@@ -100,13 +100,18 @@
 
 /* Card-lift hover: no scale, no ring — just a gentle upward shift and
    a deeper shadow. Used for browsing grids (e.g. the student hotel
-   list) where a scale-up made cards overlap their neighbors. */
+   list) where a scale-up made cards overlap their neighbors. Applied
+   to the card's own container (not an inner content wrapper), so the
+   whole card — border, shadow and all — moves as one piece.
+   :focus-within (rather than :focus-visible) covers keyboard focus
+   here since the container itself isn't focusable — a button nested
+   inside it is. */
 .mv-card-lift {
   transition: transform 200ms ease, box-shadow 200ms ease;
 }
 
 .mv-card-lift:hover,
-.mv-card-lift:focus-visible {
+.mv-card-lift:focus-within {
   transform: translateY(-4px);
 }
 
@@ -115,7 +120,7 @@
     transition: none;
   }
   .mv-card-lift:hover,
-  .mv-card-lift:focus-visible {
+  .mv-card-lift:focus-within {
     transform: none;
   }
 }
