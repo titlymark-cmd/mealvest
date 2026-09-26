@@ -47,6 +47,7 @@ export default function BudgetOnboardingScreen() {
   const { authFetch, user } = useAuth();
 
   const [amount, setAmount] = useState("5000");
+  const [amountFocused, setAmountFocused] = useState(false);
   const [days, setDays] = useState("30");
   const [phone, setPhone] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -209,9 +210,23 @@ export default function BudgetOnboardingScreen() {
       )}
 
       <span style={styles.label}>How much do you have for food?</span>
-      <div style={styles.amountRow}>
+      <div
+        style={{
+          ...styles.amountRow,
+          borderColor: amountFocused ? "#ff8a3d" : COLORS.border,
+          boxShadow: amountFocused ? "0 0 0 3px rgba(245, 166, 35, 0.3)" : "none",
+        }}
+      >
         <span style={styles.currencyPrefix}>KSh</span>
-        <input style={styles.amountInput} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input
+          className="mv-input-plain"
+          style={styles.amountInput}
+          inputMode="numeric"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onFocus={() => setAmountFocused(true)}
+          onBlur={() => setAmountFocused(false)}
+        />
       </div>
       <div style={styles.pillRow}>
         {PRESETS.map((v) => (
@@ -284,12 +299,24 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     backgroundColor: "rgba(252,244,234,0.06)",
     borderRadius: RADIUS.sm,
-    border: `1.5px solid ${COLORS.border}`,
+    border: "1.5px solid",
     paddingLeft: 16,
     paddingRight: 16,
+    transition: "border-color 160ms ease, box-shadow 160ms ease",
   },
   currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.primaryLight, marginRight: 8 },
-  amountInput: { flex: 1, fontSize: 18, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, paddingTop: 14, paddingBottom: 14, backgroundColor: "transparent", outline: "none" },
+  amountInput: {
+    flex: 1,
+    fontSize: 18,
+    fontFamily: FONTS.displayBold,
+    fontWeight: 800,
+    color: COLORS.textOnDark,
+    paddingTop: 14,
+    paddingBottom: 14,
+    backgroundColor: "transparent",
+    border: "none",
+    outline: "none",
+  },
   input: {
     backgroundColor: "rgba(252,244,234,0.06)",
     borderRadius: RADIUS.sm,
