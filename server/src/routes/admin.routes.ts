@@ -12,6 +12,7 @@ import {
   getDailyLedger,
   getTopHotels,
   getAlerts,
+  listStudents,
 } from "../controllers/admin.controller";
 
 export const adminRouter = Router();
@@ -21,6 +22,7 @@ adminRouter.get("/overview", getAdminOverview);
 adminRouter.get("/alerts", getAlerts);
 adminRouter.get("/ledger", getDailyLedger);
 adminRouter.get("/hotels/top", getTopHotels);
+adminRouter.get("/students", listStudents);
 adminRouter.get("/hotels", listHotels);
 adminRouter.post("/hotels", createHotel);
 adminRouter.patch("/hotels/:hotelId/suspend", suspendHotel);

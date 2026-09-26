@@ -441,3 +441,47 @@ export async function getAlerts(_req: AuthedRequest, res: Response, next: NextFu
     next(err);
   }
 }
+
+/**
+ * GET /api/admin/students?search=<name>
+ *
+ * Each student's CURRENT plan is their most recent active budget row
+ * (a student can have older completed/cancelled budgets, but only one
+ * active one at a time per budgetService's own invariant) — real
+ * amount/duration/hotel columns, never estimated. Students with no
+ * active budget still show up, with a null plan the frontend renders
+ * as "No active plan" rather than inventing one.
+ */
+export async function listStudents(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const search = (req.query.search as string | undefined)?.trim();
+    const params: unknown[] = [];
+    let searchClause = "";
+    if (search) {
+      params.push(`%${search}%`);
+      searchClause = `AND s.full_name ILIKE $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT u.id, u.email, s.full_name, s.institution, s.admission_number,
+              b.id AS budget_id, b.total_amount, b.remaining_amount, b.daily_allowance,
+              b.number_of_days, b.start_date, b.end_date, b.status AS budget_status,
+              h.id AS hotel_id, h.name AS hotel_name
+       FROM users u
+       JOIN students s ON s.user_id = u.id
+       LEFT JOIN LATERAL (
+         SELECT * FROM budgets WHERE budgets.user_id = u.id AND budgets.status = 'active'
+         ORDER BY budgets.created_at DESC LIMIT 1
+       ) b ON true
+       LEFT JOIN hotels h ON h.id = b.hotel_id
+       WHERE u.role = 'student' ${searchClause}
+       ORDER BY s.full_name ASC
+       LIMIT 300`,
+      params
+    );
+
+    res.json({ students: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}

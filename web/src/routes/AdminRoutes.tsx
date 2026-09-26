@@ -4,6 +4,7 @@ import { AdminSidebar, ADMIN_MOBILE_BREAKPOINT, ADMIN_SIDEBAR_WIDTH } from "../c
 import { useWindowSize } from "../hooks/useWindowSize";
 import AdminOverviewScreen from "../pages/admin/AdminOverviewScreen";
 import AdminHotelsScreen from "../pages/admin/AdminHotelsScreen";
+import AdminStudentsScreen from "../pages/admin/AdminStudentsScreen";
 import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
 import AdminPaymentsScreen from "../pages/admin/AdminPaymentsScreen";
 import AdminCreateHotelScreen from "../pages/admin/AdminCreateHotelScreen";
@@ -47,6 +48,7 @@ export function AdminRoutes() {
     <Routes>
       <Route path="/admin/home" element={<AdminShell><AdminOverviewScreen /></AdminShell>} />
       <Route path="/admin/hotels" element={<AdminShell><AdminHotelsScreen /></AdminShell>} />
+      <Route path="/admin/students" element={<AdminShell><AdminStudentsScreen /></AdminShell>} />
       <Route path="/admin/orders" element={<AdminShell><AdminOrdersScreen /></AdminShell>} />
       <Route path="/admin/payments" element={<AdminShell><AdminPaymentsScreen /></AdminShell>} />
       <Route path="/admin/create-hotel" element={<AdminCreateHotelScreen />} />

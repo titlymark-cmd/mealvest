@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Building2, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2 } from "lucide-react";
+import { Building2, Users, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2, ChevronRight, LogOut } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
@@ -30,7 +30,7 @@ function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: s
 }
 
 export default function AdminOverviewScreen() {
-  const { authFetch } = useAuth();
+  const { authFetch, logout } = useAuth();
   const navigate = useNavigate();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [ledger, setLedger] = useState<DailyLedger | null>(null);
@@ -75,6 +75,16 @@ export default function AdminOverviewScreen() {
     }
   };
 
+  // Combine both alert kinds into one recency-sorted list and cap the
+  // card at 4 rows — the full count still shows in the subtitle above
+  // and via "View all orders" below, this just keeps the card compact.
+  const visibleAlerts = useMemo(() => {
+    if (!alerts) return [];
+    const hotels = alerts.pendingHotels.map((h) => ({ kind: "hotel" as const, hotel: h, at: h.created_at }));
+    const payments = alerts.failedPayments.map((p) => ({ kind: "payment" as const, payment: p, at: p.created_at }));
+    return [...hotels, ...payments].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 4);
+  }, [alerts]);
+
   if (loading) {
     return (
       <div style={styles.center}>
@@ -112,12 +122,17 @@ export default function AdminOverviewScreen() {
             )}
           </div>
         </div>
-        {ledger && (
-          <div style={styles.collectedPill}>
-            <span style={styles.collectedLabel}>Collected today</span>
-            <span style={styles.collectedValue}>{formatKsh(ledger.plansCollected.amount)}</span>
-          </div>
-        )}
+        <div style={styles.bannerRightGroup}>
+          {ledger && (
+            <div style={styles.collectedPill}>
+              <span style={styles.collectedLabel}>Collected today</span>
+              <span style={styles.collectedValue}>{formatKsh(ledger.plansCollected.amount)}</span>
+            </div>
+          )}
+          <button onClick={() => logout()} style={styles.bannerLogoutBtn} aria-label="Log out">
+            <LogOut size={16} color="#fff" />
+          </button>
+        </div>
       </div>
 
       <div style={styles.statsGrid}>
@@ -131,10 +146,10 @@ export default function AdminOverviewScreen() {
         )}
         {overview && (
           <StatCard
-            icon={<Building2 size={16} color={COLORS.primary} />}
-            label="Partner hotels"
-            value={String(overview.hotels.total)}
-            sub={Number(overview.hotels.pending) > 0 ? `${overview.hotels.pending} awaiting review` : "All reviewed"}
+            icon={<Users size={16} color={COLORS.primary} />}
+            label="Students"
+            value={String(overview.students)}
+            sub="Registered with MEALVEST"
           />
         )}
         {ledger && (
@@ -166,39 +181,44 @@ export default function AdminOverviewScreen() {
 
           {needsAttentionCount === 0 && <p style={styles.emptyText}>Nothing needs attention right now.</p>}
 
-          {alerts?.pendingHotels.map((h) => (
-            <div key={h.id} style={styles.attentionRow}>
-              <div style={{ flex: 1 }}>
-                <span style={styles.attentionName}>{h.name}</span>
-                <span style={styles.attentionMeta}>
-                  {h.location || "No location set"} · Requested {timeAgo(h.created_at)}
-                </span>
+          {visibleAlerts.map((item) =>
+            item.kind === "hotel" ? (
+              <div key={`hotel-${item.hotel.id}`} style={styles.attentionRow}>
+                <div style={{ flex: 1 }}>
+                  <span style={styles.attentionName}>{item.hotel.name}</span>
+                  <span style={styles.attentionMeta}>
+                    {item.hotel.location || "No location set"} · Requested {timeAgo(item.hotel.created_at)}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleApprove(item.hotel.id)}
+                  disabled={actingOn === item.hotel.id}
+                  style={{ ...styles.attentionBtn, backgroundColor: COLORS.success }}
+                >
+                  <span style={styles.attentionBtnText}>Approve</span>
+                </button>
               </div>
-              <button
-                onClick={() => handleApprove(h.id)}
-                disabled={actingOn === h.id}
-                style={{ ...styles.attentionBtn, backgroundColor: COLORS.success }}
-              >
-                <span style={styles.attentionBtnText}>Approve</span>
-              </button>
-            </div>
-          ))}
+            ) : (
+              <div key={`payment-${item.payment.id}`} style={styles.attentionRow}>
+                <div style={{ flex: 1 }}>
+                  <span style={styles.attentionName}>
+                    Failed payment · {item.payment.student_name || item.payment.student_email}
+                  </span>
+                  <span style={styles.attentionMeta}>
+                    {formatKsh(item.payment.amount)} · {item.payment.hotel_name || "No hotel"} · {timeAgo(item.payment.created_at)}
+                  </span>
+                </div>
+                <button onClick={() => navigate("/admin/payments")} style={{ ...styles.attentionBtn, backgroundColor: COLORS.bgDeep }}>
+                  <span style={styles.attentionBtnText}>Follow up</span>
+                </button>
+              </div>
+            )
+          )}
 
-          {alerts?.failedPayments.map((p) => (
-            <div key={p.id} style={styles.attentionRow}>
-              <div style={{ flex: 1 }}>
-                <span style={styles.attentionName}>
-                  Failed payment · {p.student_name || p.student_email}
-                </span>
-                <span style={styles.attentionMeta}>
-                  {formatKsh(p.amount)} · {p.hotel_name || "No hotel"} · {timeAgo(p.created_at)}
-                </span>
-              </div>
-              <button onClick={() => navigate("/admin/payments")} style={{ ...styles.attentionBtn, backgroundColor: COLORS.bgDeep }}>
-                <span style={styles.attentionBtnText}>Follow up</span>
-              </button>
-            </div>
-          ))}
+          <button onClick={() => navigate("/admin/orders")} style={styles.viewAllRow}>
+            <span style={styles.viewAllText}>View all orders</span>
+            <ChevronRight size={14} color={COLORS.primary} />
+          </button>
         </Card>
 
         <Card style={styles.panelCard}>
@@ -271,14 +291,25 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: COLORS.text,
   },
+  bannerRightGroup: { position: "relative", display: "flex", flexDirection: "row", alignItems: "center", gap: 12 },
   collectedPill: {
-    position: "relative",
     backgroundColor: "rgba(0,0,0,0.25)",
     borderRadius: RADIUS.md,
     padding: "14px 20px",
     display: "flex",
     flexDirection: "column",
     alignItems: "flex-end",
+  },
+  bannerLogoutBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    border: "1px solid rgba(255,255,255,0.35)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
   collectedLabel: { fontFamily: FONTS.body, fontSize: 11, color: "rgba(255,255,255,0.8)" },
   collectedValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: "#fff", marginTop: 2 },
@@ -306,6 +337,18 @@ const styles: Record<string, React.CSSProperties> = {
   attentionMeta: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
   attentionBtn: { borderRadius: RADIUS.sm, padding: "7px 12px", flexShrink: 0 },
   attentionBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#fff" },
+  viewAllRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTop: `1px solid ${COLORS.borderSoft}`,
+    width: "100%",
+  },
+  viewAllText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary },
   topHotelRow: { marginTop: 12 },
   topHotelHeader: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
   topHotelRank: {

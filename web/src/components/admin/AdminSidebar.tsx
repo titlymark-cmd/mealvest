@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { TrendingUp, Building2, ShoppingBag, CreditCard, LogOut } from "lucide-react";
+import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut } from "lucide-react";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
@@ -9,6 +9,7 @@ import logo from "../../assets/mealvest-logo.png";
 const NAV_ITEMS = [
   { to: "/admin/home", label: "Overview", icon: TrendingUp, end: true },
   { to: "/admin/hotels", label: "Hotels", icon: Building2 },
+  { to: "/admin/students", label: "Students", icon: Users },
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
   { to: "/admin/payments", label: "Payments", icon: CreditCard },
 ];
@@ -29,6 +30,10 @@ export function AdminSidebar() {
   const isMobile = width < ADMIN_MOBILE_BREAKPOINT;
 
   if (isMobile) {
+    // No "Log out" item here — with 5 nav items already, a 6th tab
+    // would crowd the bar. Logout instead lives on the Overview
+    // banner (see AdminOverviewScreen), reachable from every screen
+    // via the Overview tab.
     return (
       <nav style={mobileStyles.bar}>
         {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -45,10 +50,6 @@ export function AdminSidebar() {
             <span style={mobileStyles.label}>{label}</span>
           </NavLink>
         ))}
-        <button onClick={() => logout()} style={mobileStyles.item}>
-          <LogOut size={18} color={COLORS.danger} />
-          <span style={{ ...mobileStyles.label, color: COLORS.danger }}>Log out</span>
-        </button>
       </nav>
     );
   }

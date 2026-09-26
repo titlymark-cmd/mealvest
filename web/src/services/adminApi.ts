@@ -222,3 +222,29 @@ export async function fetchWithdrawals(authFetch: AuthFetch, status?: string): P
   const data = await parseOrError<{ withdrawals: AdminWithdrawal[] }>(res, "Could not load withdrawals.");
   return data.withdrawals;
 }
+
+/** budget_* fields are null when the student has no active plan right now. */
+export interface AdminStudent {
+  id: string;
+  email: string;
+  full_name: string;
+  institution: string | null;
+  admission_number: string | null;
+  budget_id: string | null;
+  total_amount: string | null;
+  remaining_amount: string | null;
+  daily_allowance: string | null;
+  number_of_days: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  budget_status: string | null;
+  hotel_id: string | null;
+  hotel_name: string | null;
+}
+
+export async function fetchAdminStudents(authFetch: AuthFetch, search?: string): Promise<AdminStudent[]> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await authFetch(`/api/admin/students${qs}`);
+  const data = await parseOrError<{ students: AdminStudent[] }>(res, "Could not load students.");
+  return data.students;
+}
