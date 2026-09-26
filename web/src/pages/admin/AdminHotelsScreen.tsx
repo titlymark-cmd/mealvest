@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { Store, Plus, Pencil, MapPin } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { timeAgo, badgeColorFor } from "../../components/admin/adminFormat";
+import { AddHotelModal } from "../../components/admin/AddHotelModal";
 import {
   fetchAdminHotels,
   approveHotel,
@@ -30,13 +30,13 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function AdminHotelsScreen() {
   const { authFetch } = useAuth();
-  const navigate = useNavigate();
   const [hotels, setHotels] = useState<AdminHotel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [editingCommissionId, setEditingCommissionId] = useState<string | null>(null);
   const [commissionDraft, setCommissionDraft] = useState("");
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -112,11 +112,21 @@ export default function AdminHotelsScreen() {
           <h1 style={styles.title}>Hotels</h1>
           <p style={styles.subtitle}>{hotels.length} partner hotel{hotels.length === 1 ? "" : "s"} registered with MEALVEST.</p>
         </div>
-        <button className="mv-action" onClick={() => navigate("/admin/create-hotel")} style={styles.addBtn}>
+        <button className="mv-action" onClick={() => setShowAddModal(true)} style={styles.addBtn}>
           <Plus size={14} color={COLORS.primary} />
           <span style={styles.addBtnText}>Add hotel</span>
         </button>
       </div>
+
+      {showAddModal && (
+        <AddHotelModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={() => {
+            setShowAddModal(false);
+            load();
+          }}
+        />
+      )}
 
       {error && <p style={styles.errorText}>{error}</p>}
 
