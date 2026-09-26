@@ -220,7 +220,8 @@ export async function listHotels(_req: AuthedRequest, res: Response, next: NextF
   try {
     const result = await pool.query(
       `SELECT id, name, location, status, contract_start_date, contract_end_date,
-              registration_fee, commission_percent, loyalty_incentive_percent, payment_method
+              registration_fee, commission_percent, loyalty_incentive_percent, payment_method,
+              image_url, created_at
        FROM hotels ORDER BY created_at DESC`
     );
     res.json({ hotels: result.rows });
@@ -263,16 +264,179 @@ export async function listAllOrders(req: AuthedRequest, res: Response, next: Nex
   }
 }
 
-export async function listWithdrawals(_req: AuthedRequest, res: Response, next: NextFunction) {
+/**
+ * status=unresolved (the default for the admin "Follow-up" list) means
+ * "not yet completed" — pending/processing/failed/rejected — since
+ * those are the withdrawals that still need someone's attention.
+ * Passing an explicit status (including 'completed') overrides that.
+ */
+export async function listWithdrawals(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
+    const status = req.query.status as string | undefined;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (status && status !== "unresolved") {
+      params.push(status);
+      conditions.push(`w.status = $${params.length}`);
+    } else if (!status || status === "unresolved") {
+      conditions.push(`w.status IN ('pending', 'processing', 'failed', 'rejected')`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await pool.query(
-      `SELECT w.*, u.email AS student_email, h.name AS hotel_name
+      `SELECT w.*, u.email AS student_email, s.full_name AS student_name, h.name AS hotel_name
        FROM savings_withdrawals w
        JOIN users u ON u.id = w.user_id
+       LEFT JOIN students s ON s.user_id = w.user_id
        LEFT JOIN hotels h ON h.id = w.hotel_id
-       ORDER BY w.created_at DESC LIMIT 200`
+       ${where}
+       ORDER BY w.created_at DESC LIMIT 200`,
+      params
     );
     res.json({ withdrawals: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/ledger?date=YYYY-MM-DD (defaults to today)
+ *
+ * Every figure here comes from a real, already-frozen column —
+ * nothing is estimated or extrapolated:
+ *   - plansCollected: successful M-Pesa top-ups (transactions.type =
+ *     'budget_topup') on that date — this is the ONLY transaction
+ *     type this codebase ever actually creates (order redemption
+ *     spends from an already-topped-up budget, it doesn't create a
+ *     fresh transaction row).
+ *   - mealsRedeemed: orders actually redeemed that date (real
+ *     redeemed_at timestamp, not order-creation time).
+ *   - failedPayments: failed top-up attempts that date.
+ *   - commissionEarned: orders.commission_amount, frozen onto the
+ *     order at redemption time (migration 020) — not recomputed here.
+ */
+export async function getDailyLedger(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const dateParam = req.query.date as string | undefined;
+    const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    if (dateParam && !dateSchema.safeParse(dateParam).success) {
+      throw new ApiError(400, "VALIDATION_ERROR", "date must be in YYYY-MM-DD format.");
+    }
+    const date = dateParam || null; // NULL -> CURRENT_DATE in SQL below
+
+    const [plans, meals, failed, commission] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS count
+         FROM transactions
+         WHERE type = 'budget_topup' AND status = 'success'
+           AND created_at::date = COALESCE($1::date, CURRENT_DATE)`,
+        [date]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS count
+         FROM orders
+         WHERE status = 'redeemed' AND redeemed_at::date = COALESCE($1::date, CURRENT_DATE)`,
+        [date]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS count
+         FROM transactions
+         WHERE status = 'failed' AND created_at::date = COALESCE($1::date, CURRENT_DATE)`,
+        [date]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(commission_amount), 0) AS amount, COUNT(*) AS count
+         FROM orders
+         WHERE status = 'redeemed' AND redeemed_at::date = COALESCE($1::date, CURRENT_DATE)`,
+        [date]
+      ),
+    ]);
+
+    res.json({
+      date: dateParam || new Date().toISOString().slice(0, 10),
+      plansCollected: plans.rows[0],
+      mealsRedeemed: meals.rows[0],
+      failedPayments: failed.rows[0],
+      commissionEarned: commission.rows[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/hotels/top?period=today|all&limit=5
+ *
+ * Ranks active hotels by real redeemed-order revenue — never a
+ * fabricated "popularity" score. Hotels with zero redeemed orders in
+ * the window are excluded rather than shown with a misleading KSh 0.
+ */
+export async function getTopHotels(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const period = req.query.period === "all" ? "all" : "today";
+    const limitParam = Number(req.query.limit);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 && limitParam <= 20 ? Math.floor(limitParam) : 5;
+
+    const dateFilter = period === "today" ? "AND o.redeemed_at::date = CURRENT_DATE" : "";
+    const result = await pool.query(
+      `SELECT h.id, h.name, h.location,
+              COALESCE(SUM(o.amount), 0) AS revenue,
+              COUNT(o.id) AS orders_count
+       FROM hotels h
+       JOIN orders o ON o.hotel_id = h.id AND o.status = 'redeemed' ${dateFilter}
+       WHERE h.status = 'active'
+       GROUP BY h.id
+       HAVING COALESCE(SUM(o.amount), 0) > 0
+       ORDER BY revenue DESC
+       LIMIT $1`,
+      [limit]
+    );
+
+    res.json({ period, hotels: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/alerts
+ *
+ * "Needs attention" = things with a real pending action, composed
+ * from two already-real states — never a synthetic health score:
+ *   - hotels stuck at status='pending_verification' (an approve action
+ *     genuinely exists for these — see approveHotel/reactivateHotel)
+ *   - recently failed M-Pesa top-ups (real transactions.status='failed'
+ *     rows, not a made-up "issue" count)
+ */
+export async function getAlerts(_req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const [pendingHotels, failedPayments] = await Promise.all([
+      pool.query(
+        `SELECT id, name, location, created_at
+         FROM hotels
+         WHERE status = 'pending_verification'
+         ORDER BY created_at ASC
+         LIMIT 10`
+      ),
+      pool.query(
+        `SELECT t.id, t.amount, t.created_at, t.result_description,
+                s.full_name AS student_name, u.email AS student_email, h.name AS hotel_name
+         FROM transactions t
+         JOIN users u ON u.id = t.user_id
+         LEFT JOIN students s ON s.user_id = t.user_id
+         LEFT JOIN hotels h ON h.id = t.hotel_id
+         WHERE t.status = 'failed'
+         ORDER BY t.created_at DESC
+         LIMIT 10`
+      ),
+    ]);
+
+    res.json({
+      pendingHotels: pendingHotels.rows,
+      failedPayments: failedPayments.rows,
+      totalCount: pendingHotels.rows.length + failedPayments.rows.length,
+    });
   } catch (err) {
     next(err);
   }
