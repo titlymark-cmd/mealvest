@@ -247,11 +247,13 @@ function AuthScreenMobile({ isRegister, registerRole, onSwitchToRegister, onSwit
       <div style={styles.mobileScrim} />
 
       <div style={styles.mobileScroll}>
-        {isRegister ? (
-          <RegisterFormContent mode={registerRole} onSwitchToLogin={onSwitchToLogin} />
-        ) : (
-          <LoginFormContent onSwitchToRegister={onSwitchToRegister} />
-        )}
+        <div style={styles.mobileFormWrap}>
+          {isRegister ? (
+            <RegisterFormContent mode={registerRole} onSwitchToLogin={onSwitchToLogin} />
+          ) : (
+            <LoginFormContent onSwitchToRegister={onSwitchToRegister} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -270,17 +272,24 @@ const styles: Record<string, React.CSSProperties> = {
   formPanel: { display: "flex", flexDirection: "column", paddingLeft: FORM_PADDING, paddingRight: FORM_PADDING, paddingBottom: 40 },
   mobileRoot: { flex: 1, width: "100%", height: "100%", position: "relative", backgroundColor: COLORS.bg },
   mobileScrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(29,21,17,0.72)" },
+  // No justifyContent:"center" here on purpose — combined with
+  // overflowY:auto, centering an over-height flex child clips its
+  // leading edge outside the scrollable range in most browsers (you
+  // can scroll to see the bottom of a too-tall form, but never far
+  // enough to reach its top). Vertical centering is done below instead
+  // via margin:auto on the child, which degrades to normal top-down
+  // flow — fully scrollable to the very top — once content overflows.
   mobileScroll: {
     position: "relative",
     display: "flex",
     flexDirection: "column",
     flex: 1,
     height: "100%",
-    justifyContent: "center",
     alignItems: "center",
     padding: 24,
     paddingTop: 60,
     paddingBottom: 40,
     overflowY: "auto",
   },
+  mobileFormWrap: { width: "100%", display: "flex", flexDirection: "column", alignItems: "center", margin: "auto 0" },
 };
