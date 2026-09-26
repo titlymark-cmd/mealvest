@@ -88,7 +88,7 @@ export default function AdminOrdersScreen() {
           <p style={styles.emptyText}>No orders match this filter yet.</p>
         </Card>
       ) : (
-        <div style={{ ...styles.grid, gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
+        <div style={{ ...styles.grid, gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)" }}>
           {orders.map((o) => (
             <Card key={o.id} style={styles.orderCard}>
               <div style={styles.orderHeader}>
