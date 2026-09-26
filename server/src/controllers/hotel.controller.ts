@@ -68,30 +68,100 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
   try {
     const hotelId = await resolveHotelId(req);
 
-    const hotelResult = await pool.query(
-      `SELECT id, name, status, contract_start_date, contract_end_date,
-              commission_percent, registration_fee, payment_method, payment_details,
-              image_url, description
-       FROM hotels WHERE id = $1`,
-      [hotelId]
-    );
+    const [hotelResult, statsResult, menuCountResult] = await Promise.all([
+      pool.query(
+        `SELECT id, name, status, location, address, settlement_schedule, contract_start_date, contract_end_date,
+                commission_percent, registration_fee, payment_method, payment_details,
+                image_url, description
+         FROM hotels WHERE id = $1`,
+        [hotelId]
+      ),
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_orders,
+           COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
+           COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
+           COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
+           COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
+           COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
+           COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS commission_owed,
+           COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
+         FROM orders WHERE hotel_id = $1`,
+        [hotelId]
+      ),
+      pool.query("SELECT COUNT(*) AS menu_item_count FROM menu_items WHERE hotel_id = $1", [hotelId]),
+    ]);
+
     if (hotelResult.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
     const hotel = hotelResult.rows[0];
 
-    const statsResult = await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_orders,
-         COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
-         COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
-         COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
-         COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
-         COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS commission_owed,
-         COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
-       FROM orders WHERE hotel_id = $1`,
+    res.json({
+      hotel,
+      stats: { ...statsResult.rows[0], menu_item_count: menuCountResult.rows[0].menu_item_count },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/hotel/revenue/weekly — real day-by-day redeemed revenue for
+ * the trailing 7 days (including today), one row per day even when a
+ * day has zero orders (generate_series, not just grouping existing
+ * rows) so the frontend can plot a full week without gaps.
+ */
+export async function getHotelWeeklyRevenue(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = await resolveHotelId(req);
+    const result = await pool.query(
+      `SELECT d::date AS day,
+              COALESCE(SUM(o.amount) FILTER (WHERE o.status = 'redeemed' AND o.redeemed_at::date = d::date), 0) AS revenue
+       FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS d
+       LEFT JOIN orders o ON o.hotel_id = $1
+       GROUP BY d
+       ORDER BY d ASC`,
       [hotelId]
     );
+    res.json({ days: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}
 
-    res.json({ hotel, stats: statsResult.rows[0] });
+/**
+ * GET /api/hotel/students?search=<name> — students who have (or have
+ * had) an actual budget/plan tied to THIS hotel specifically — the
+ * JOIN LATERAL is an inner join in effect, so a student with zero
+ * budgets at this hotel simply never appears, rather than showing
+ * every platform student with a blank plan.
+ */
+export async function listHotelStudents(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = await resolveHotelId(req);
+    const search = (req.query.search as string | undefined)?.trim();
+    const params: unknown[] = [hotelId];
+    let searchClause = "";
+    if (search) {
+      params.push(`%${search}%`);
+      searchClause = `AND s.full_name ILIKE $${params.length}`;
+    }
+
+    const result = await pool.query(
+      `SELECT u.id, u.email, s.full_name, s.institution,
+              b.id AS budget_id, b.total_amount, b.remaining_amount, b.daily_allowance,
+              b.number_of_days, b.start_date, b.end_date, b.status AS budget_status
+       FROM users u
+       JOIN students s ON s.user_id = u.id
+       JOIN LATERAL (
+         SELECT * FROM budgets WHERE budgets.user_id = u.id AND budgets.hotel_id = $1
+         ORDER BY budgets.created_at DESC LIMIT 1
+       ) b ON true
+       WHERE u.role = 'student' ${searchClause}
+       ORDER BY s.full_name ASC
+       LIMIT 300`,
+      params
+    );
+    res.json({ students: result.rows });
   } catch (err) {
     next(err);
   }
@@ -271,6 +341,27 @@ export async function updateMenuItem(req: AuthedRequest, res: Response, next: Ne
     );
     if (result.rows.length === 0) throw new ApiError(404, "ITEM_NOT_FOUND", "Menu item not found.");
     res.json({ item: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Hard delete — safe because orders.items is a JSONB snapshot taken
+ * at order time (see migration 014), not a foreign key to menu_items,
+ * so removing a menu item never orphans or corrupts past order
+ * history. hotel_id = $2 in the WHERE clause, same "only your own
+ * hotel's items" scoping as updateMenuItem.
+ */
+export async function deleteMenuItem(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = await getOwnHotelId(req.user!.id);
+    const result = await pool.query(
+      "DELETE FROM menu_items WHERE id = $1 AND hotel_id = $2 RETURNING id",
+      [req.params.itemId, hotelId]
+    );
+    if (result.rows.length === 0) throw new ApiError(404, "ITEM_NOT_FOUND", "Menu item not found.");
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

@@ -11,6 +11,9 @@ export interface HotelDashboard {
     id: string;
     name: string;
     status: string;
+    location: string | null;
+    address: string | null;
+    settlement_schedule: string | null;
     commission_percent: string;
     registration_fee: string;
     payment_method: string | null;
@@ -22,8 +25,10 @@ export interface HotelDashboard {
     pending_orders: string;
     redeemed_orders: string;
     gross_revenue: string;
+    revenue_today: string;
     commission_owed: string;
     net_earnings: string;
+    menu_item_count: string;
   };
 }
 
@@ -159,4 +164,43 @@ export async function redeemQr(authFetch: AuthFetch, qrPayload: string): Promise
     body: JSON.stringify({ qrPayload }),
   });
   return parseOrError(res, "Could not redeem this QR code.");
+}
+
+export async function deleteMenuItem(authFetch: AuthFetch, itemId: string): Promise<void> {
+  const res = await authFetch(`/api/hotel/menu/${itemId}`, { method: "DELETE" });
+  await parseOrError(res, "Could not remove this item.");
+}
+
+export interface WeeklyRevenueDay {
+  day: string;
+  revenue: string;
+}
+
+export async function fetchHotelWeeklyRevenue(authFetch: AuthFetch): Promise<WeeklyRevenueDay[]> {
+  const res = await authFetch("/api/hotel/revenue/weekly");
+  const data = await parseOrError<{ days: WeeklyRevenueDay[] }>(res, "Could not load this week's revenue.");
+  return data.days;
+}
+
+/** budget_* fields are null when the student has no plan tied to this hotel right now (their most recent one wasn't active). */
+export interface HotelStudent {
+  id: string;
+  email: string;
+  full_name: string;
+  institution: string | null;
+  budget_id: string | null;
+  total_amount: string | null;
+  remaining_amount: string | null;
+  daily_allowance: string | null;
+  number_of_days: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  budget_status: string | null;
+}
+
+export async function fetchHotelStudents(authFetch: AuthFetch, search?: string): Promise<HotelStudent[]> {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await authFetch(`/api/hotel/students${qs}`);
+  const data = await parseOrError<{ students: HotelStudent[] }>(res, "Could not load your students.");
+  return data.students;
 }

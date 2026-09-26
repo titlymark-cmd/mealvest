@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut } from "lucide-react";
+import { TrendingUp, ShoppingBag, UtensilsCrossed, Users, User, LogOut } from "lucide-react";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
@@ -8,29 +8,25 @@ import { SIDEBAR_WIDTH, SIDEBAR_MOBILE_BREAKPOINT } from "../layout/sidebarConfi
 import logo from "../../assets/mealvest-logo.png";
 
 const NAV_ITEMS = [
-  { to: "/admin/home", label: "Overview", icon: TrendingUp, end: true },
-  { to: "/admin/hotels", label: "Hotels", icon: Building2 },
-  { to: "/admin/students", label: "Students", icon: Users },
-  { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
-  { to: "/admin/payments", label: "Payments", icon: CreditCard },
+  { to: "/hotel-owner/home", label: "Overview", icon: TrendingUp, end: true },
+  { to: "/hotel-owner/orders", label: "Orders", icon: ShoppingBag },
+  { to: "/hotel-owner/menu", label: "MenuBoard", icon: UtensilsCrossed },
+  { to: "/hotel-owner/students", label: "Students", icon: Users },
+  { to: "/hotel-owner/profile", label: "Profile", icon: User },
 ];
 
-// Re-exported under admin-specific names for existing call sites —
-// values come from the shared sidebarConfig so every dashboard shell
-// (admin, hotel owner, …) stays in sync.
-export const ADMIN_MOBILE_BREAKPOINT = SIDEBAR_MOBILE_BREAKPOINT;
-export const ADMIN_SIDEBAR_WIDTH = SIDEBAR_WIDTH;
+export const HOTEL_MOBILE_BREAKPOINT = SIDEBAR_MOBILE_BREAKPOINT;
+export const HOTEL_SIDEBAR_WIDTH = SIDEBAR_WIDTH;
 
-export function AdminSidebar() {
+export function HotelSidebar() {
   const { logout } = useAuth();
   const { width } = useWindowSize();
-  const isMobile = width < ADMIN_MOBILE_BREAKPOINT;
+  const isMobile = width < HOTEL_MOBILE_BREAKPOINT;
 
   if (isMobile) {
-    // No "Log out" item here — with 5 nav items already, a 6th tab
-    // would crowd the bar. Logout instead lives on the Overview
-    // banner (see AdminOverviewScreen), reachable from every screen
-    // via the Overview tab.
+    // No "Log out" tab here — 5 nav items is already the practical
+    // limit for a phone-width bar (same call made for the admin
+    // dashboard). Logout instead lives on the Overview banner.
     return (
       <nav style={mobileStyles.bar}>
         {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -57,7 +53,7 @@ export function AdminSidebar() {
         <img src={logo} alt="" style={styles.logo} />
         <span style={styles.brandText}>MEALVEST</span>
       </div>
-      <span style={styles.tagline}>Platform overview</span>
+      <span style={styles.tagline}>Hotel dashboard</span>
 
       <nav style={styles.nav}>
         {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -89,7 +85,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "fixed",
     top: 0,
     left: 0,
-    width: ADMIN_SIDEBAR_WIDTH,
+    width: HOTEL_SIDEBAR_WIDTH,
     height: "100vh",
     zIndex: 40,
     backgroundColor: COLORS.bgDeep,
@@ -101,7 +97,17 @@ const styles: Record<string, React.CSSProperties> = {
   brandRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10 },
   logo: { width: 36, height: 36, borderRadius: RADIUS.sm, objectFit: "cover" },
   brandText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.textOnDark, letterSpacing: 0.5 },
-  tagline: { display: "block", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 8, marginBottom: 20 },
+  tagline: {
+    display: "block",
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    color: COLORS.textOnDarkMuted,
+    marginTop: 8,
+    marginBottom: 20,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
   nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1 },
   navItem: {
     display: "flex",
@@ -120,8 +126,6 @@ const styles: Record<string, React.CSSProperties> = {
   logoutText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger },
 };
 
-// Floating pill bar pinned to the bottom of the viewport — sized to
-// its content (icon + label per item), not stretched edge to edge.
 const mobileStyles: Record<string, React.CSSProperties> = {
   bar: {
     position: "fixed",
