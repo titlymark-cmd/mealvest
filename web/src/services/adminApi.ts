@@ -1,3 +1,5 @@
+import { SettlementInput } from "./authApi";
+
 type AuthFetch = (path: string, init?: RequestInit) => Promise<Response>;
 
 async function parseOrError<T>(res: Response, fallback: string): Promise<T> {
@@ -59,22 +61,25 @@ export async function approveHotel(authFetch: AuthFetch, hotelId: string): Promi
 }
 
 /**
- * Matches the backend's admin-only createHotelSchema exactly — note
- * this is a DIFFERENT (older, 3-option) payment shape than the
- * public self-registration schema's 5-option one. That's a real
- * inconsistency in the backend itself, not something papered over
- * here — the admin form below is built to match what this specific
- * endpoint actually validates.
+ * Matches the backend's admin-only createHotelSchema exactly, which
+ * now reuses the exact same settlementMethodSchema and pinSchema as
+ * the public self-registration endpoint (see authApi.ts's
+ * SettlementInput) — the two hotel-creation forms collect the same
+ * real data. adminUsername/registrationFee/commissionPercent stay
+ * admin-only fields, since admin-created hotels skip the commercial
+ * plan + approval flow self-registration goes through.
  */
 export interface CreateHotelInput {
   name: string;
   phone: string;
   email: string;
   location?: string;
+  businessType: string;
   ownerContactName: string;
   adminUsername: string;
   password: string;
-  payment: { method: "mpesa_till"; tillNumber: string; businessName: string };
+  pin: string;
+  payment: SettlementInput;
   registrationFee: number;
   commissionPercent: number;
   termsAccepted: true;

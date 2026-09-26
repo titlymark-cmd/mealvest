@@ -5,6 +5,8 @@ import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { hashPassword } from "../lib/password";
 import { normalizeKenyanPhone } from "../lib/phone";
+import { pinSchema } from "../schemas/authSchemas";
+import { settlementMethodSchema } from "../schemas/settlementMethodSchema";
 
 const TERMS_VERSION = "2026-01-mealvest-hotel-partnership-v1";
 
@@ -44,26 +46,32 @@ export async function getAdminOverview(_req: AuthedRequest, res: Response, next:
 }
 
 // -----------------------------------------------------------------
-// Hotel registration — the ONLY way a hotel_owner account and its
-// hotel record come into existence. No public self-registration
-// route creates a hotel; this is deliberately admin-only.
+// Admin-created hotel registration — a SECOND path to creating a
+// hotel_owner account alongside the public self-registration route
+// (POST /api/auth/register/hotel, authService.registerHotel). Unlike
+// self-registration (which starts pending_verification and gets
+// assigned a commercial plan), an admin-created hotel goes live
+// immediately with commercial terms (registration fee, commission)
+// and a login username the admin sets directly — real fields the
+// public flow has no equivalent for. Everything else (business type,
+// PIN, settlement method) reuses the exact same shared schemas as the
+// public flow so the two forms collect the same real data.
 // -----------------------------------------------------------------
-const paymentDetailsSchema = z.discriminatedUnion("method", [
-  z.object({ method: z.literal("bank"), bankName: z.string().min(1), accountName: z.string().min(1), accountNumber: z.string().min(1) }),
-  z.object({ method: z.literal("mpesa_till"), tillNumber: z.string().min(1), businessName: z.string().min(1) }),
-  z.object({ method: z.literal("mpesa_pochi"), phoneNumber: z.string().min(9), ownerName: z.string().min(1) }),
-]);
-
 const createHotelSchema = z.object({
   name: z.string().trim().min(1).max(120),
   phone: z.string().min(9),
   email: z.string().email(),
   location: z.string().trim().max(160).optional(),
   address: z.string().trim().max(300).optional(),
+  businessType: z
+    .enum(["hotel", "restaurant", "cafeteria", "canteen", "food_kiosk", "cafe", "catering", "other"])
+    .optional()
+    .default("hotel"),
   ownerContactName: z.string().trim().min(1).max(120),
   adminUsername: z.string().trim().min(3).max(60),
   password: z.string().min(8),
-  payment: paymentDetailsSchema,
+  pin: pinSchema,
+  payment: settlementMethodSchema,
   registrationFee: z.number().min(0).max(10000),
   commissionPercent: z.number().min(0).max(10),
   loyaltyIncentivePercent: z.number().min(0).max(100).optional().default(0),
@@ -95,6 +103,7 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
     if (!normalizedPhone) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan phone number.");
 
     const passwordHash = await hashPassword(d.password);
+    const pinHash = await hashPassword(d.pin);
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + d.contractDays * 24 * 60 * 60 * 1000);
 
@@ -102,15 +111,16 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
 
     const hotelResult = await client.query(
       `INSERT INTO hotels
-         (name, location, address, contact_phone, contact_email, owner_contact_name, admin_username,
+         (name, location, address, business_type, contact_phone, contact_email, owner_contact_name, admin_username,
           payment_method, payment_details, registration_fee, commission_percent, loyalty_incentive_percent,
           terms_accepted, terms_accepted_at, terms_version, contract_start_date, contract_end_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,now(),$13,$14,$15,'active')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,now(),$14,$15,$16,'active')
        RETURNING *`,
       [
         d.name,
         d.location ?? null,
         d.address ?? null,
+        d.businessType,
         normalizedPhone,
         d.email.toLowerCase(),
         d.ownerContactName,
@@ -128,10 +138,10 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
     const hotel = hotelResult.rows[0];
 
     const userResult = await client.query(
-      `INSERT INTO users (email, phone_number, password_hash, role, auth_provider, email_verified, account_status)
-       VALUES ($1, $2, $3, 'hotel_owner', 'password', true, 'active')
+      `INSERT INTO users (email, phone_number, password_hash, pin_hash, role, auth_provider, email_verified, account_status)
+       VALUES ($1, $2, $3, $4, 'hotel_owner', 'password', true, 'active')
        RETURNING id`,
-      [d.email.toLowerCase(), normalizedPhone, passwordHash]
+      [d.email.toLowerCase(), normalizedPhone, passwordHash, pinHash]
     );
     const userId = userResult.rows[0].id;
 
