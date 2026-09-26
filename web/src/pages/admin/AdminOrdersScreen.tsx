@@ -87,20 +87,20 @@ export default function AdminOrdersScreen() {
         <div style={styles.list}>
           {orders.map((o) => (
             <Card key={o.id} style={styles.row}>
-              <div style={{ flex: 1.4 }}>
+              <div style={{ flex: "1 1 160px", minWidth: 140 }}>
                 <span style={styles.hotelName}>{o.hotel_name}</span>
                 <span style={styles.meta}>{o.student_email}</span>
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: "1 1 120px", minWidth: 100 }}>
                 <span style={styles.itemsText}>{itemsSummary(o.items)}</span>
               </div>
-              <div style={{ flex: 0.7, textAlign: "right" }}>
+              <div style={styles.rowRightGroup}>
                 <span style={styles.amount}>{formatKsh(o.amount)}</span>
+                <span style={{ ...styles.statusBadge, backgroundColor: STATUS_COLOR[o.status] || COLORS.textFaint }}>
+                  {o.status.replace("_", " ")}
+                </span>
+                <span style={styles.date}>{timeAgo(o.redeemed_at || o.created_at)}</span>
               </div>
-              <span style={{ ...styles.statusBadge, backgroundColor: STATUS_COLOR[o.status] || COLORS.textFaint }}>
-                {o.status.replace("_", " ")}
-              </span>
-              <span style={styles.date}>{timeAgo(o.redeemed_at || o.created_at)}</span>
             </Card>
           ))}
         </div>
@@ -131,6 +131,7 @@ const styles: Record<string, React.CSSProperties> = {
   emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textFaint, margin: 0 },
   list: { display: "flex", flexDirection: "column", gap: 8, paddingBottom: 24 },
   row: { display: "flex", flexDirection: "row", alignItems: "center", padding: 14, gap: 12, flexWrap: "wrap" },
+  rowRightGroup: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, marginLeft: "auto", flexShrink: 0 },
   hotelName: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
   meta: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
   itemsText: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted },
