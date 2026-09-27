@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Building2, Users, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2, ChevronRight, LogOut } from "lucide-react";
+import { Building2, Users, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2, ChevronRight, LogOut, Phone } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
@@ -17,6 +17,7 @@ import {
   AdminAlerts,
   TopHotel,
 } from "../../services/adminApi";
+import { fetchCustomerCarePhone, updateCustomerCarePhone } from "../../services/settingsApi";
 
 function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
@@ -40,24 +41,48 @@ export default function AdminOverviewScreen() {
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
 
+  const [carePhone, setCarePhone] = useState<string | null>(null);
+  const [careDraft, setCareDraft] = useState("");
+  const [careEditing, setCareEditing] = useState(false);
+  const [careSaving, setCareSaving] = useState(false);
+  const [careError, setCareError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [ov, led, al, top] = await Promise.all([
+      const [ov, led, al, top, care] = await Promise.all([
         fetchAdminOverview(authFetch),
         fetchDailyLedger(authFetch),
         fetchAdminAlerts(authFetch),
         fetchTopHotels(authFetch, "today"),
+        fetchCustomerCarePhone(),
       ]);
       setOverview(ov);
       setLedger(led);
       setAlerts(al);
       setTopHotels(top);
+      setCarePhone(care);
+      setCareDraft(care || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the admin overview.");
     } finally {
       setLoading(false);
     }
   }, [authFetch]);
+
+  const saveCustomerCare = async () => {
+    setCareSaving(true);
+    setCareError(null);
+    try {
+      const phone = await updateCustomerCarePhone(authFetch, careDraft.trim());
+      setCarePhone(phone);
+      setCareDraft(phone);
+      setCareEditing(false);
+    } catch (err) {
+      setCareError(err instanceof Error ? err.message : "Could not update the customer care number.");
+    } finally {
+      setCareSaving(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -245,6 +270,53 @@ export default function AdminOverviewScreen() {
             </div>
           ))}
         </Card>
+
+        <Card style={styles.panelCard}>
+          <div style={styles.panelHeaderRow}>
+            <Phone size={16} color={COLORS.primary} />
+            <div>
+              <span style={styles.panelTitle}>Customer Care</span>
+              <span style={styles.panelSubtitle}>The support number students see across the app</span>
+            </div>
+          </div>
+
+          {careEditing ? (
+            <>
+              <input
+                style={styles.careInput}
+                value={careDraft}
+                onChange={(e) => setCareDraft(e.target.value.replace(/[^\d]/g, ""))}
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="0798180082"
+                autoFocus
+              />
+              {careError && <p style={styles.careError}>{careError}</p>}
+              <div style={styles.careBtnRow}>
+                <button
+                  onClick={() => {
+                    setCareEditing(false);
+                    setCareDraft(carePhone || "");
+                    setCareError(null);
+                  }}
+                  style={styles.careCancelBtn}
+                >
+                  <span style={styles.careCancelText}>Cancel</span>
+                </button>
+                <button onClick={saveCustomerCare} disabled={careSaving} style={styles.careSaveBtn}>
+                  <span style={styles.careSaveText}>{careSaving ? "Saving…" : "Save"}</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={styles.careDisplayRow}>
+              <span style={styles.careDisplayValue}>{carePhone || "Not set"}</span>
+              <button onClick={() => setCareEditing(true)} style={styles.careEditBtn}>
+                <span style={styles.careEditText}>Change</span>
+              </button>
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
@@ -369,4 +441,26 @@ const styles: Record<string, React.CSSProperties> = {
   topHotelValue: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 13, color: COLORS.primary },
   topHotelBarTrack: { height: 6, borderRadius: RADIUS.pill, backgroundColor: COLORS.borderSoft, overflow: "hidden" },
   topHotelBarFill: { height: "100%", borderRadius: RADIUS.pill, background: `linear-gradient(90deg, ${GRADIENT[0]}, ${GRADIENT[1]})` },
+  careDisplayRow: { display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  careDisplayValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.text },
+  careEditBtn: { backgroundColor: "rgba(0,0,0,0.05)", borderRadius: RADIUS.sm, padding: "7px 12px" },
+  careEditText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary },
+  careInput: {
+    backgroundColor: COLORS.cardWhite,
+    borderRadius: RADIUS.sm,
+    border: `1px solid ${COLORS.borderSoft}`,
+    padding: "11px 14px",
+    fontSize: 15,
+    fontFamily: FONTS.bodyMedium,
+    fontWeight: 500,
+    color: COLORS.text,
+    outline: "none",
+    width: "100%",
+  },
+  careError: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.danger, margin: "6px 0 0 0" },
+  careBtnRow: { display: "flex", flexDirection: "row", gap: 8, marginTop: 10 },
+  careCancelBtn: { flex: 1, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: RADIUS.sm, padding: "9px 12px" },
+  careCancelText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textMuted, textAlign: "center", display: "block" },
+  careSaveBtn: { flex: 1, backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: "9px 12px" },
+  careSaveText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: "#fff", textAlign: "center", display: "block" },
 };

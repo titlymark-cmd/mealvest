@@ -117,3 +117,16 @@ export async function transferToNextDay(req: AuthedRequest, res: Response, next:
     next(err);
   }
 }
+
+/**
+ * Hotel Transfer (switching a student's active plan to a different
+ * hotel mid-contract for a KSh 50 fee) is intentionally frozen for
+ * MVP1 — the frontend never calls this in normal use (the "Switch
+ * hotel" UI just shows a locked/MVP2 message locally, no request
+ * made). This exists only as a defense-in-depth backend safety net so
+ * a direct call to the endpoint can't do anything real: no table, no
+ * payment, no budget/hotel mutation — just a clear rejection.
+ */
+export async function requestHotelTransfer(_req: AuthedRequest, _res: Response, next: NextFunction) {
+  next(new ApiError(501, "FEATURE_NOT_AVAILABLE", "Hotel Transfer is coming in MVP 2."));
+}

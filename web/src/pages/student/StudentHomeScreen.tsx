@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap } from "lucide-react";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { getActiveBudget, transferToNextDay, Budget } from "../../services/budgetApi";
+import { fetchCustomerCarePhone } from "../../services/settingsApi";
 
 export default function StudentHomeScreen() {
   const { user, logout, authFetch } = useAuth();
@@ -18,6 +19,14 @@ export default function StudentHomeScreen() {
   const [budget, setBudget] = useState<Budget | null>(passedBudget || null);
   const [loading, setLoading] = useState(!passedBudget);
   const [error, setError] = useState<string | null>(null);
+  const [careOpen, setCareOpen] = useState(false);
+  const [carePhone, setCarePhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCustomerCarePhone()
+      .then(setCarePhone)
+      .catch(() => setCarePhone(null));
+  }, []);
 
   const loadBudget = useCallback(async () => {
     try {
@@ -58,6 +67,15 @@ export default function StudentHomeScreen() {
       "Carried over from previous days\n\n" +
         `KSh ${bankedAmount.toLocaleString()} of unused daily allowance has automatically been added to today's balance. ` +
         `You now have KSh ${spendableToday.toLocaleString()} available today.`
+    );
+  };
+
+  // Frozen MVP2 feature — no navigation, no API call, matches the
+  // backend's own defense-in-depth rejection at POST /student/hotel-transfer.
+  const showTransferLockedNotice = () => {
+    window.alert(
+      "Hotel Transfer — Coming in MVP 2\n\n" +
+        "Soon you'll be able to switch your active plan to another MealVest hotel for a KSh 50 fee. This isn't available yet."
     );
   };
 
@@ -102,11 +120,31 @@ export default function StudentHomeScreen() {
           <button style={styles.logoutIcon} onClick={() => navigate("/student/orders")}>
             <Receipt size={16} color={COLORS.primary} />
           </button>
+          <button style={styles.logoutIcon} onClick={() => setCareOpen((v) => !v)} aria-label="Customer Care">
+            <Phone size={16} color={COLORS.primary} />
+          </button>
           <button style={styles.logoutIcon} onClick={() => logout()}>
             <LogOut size={18} color={COLORS.danger} />
           </button>
         </div>
       </div>
+
+      {careOpen && (
+        <Card style={styles.careCard}>
+          <span style={styles.careLabel}>CUSTOMER CARE</span>
+          {carePhone ? (
+            <>
+              <span style={styles.carePhone}>{carePhone}</span>
+              <a href={`tel:${carePhone}`} className="mv-action" style={styles.careCallBtn}>
+                <Phone size={14} color="#fff" />
+                <span style={styles.careCallText}>Call now</span>
+              </a>
+            </>
+          ) : (
+            <span style={styles.careUnavailable}>Customer care number is not available right now.</span>
+          )}
+        </Card>
+      )}
 
       {user && <span style={styles.welcome}>Signed in as {user.fullName || user.email}</span>}
 
@@ -185,6 +223,13 @@ export default function StudentHomeScreen() {
             <Card style={styles.hotelCard}>
               <span style={styles.hotelLabel}>Your hotel</span>
               <span style={styles.hotelValue}>{hotelName}</span>
+              <button style={styles.transferRow} onClick={showTransferLockedNotice}>
+                <div style={styles.transferLeft}>
+                  <Lock size={12} color={COLORS.textFaint} />
+                  <span style={styles.transferText}>Switch hotel · KSh 50</span>
+                </div>
+                <span style={styles.mvp2Badge}>MVP 2</span>
+              </button>
             </Card>
           )}
 
@@ -293,6 +338,42 @@ const styles: Record<string, React.CSSProperties> = {
   hotelCard: { marginTop: 12, display: "flex", flexDirection: "column" },
   hotelLabel: { display: "block", fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, textTransform: "uppercase" },
   hotelValue: { display: "block", fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text, marginTop: 2 },
+  transferRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    paddingTop: 10,
+    borderTop: `1px solid ${COLORS.borderSoft}`,
+    opacity: 0.65,
+  },
+  transferLeft: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6 },
+  transferText: { fontSize: 12, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.textMuted },
+  mvp2Badge: {
+    fontSize: 9,
+    fontFamily: FONTS.bodySemibold,
+    fontWeight: 700,
+    color: COLORS.textFaint,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    borderRadius: RADIUS.pill,
+    padding: "3px 8px",
+    letterSpacing: 0.4,
+  },
+  careCard: { marginTop: 14, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8 },
+  careLabel: { fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 700, color: COLORS.textFaint, letterSpacing: 0.6 },
+  carePhone: { fontSize: 18, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text },
+  careCallBtn: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.pill,
+    padding: "9px 16px",
+  },
+  careCallText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12 },
+  careUnavailable: { fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted },
   aiCard: { marginTop: 12, borderRadius: RADIUS.sm, padding: 16, background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})` },
   aiHeader: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   aiHeaderText: { color: "#fff", fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, letterSpacing: 0.5 },

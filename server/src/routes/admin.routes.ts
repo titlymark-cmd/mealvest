@@ -14,6 +14,7 @@ import {
   getAlerts,
   listStudents,
 } from "../controllers/admin.controller";
+import { updateCustomerCarePhone } from "../controllers/settings.controller";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireRole("mealvest_admin"));
@@ -30,3 +31,4 @@ adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
 adminRouter.get("/orders", listAllOrders);
 adminRouter.get("/withdrawals", listWithdrawals);
+adminRouter.patch("/settings/customer-care", updateCustomerCarePhone);

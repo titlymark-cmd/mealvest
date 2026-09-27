@@ -7,6 +7,7 @@ import {
   getWithdrawalStatus,
   requestWithdrawal,
   transferToNextDay,
+  requestHotelTransfer,
 } from "../controllers/student.controller";
 
 export const studentRouter = Router();
@@ -18,3 +19,5 @@ studentRouter.get("/budget", getBudget);
 studentRouter.post("/budget/transfer-to-next-day", transferToNextDay);
 studentRouter.get("/withdrawal-status", getWithdrawalStatus);
 studentRouter.post("/withdraw", requestWithdrawal);
+// Frozen MVP2 feature — see requestHotelTransfer's own comment.
+studentRouter.post("/hotel-transfer", requestHotelTransfer);
