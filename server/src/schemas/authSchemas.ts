@@ -5,7 +5,7 @@ import { settlementMethodSchema } from "./settlementMethodSchema";
 const passwordSchema = z.string().min(8, "Password must be at least 8 characters.");
 
 const emailSchema = z.string().trim().email("Enter a valid email address.");
-const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.");
+export const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.");
 
 // Exactly 4 digits, nothing else — same "simple, non-aggressive" rule
 // as the password above. The 4-attempt lockout (see authService

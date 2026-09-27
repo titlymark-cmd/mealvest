@@ -8,6 +8,7 @@ import { StudentRoutes } from "./StudentRoutes";
 import { HotelStaffRoutes } from "./HotelStaffRoutes";
 import { HotelOwnerRoutes } from "./HotelOwnerRoutes";
 import { AdminRoutes } from "./AdminRoutes";
+import { AnnouncementPopup } from "../components/AnnouncementPopup";
 
 /**
  * Web port of navigation/RootNavigator.tsx's RootNavigator function —
@@ -59,11 +60,26 @@ export function RootGate() {
 
   switch (user.role) {
     case "student":
-      return <StudentRoutes />;
+      return (
+        <>
+          <AnnouncementPopup />
+          <StudentRoutes />
+        </>
+      );
     case "hotel_staff":
-      return <HotelStaffRoutes />;
+      return (
+        <>
+          <AnnouncementPopup />
+          <HotelStaffRoutes />
+        </>
+      );
     case "hotel_owner":
-      return <HotelOwnerRoutes />;
+      return (
+        <>
+          <AnnouncementPopup />
+          <HotelOwnerRoutes />
+        </>
+      );
     case "mealvest_admin":
       return <AdminRoutes />;
     default:

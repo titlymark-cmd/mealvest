@@ -15,6 +15,12 @@ import {
   listStudents,
 } from "../controllers/admin.controller";
 import { updateCustomerCarePhone } from "../controllers/settings.controller";
+import {
+  listAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement,
+} from "../controllers/announcements.controller";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireRole("mealvest_admin"));
@@ -32,3 +38,7 @@ adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
 adminRouter.get("/orders", listAllOrders);
 adminRouter.get("/withdrawals", listWithdrawals);
 adminRouter.patch("/settings/customer-care", updateCustomerCarePhone);
+adminRouter.get("/announcements", listAnnouncements);
+adminRouter.post("/announcements", createAnnouncement);
+adminRouter.patch("/announcements/:id", updateAnnouncement);
+adminRouter.delete("/announcements/:id", deleteAnnouncement);

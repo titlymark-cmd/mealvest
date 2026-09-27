@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Building2, Users, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2, ChevronRight, LogOut, Phone } from "lucide-react";
+import { Building2, Users, ShoppingBag, DollarSign, Wallet, AlertTriangle, TrendingUp, CheckCircle2, ChevronRight, LogOut, Phone, Megaphone, Trash2 } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
@@ -18,6 +18,13 @@ import {
   TopHotel,
 } from "../../services/adminApi";
 import { fetchCustomerCarePhone, updateCustomerCarePhone } from "../../services/settingsApi";
+import {
+  fetchAllAnnouncements,
+  createAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement,
+  AdminAnnouncement,
+} from "../../services/announcementsApi";
 
 function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
@@ -47,14 +54,21 @@ export default function AdminOverviewScreen() {
   const [careSaving, setCareSaving] = useState(false);
   const [careError, setCareError] = useState<string | null>(null);
 
+  const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([]);
+  const [newAnnouncement, setNewAnnouncement] = useState("");
+  const [postingAnnouncement, setPostingAnnouncement] = useState(false);
+  const [announcementError, setAnnouncementError] = useState<string | null>(null);
+  const [announcementBusyId, setAnnouncementBusyId] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [ov, led, al, top, care] = await Promise.all([
+      const [ov, led, al, top, care, ann] = await Promise.all([
         fetchAdminOverview(authFetch),
         fetchDailyLedger(authFetch),
         fetchAdminAlerts(authFetch),
         fetchTopHotels(authFetch, "today"),
         fetchCustomerCarePhone(),
+        fetchAllAnnouncements(authFetch),
       ]);
       setOverview(ov);
       setLedger(led);
@@ -62,12 +76,54 @@ export default function AdminOverviewScreen() {
       setTopHotels(top);
       setCarePhone(care);
       setCareDraft(care || "");
+      setAnnouncements(ann);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the admin overview.");
     } finally {
       setLoading(false);
     }
   }, [authFetch]);
+
+  const postAnnouncement = async () => {
+    const message = newAnnouncement.trim();
+    if (!message) return;
+    setPostingAnnouncement(true);
+    setAnnouncementError(null);
+    try {
+      const created = await createAnnouncement(authFetch, message);
+      setAnnouncements((prev) => [created, ...prev]);
+      setNewAnnouncement("");
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : "Could not post the announcement.");
+    } finally {
+      setPostingAnnouncement(false);
+    }
+  };
+
+  const toggleAnnouncementActive = async (a: AdminAnnouncement) => {
+    setAnnouncementBusyId(a.id);
+    try {
+      const updated = await updateAnnouncement(authFetch, a.id, { isActive: !a.is_active });
+      setAnnouncements((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : "Could not update the announcement.");
+    } finally {
+      setAnnouncementBusyId(null);
+    }
+  };
+
+  const removeAnnouncement = async (id: string) => {
+    if (!window.confirm("Delete this announcement? This can't be undone.")) return;
+    setAnnouncementBusyId(id);
+    try {
+      await deleteAnnouncement(authFetch, id);
+      setAnnouncements((prev) => prev.filter((x) => x.id !== id));
+    } catch (err) {
+      setAnnouncementError(err instanceof Error ? err.message : "Could not delete the announcement.");
+    } finally {
+      setAnnouncementBusyId(null);
+    }
+  };
 
   const saveCustomerCare = async () => {
     setCareSaving(true);
@@ -317,6 +373,69 @@ export default function AdminOverviewScreen() {
             </div>
           )}
         </Card>
+
+        <Card style={styles.panelCard}>
+          <div style={styles.panelHeaderRow}>
+            <Megaphone size={16} color={COLORS.primary} />
+            <div>
+              <span style={styles.panelTitle}>Announcements</span>
+              <span style={styles.panelSubtitle}>Pops up on every signed-in student and hotel screen</span>
+            </div>
+          </div>
+
+          <textarea
+            style={styles.announcementInput}
+            value={newAnnouncement}
+            onChange={(e) => setNewAnnouncement(e.target.value)}
+            placeholder="Type an announcement to broadcast to everyone…"
+            rows={3}
+          />
+          {announcementError && <p style={styles.careError}>{announcementError}</p>}
+          <button
+            onClick={postAnnouncement}
+            disabled={postingAnnouncement || !newAnnouncement.trim()}
+            style={{
+              ...styles.careSaveBtn,
+              flex: undefined,
+              marginTop: 10,
+              opacity: postingAnnouncement || !newAnnouncement.trim() ? 0.6 : 1,
+            }}
+          >
+            <span style={styles.careSaveText}>{postingAnnouncement ? "Posting…" : "Post announcement"}</span>
+          </button>
+
+          {announcements.length > 0 && (
+            <div style={styles.announcementList}>
+              {announcements.map((a) => (
+                <div key={a.id} style={styles.announcementRow}>
+                  <div style={{ flex: 1 }}>
+                    <span style={styles.announcementMessage}>{a.message}</span>
+                    <span style={styles.attentionMeta}>
+                      {a.is_active ? "Active" : "Inactive"} · {timeAgo(a.created_at)}
+                    </span>
+                  </div>
+                  <div style={styles.announcementActions}>
+                    <button
+                      onClick={() => toggleAnnouncementActive(a)}
+                      disabled={announcementBusyId === a.id}
+                      style={styles.announcementToggleBtn}
+                    >
+                      <span style={styles.announcementToggleText}>{a.is_active ? "Deactivate" : "Activate"}</span>
+                    </button>
+                    <button
+                      onClick={() => removeAnnouncement(a.id)}
+                      disabled={announcementBusyId === a.id}
+                      style={styles.announcementDeleteBtn}
+                      aria-label="Delete announcement"
+                    >
+                      <Trash2 size={14} color={COLORS.danger} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
@@ -463,4 +582,39 @@ const styles: Record<string, React.CSSProperties> = {
   careCancelText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textMuted, textAlign: "center", display: "block" },
   careSaveBtn: { flex: 1, backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: "9px 12px" },
   careSaveText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: "#fff", textAlign: "center", display: "block" },
+  announcementInput: {
+    backgroundColor: COLORS.cardWhite,
+    borderRadius: RADIUS.sm,
+    border: `1px solid ${COLORS.borderSoft}`,
+    padding: "11px 14px",
+    fontSize: 13,
+    fontFamily: FONTS.body,
+    color: COLORS.text,
+    outline: "none",
+    width: "100%",
+    resize: "vertical",
+  },
+  announcementList: { display: "flex", flexDirection: "column", gap: 0, marginTop: 14 },
+  announcementRow: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    padding: "10px 0",
+    borderTop: `1px solid ${COLORS.borderSoft}`,
+  },
+  announcementMessage: { display: "block", fontFamily: FONTS.bodyMedium, fontWeight: 500, fontSize: 13, color: COLORS.text, wordBreak: "break-word" },
+  announcementActions: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
+  announcementToggleBtn: { backgroundColor: "rgba(0,0,0,0.05)", borderRadius: RADIUS.sm, padding: "6px 10px" },
+  announcementToggleText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.primary },
+  announcementDeleteBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: RADIUS.sm,
+    backgroundColor: "rgba(0,0,0,0.05)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
 };

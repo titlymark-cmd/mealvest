@@ -7,6 +7,7 @@ import StudentHomeScreen from "../pages/student/StudentHomeScreen";
 import MealPassScreen from "../pages/student/MealPassScreen";
 import OrderHistoryScreen from "../pages/student/OrderHistoryScreen";
 import MealBoostScreen from "../pages/student/MealBoostScreen";
+import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 
 /**
  * Web port of navigation/StudentStack.tsx. Same seven screens, same
@@ -36,6 +37,7 @@ export function StudentRoutes() {
       <Route path="/student/meal-pass" element={<MealPassScreen />} />
       <Route path="/student/orders" element={<OrderHistoryScreen />} />
       <Route path="/student/meal-boost" element={<MealBoostScreen />} />
+      <Route path="/student/profile" element={<StudentProfileScreen />} />
       <Route path="*" element={<Navigate to="/student" replace />} />
     </Routes>
   );

@@ -4,12 +4,14 @@ import { AuthedRequest } from "../middleware/auth";
 import { pool } from "../config/db";
 import * as budgetService from "../services/budgetService";
 import { createBudgetSchema } from "../schemas/budgetSchemas";
+import { updateStudentProfileSchema } from "../schemas/studentSchemas";
 import { ApiError } from "../middleware/errorHandler";
 
 export async function getStudentProfile(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.email, u.phone_number, u.account_status, s.full_name, s.institution, s.admission_number
+      `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
+              s.full_name, s.institution, s.admission_number
        FROM users u JOIN students s ON s.user_id = u.id
        WHERE u.id = $1`,
       [req.user!.id]
@@ -18,6 +20,70 @@ export async function getStudentProfile(req: AuthedRequest, res: Response, next:
       throw new ApiError(404, "PROFILE_NOT_FOUND", "Student profile not found.");
     }
     res.json({ profile: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Partial update — only the fields present in the body are touched.
+ * full_name/institution/admission_number live on `students`,
+ * phone_number/alternate_phone_number on `users`; both are updated in
+ * one transaction so a client never sees a half-applied edit.
+ * Email is deliberately not editable here — it's a sign-in identifier,
+ * changing it needs its own re-verification flow, out of scope.
+ */
+export async function updateStudentProfile(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = updateStudentProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid profile update.");
+    }
+    const { fullName, phoneNumber, alternatePhoneNumber, institution, admissionNumber } = parsed.data;
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      if (fullName !== undefined || institution !== undefined || admissionNumber !== undefined) {
+        await client.query(
+          `UPDATE students SET
+             full_name = COALESCE($1, full_name),
+             institution = COALESCE($2, institution),
+             admission_number = COALESCE($3, admission_number)
+           WHERE user_id = $4`,
+          [fullName ?? null, institution ?? null, admissionNumber ?? null, req.user!.id]
+        );
+      }
+
+      if (phoneNumber !== undefined || alternatePhoneNumber !== undefined) {
+        await client.query(
+          `UPDATE users SET
+             phone_number = COALESCE($1, phone_number),
+             alternate_phone_number = CASE WHEN $2::text IS NULL THEN alternate_phone_number
+                                            WHEN $2 = '' THEN NULL
+                                            ELSE $2 END
+           WHERE id = $3`,
+          [phoneNumber ?? null, alternatePhoneNumber ?? null, req.user!.id]
+        );
+      }
+
+      const result = await client.query(
+        `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
+                s.full_name, s.institution, s.admission_number
+         FROM users u JOIN students s ON s.user_id = u.id
+         WHERE u.id = $1`,
+        [req.user!.id]
+      );
+
+      await client.query("COMMIT");
+      res.json({ profile: result.rows[0] });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     next(err);
   }

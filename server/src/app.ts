@@ -15,6 +15,7 @@ import { webhooksRouter } from "./routes/webhooks.routes";
 import { ordersRouter } from "./routes/orders.routes";
 import { plansRouter } from "./routes/plans.routes";
 import { settingsRouter } from "./routes/settings.routes";
+import { announcementsRouter } from "./routes/announcements.routes";
 
 export function createApp() {
   const app = express();
@@ -64,6 +65,7 @@ export function createApp() {
   app.use("/api/orders", ordersRouter);
   app.use("/api/plans", plansRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/announcements", announcementsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

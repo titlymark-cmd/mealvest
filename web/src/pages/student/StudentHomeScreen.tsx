@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock } from "lucide-react";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock, User } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { Spinner } from "../../components/Spinner";
@@ -122,6 +122,9 @@ export default function StudentHomeScreen() {
           </button>
           <button style={styles.logoutIcon} onClick={() => setCareOpen((v) => !v)} aria-label="Customer Care">
             <Phone size={16} color={COLORS.primary} />
+          </button>
+          <button style={styles.logoutIcon} onClick={() => navigate("/student/profile")} aria-label="My Profile">
+            <User size={16} color={COLORS.primary} />
           </button>
           <button style={styles.logoutIcon} onClick={() => logout()}>
             <LogOut size={18} color={COLORS.danger} />
