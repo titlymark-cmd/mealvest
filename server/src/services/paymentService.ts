@@ -89,7 +89,18 @@ export async function activatePaymentIfNeeded(
     const tx = txResult.rows[0];
 
     // ---- IDEMPOTENCY GUARD ----
-    if (tx.status === "success" || tx.status === "failed") {
+    // Only "success" is truly terminal here — it's the one state
+    // where money has definitely moved and a budget has already been
+    // created/credited, so re-entering this function for it must be a
+    // safe no-op. "failed" is deliberately NOT short-circuited: a
+    // status that looked like a failure at one poll (e.g. Paystack's
+    // "abandoned" for an M-Pesa STK push still awaiting PIN entry,
+    // mapped to "pending" upstream, or even a genuine transient
+    // failure) can still resolve to "success" on a later poll or
+    // webhook delivery. Locking "failed" as permanent as "success"
+    // would let a payment that actually succeeds never get credited —
+    // this is what previously made a false-failure unrecoverable.
+    if (tx.status === "success") {
       await client.query("COMMIT");
       return { alreadyProcessed: true, transactionId: tx.id };
     }

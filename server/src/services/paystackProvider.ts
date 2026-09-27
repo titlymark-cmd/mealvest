@@ -25,8 +25,20 @@ function client() {
 
 function mapPaystackStatus(status: string): VerifyPaymentResult["status"] {
   if (status === "success") return "success";
-  if (status === "failed" || status === "abandoned" || status === "reversed") return "failed";
-  return "pending"; // "pending", "ongoing", "queued", etc.
+  if (status === "failed" || status === "reversed") return "failed";
+  // "abandoned" is deliberately NOT treated as a hard failure here.
+  // For the mobile_money/M-Pesa channel, Paystack commonly reports
+  // "abandoned" transiently while a charge is still awaiting the
+  // customer's STK-push PIN entry — not only once they've genuinely
+  // given up — and it can still resolve to "success" moments later.
+  // Collapsing it into "failed" let a payment that succeeds shortly
+  // after get permanently misclassified, because
+  // activatePaymentIfNeeded's idempotency guard treats "failed" the
+  // same as a done deal and never re-checks. Mapping it to "pending"
+  // keeps polling/the webhook able to catch the real outcome; a
+  // genuinely abandoned checkout just times out on the frontend's own
+  // poll limit instead of being falsely reported as failed.
+  return "pending"; // "abandoned", "pending", "ongoing", "queued", etc.
 }
 
 export class PaystackPaymentProvider implements PaymentProvider {
