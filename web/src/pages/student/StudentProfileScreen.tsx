@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, User } from "lucide-react";
+import { User } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
@@ -40,7 +39,6 @@ function Field({
 
 export default function StudentProfileScreen() {
   const { authFetch } = useAuth();
-  const navigate = useNavigate();
 
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,11 +113,6 @@ export default function StudentProfileScreen() {
 
   return (
     <div style={styles.container}>
-      <button onClick={() => navigate(-1)} style={styles.backRow}>
-        <ArrowLeft size={16} color={COLORS.primary} />
-        <span style={styles.backText}>Back</span>
-      </button>
-
       <div style={styles.titleRow}>
         <div style={styles.avatarCircle}>
           <User size={20} color={COLORS.primary} />
@@ -190,9 +183,7 @@ export default function StudentProfileScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
-  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
-  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
+  container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, maxWidth: 560, display: "flex", flexDirection: "column" },
   titleRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 },
   avatarCircle: {
     width: 40,

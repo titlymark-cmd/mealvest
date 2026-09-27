@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock, User } from "lucide-react";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock, UtensilsCrossed } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { Spinner } from "../../components/Spinner";
@@ -123,9 +123,6 @@ export default function StudentHomeScreen() {
           <button style={styles.logoutIcon} onClick={() => setCareOpen((v) => !v)} aria-label="Customer Care">
             <Phone size={16} color={COLORS.primary} />
           </button>
-          <button style={styles.logoutIcon} onClick={() => navigate("/student/profile")} aria-label="My Profile">
-            <User size={16} color={COLORS.primary} />
-          </button>
           <button style={styles.logoutIcon} onClick={() => logout()}>
             <LogOut size={18} color={COLORS.danger} />
           </button>
@@ -165,6 +162,11 @@ export default function StudentHomeScreen() {
 
       {!loading && !error && budget && (
         <>
+          <button className="mv-action" style={styles.orderCard} onClick={() => navigate("/student/menu")}>
+            <UtensilsCrossed size={18} color="#fff" />
+            <span style={styles.orderCardText}>Order today's meal</span>
+          </button>
+
           <Card style={styles.ringCard}>
             <PlateRing pct={pct}>
               <span style={styles.ringLabel}>DAILY CREDIT</span>
@@ -256,7 +258,7 @@ export default function StudentHomeScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 60, paddingBottom: 40, display: "flex", flexDirection: "column" },
+  container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, paddingBottom: 40, maxWidth: 560, display: "flex", flexDirection: "column" },
   headerRow: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   greeting: { display: "block", fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted },
   title: { fontSize: 21, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0, marginTop: 2 },
@@ -297,6 +299,20 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
   },
   rolloverBannerText: { fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.primary },
+  orderCard: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    borderRadius: RADIUS.sm,
+    paddingTop: 15,
+    paddingBottom: 15,
+    width: "100%",
+    background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
+  },
+  orderCardText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 15 },
   welcome: { display: "block", fontSize: 12, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.accent, marginTop: 6, marginBottom: 16 },
   center: { display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 40, paddingBottom: 40 },
   note: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, textAlign: "center", margin: 0 },

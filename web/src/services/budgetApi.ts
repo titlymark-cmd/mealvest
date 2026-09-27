@@ -1,5 +1,6 @@
 export interface Budget {
   id: string;
+  hotel_id: string | null;
   total_amount: string;
   remaining_amount: string;
   amount_spent: string;
