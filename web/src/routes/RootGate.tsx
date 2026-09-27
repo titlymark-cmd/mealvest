@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { Routes, Route } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { COLORS } from "../styles/theme";
 import { Spinner } from "../components/Spinner";
@@ -9,6 +10,24 @@ import { HotelStaffRoutes } from "./HotelStaffRoutes";
 import { HotelOwnerRoutes } from "./HotelOwnerRoutes";
 import { AdminRoutes } from "./AdminRoutes";
 import { AnnouncementPopup } from "../components/AnnouncementPopup";
+import InstallScreen from "../pages/InstallScreen";
+
+/**
+ * /install is matched here, before anything else in the app — no
+ * splash, no auth check, no role-based routing, and (since it's
+ * matched ahead of the "*" branch below) never touched by
+ * UnauthenticatedRoutes' own catch-all redirect to /login. It's a
+ * standalone, public, direct-URL-only utility page: not linked from
+ * any nav, not a default route, doesn't affect anything else here.
+ */
+export function RootGate() {
+  return (
+    <Routes>
+      <Route path="/install" element={<InstallScreen />} />
+      <Route path="*" element={<AuthGatedApp />} />
+    </Routes>
+  );
+}
 
 /**
  * Web port of navigation/RootNavigator.tsx's RootNavigator function —
@@ -24,7 +43,7 @@ import { AnnouncementPopup } from "../components/AnnouncementPopup";
  * check, so a slow network doesn't add extra visible delay beyond
  * what the auth check needed anyway.
  */
-export function RootGate() {
+function AuthGatedApp() {
   const { user, isLoading } = useAuth();
   const [splashDone, setSplashDone] = useState(false);
   const handleSplashFinished = useCallback(() => setSplashDone(true), []);
