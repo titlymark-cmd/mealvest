@@ -83,11 +83,44 @@ export async function registerHotel(input: {
   return res.json();
 }
 
-export async function login(identifier: string, password: string): Promise<AuthResult> {
+export interface LoginPendingResult {
+  status: "pending_pin";
+  pendingToken: string;
+  pinSet: boolean;
+}
+
+/**
+ * Step 1 of 2 — password only. Never returns real tokens; the
+ * mandatory PIN second factor (see verifyLoginPin/setLoginPin below)
+ * is what actually completes the login.
+ */
+export async function login(identifier: string, password: string): Promise<LoginPendingResult> {
   const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ identifier, password }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
+/** Step 2 — account already has a PIN. */
+export async function verifyLoginPin(pendingToken: string, pin: string): Promise<AuthResult> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/login/verify-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pendingToken, pin }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
+/** Step 2 — account has no PIN yet; this pin becomes it. */
+export async function setLoginPin(pendingToken: string, pin: string): Promise<AuthResult> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/login/set-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pendingToken, pin }),
   });
   if (!res.ok) return parseErrorOrThrow(res);
   return res.json();

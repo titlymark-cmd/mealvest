@@ -11,6 +11,7 @@ import { HotelOwnerRoutes } from "./HotelOwnerRoutes";
 import { AdminRoutes } from "./AdminRoutes";
 import { AnnouncementPopup } from "../components/AnnouncementPopup";
 import InstallScreen from "../pages/InstallScreen";
+import { PinGateScreen } from "../pages/PinGateScreen";
 
 /**
  * /install is matched here, before anything else in the app — no
@@ -44,12 +45,20 @@ export function RootGate() {
  * what the auth check needed anyway.
  */
 function AuthGatedApp() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, pendingLogin } = useAuth();
   const [splashDone, setSplashDone] = useState(false);
   const handleSplashFinished = useCallback(() => setSplashDone(true), []);
 
   if (!splashDone) {
     return <SplashScreen onFinished={handleSplashFinished} />;
+  }
+
+  // A password login just succeeded but the mandatory PIN second
+  // factor hasn't been answered yet — `user` is still null at this
+  // point, so this must be checked ahead of every other branch below,
+  // same priority as splash/loading.
+  if (pendingLogin) {
+    return <PinGateScreen />;
   }
 
   if (isLoading) {

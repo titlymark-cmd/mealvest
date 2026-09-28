@@ -8,6 +8,7 @@ import {
   refreshSchema,
   setPinSchema,
   verifyPinSchema,
+  loginPinSchema,
 } from "../schemas/authSchemas";
 import { verifyGoogleIdToken } from "../lib/googleAuth";
 import { ApiError } from "../middleware/errorHandler";
@@ -43,12 +44,49 @@ export async function registerHotel(req: Request, res: Response, next: NextFunct
   }
 }
 
+/**
+ * Step 1 of 2 — verifies email/phone + password only. Never returns
+ * real tokens; the response is { status: "pending_pin", pendingToken,
+ * pinSet }, redeemable only via /login/verify-pin or /login/set-pin
+ * below (see authService.login's own doc comment for why).
+ */
 export async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) throw badRequestFromZod(parsed.error);
 
     const result = await authService.login(parsed.data);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Step 2 — for an account that already has a PIN (pinSet: true from
+ * step 1). No requireAuth: by definition the client doesn't hold a
+ * real token yet, the pendingToken IS the credential here, same
+ * reasoning as verifyPin below.
+ */
+export async function verifyLoginPin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = loginPinSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    const result = await authService.completeLoginWithPin(parsed.data.pendingToken, parsed.data.pin);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Step 2 — for an account with no PIN yet (pinSet: false from step 1); this call's pin becomes it. */
+export async function setLoginPin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = loginPinSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    const result = await authService.completeLoginWithNewPin(parsed.data.pendingToken, parsed.data.pin);
     res.status(200).json(result);
   } catch (err) {
     next(err);

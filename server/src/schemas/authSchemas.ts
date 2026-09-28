@@ -115,6 +115,16 @@ export const verifyPinSchema = z.object({
   pin: pinSchema,
 });
 
+// Step 2 of a fresh password login — redeems the opaque pendingToken
+// from step 1 (see authService.login) plus the 4-digit PIN. Used by
+// both /auth/login/verify-pin (account already has a PIN) and
+// /auth/login/set-pin (account doesn't have one yet, this pin becomes
+// it) — same shape either way.
+export const loginPinSchema = z.object({
+  pendingToken: z.string().min(1, "pendingToken is required."),
+  pin: pinSchema,
+});
+
 export type RegisterStudentInput = z.infer<typeof registerStudentSchema>;
 export type RegisterHotelInput = z.infer<typeof registerHotelSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

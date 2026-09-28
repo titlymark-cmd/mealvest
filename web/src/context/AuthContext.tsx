@@ -6,11 +6,24 @@ import { API_BASE_URL } from "../services/config";
 
 const REFRESH_TOKEN_KEY = "mealvest_refresh_token";
 
+/** Set right after password verification succeeds, cleared once the PIN step (or its cancellation) resolves. */
+export interface PendingLogin {
+  pendingToken: string;
+  pinSet: boolean;
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   accessToken: string | null;
   isLoading: boolean; // true only during the initial silent-refresh check on launch
+  pendingLogin: PendingLogin | null;
   loginWithPassword: (identifier: string, password: string) => Promise<void>;
+  /** Step 2 of a login where pendingLogin.pinSet is true. */
+  confirmLoginPin: (pin: string) => Promise<void>;
+  /** Step 2 of a login where pendingLogin.pinSet is false — this pin becomes the account's PIN. */
+  createLoginPin: (pin: string) => Promise<void>;
+  /** Abandon the pending PIN step and go back to the password form. */
+  cancelPendingLogin: () => void;
   loginWithGoogle: (idToken: string) => Promise<void>;
   registerStudent: (input: Parameters<typeof authApi.registerStudent>[0]) => Promise<void>;
   registerHotel: (input: Parameters<typeof authApi.registerHotel>[0]) => Promise<void>;
@@ -43,6 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingLogin, setPendingLogin] = useState<PendingLogin | null>(null);
 
   const applySession = useCallback(async (result: authApi.AuthResult) => {
     setUser(result.user);
@@ -80,13 +94,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, [applySession, clearSession]);
 
-  const loginWithPassword = useCallback(
-    async (identifier: string, password: string) => {
-      const result = await authApi.login(identifier, password);
+  /**
+   * Step 1 only — password verification. Never applies a session on
+   * its own; a successful call sets `pendingLogin`, and RootGate
+   * renders the mandatory PIN step (PinGateScreen) off of that until
+   * confirmLoginPin/createLoginPin actually completes the login.
+   */
+  const loginWithPassword = useCallback(async (identifier: string, password: string) => {
+    const result = await authApi.login(identifier, password);
+    setPendingLogin({ pendingToken: result.pendingToken, pinSet: result.pinSet });
+  }, []);
+
+  const confirmLoginPin = useCallback(
+    async (pin: string) => {
+      if (!pendingLogin) throw new Error("No login is currently pending.");
+      const result = await authApi.verifyLoginPin(pendingLogin.pendingToken, pin);
       await applySession(result);
+      setPendingLogin(null);
     },
-    [applySession]
+    [pendingLogin, applySession]
   );
+
+  const createLoginPin = useCallback(
+    async (pin: string) => {
+      if (!pendingLogin) throw new Error("No login is currently pending.");
+      const result = await authApi.setLoginPin(pendingLogin.pendingToken, pin);
+      await applySession(result);
+      setPendingLogin(null);
+    },
+    [pendingLogin, applySession]
+  );
+
+  const cancelPendingLogin = useCallback(() => {
+    setPendingLogin(null);
+  }, []);
 
   /**
    * One call handles both first-ever sign-up AND every later
@@ -168,14 +209,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       accessToken,
       isLoading,
+      pendingLogin,
       loginWithPassword,
+      confirmLoginPin,
+      createLoginPin,
+      cancelPendingLogin,
       loginWithGoogle,
       registerStudent,
       registerHotel,
       logout,
       authFetch,
     }),
-    [user, accessToken, isLoading, loginWithPassword, loginWithGoogle, registerStudent, registerHotel, logout, authFetch]
+    [
+      user,
+      accessToken,
+      isLoading,
+      pendingLogin,
+      loginWithPassword,
+      confirmLoginPin,
+      createLoginPin,
+      cancelPendingLogin,
+      loginWithGoogle,
+      registerStudent,
+      registerHotel,
+      logout,
+      authFetch,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

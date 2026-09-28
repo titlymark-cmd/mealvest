@@ -8,6 +8,8 @@ import {
   googleLogin,
   setPin,
   verifyPin,
+  verifyLoginPin,
+  setLoginPin,
 } from "../controllers/auth.controller";
 import { authRateLimiter } from "../middleware/rateLimit";
 import { requireAuth } from "../middleware/auth";
@@ -21,6 +23,11 @@ export const authRouter = Router();
 authRouter.post("/register/student", authRateLimiter, registerStudent);
 authRouter.post("/register/hotel", authRateLimiter, registerHotel);
 authRouter.post("/login", authRateLimiter, login);
+// Step 2 of login — mandatory PIN second factor. No requireAuth (see
+// verifyLoginPin/setLoginPin doc comments); rate-limited the same way
+// step 1 is, on top of the per-account PIN lockout underneath.
+authRouter.post("/login/verify-pin", authRateLimiter, verifyLoginPin);
+authRouter.post("/login/set-pin", authRateLimiter, setLoginPin);
 authRouter.post("/google", authRateLimiter, googleLogin);
 authRouter.post("/refresh", refresh);
 authRouter.post("/logout", logout);

@@ -224,7 +224,23 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
  */
 const INVALID_CREDENTIALS = new ApiError(401, "INVALID_CREDENTIALS", "Incorrect email/phone or password.");
 
-export async function login(input: LoginInput): Promise<AuthResult> {
+export interface LoginPendingResult {
+  status: "pending_pin";
+  pendingToken: string;
+  pinSet: boolean;
+}
+
+/**
+ * Password login is now only step 1 of 2 — it never issues real
+ * tokens itself. On success it hands back an opaque pendingToken (see
+ * pending_login_tokens / migration 034) that only POST
+ * /auth/login/verify-pin or /auth/login/set-pin can redeem into a
+ * real session, depending on `pinSet` (whether this account already
+ * has a PIN or needs to create one first). Google login is
+ * deliberately untouched — this PIN gate is specifically the second
+ * factor on top of a password, per spec.
+ */
+export async function login(input: LoginInput): Promise<LoginPendingResult> {
   const user = await findUserByEmailOrPhone(input.identifier);
   if (!user || !user.password_hash) {
     // Still run a hash comparison against a dummy value even when no
@@ -241,6 +257,78 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   const valid = await verifyPassword(input.password, user.password_hash);
   if (!valid) throw INVALID_CREDENTIALS;
 
+  const pendingToken = await createPendingLoginToken(user.id);
+  return { status: "pending_pin", pendingToken, pinSet: Boolean(user.pin_hash) };
+}
+
+const PENDING_LOGIN_TTL_MINUTES = 10;
+
+async function createPendingLoginToken(userId: string): Promise<string> {
+  const token = generateRefreshToken().token; // just reusing the same high-entropy random-token generator
+  const tokenHash = hashRefreshToken(token);
+  const expiresAt = new Date(Date.now() + PENDING_LOGIN_TTL_MINUTES * 60 * 1000);
+  await pool.query("INSERT INTO pending_login_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)", [
+    userId,
+    tokenHash,
+    expiresAt,
+  ]);
+  return token;
+}
+
+/** Read-only — does NOT consume the token, so a wrong PIN can be retried against the same pending login. */
+async function lookupPendingLoginToken(token: string): Promise<string> {
+  const tokenHash = hashRefreshToken(token);
+  const result = await pool.query("SELECT user_id FROM pending_login_tokens WHERE token_hash = $1 AND expires_at > now()", [
+    tokenHash,
+  ]);
+  if (result.rows.length === 0) {
+    throw new ApiError(401, "LOGIN_EXPIRED", "This login attempt has expired. Please log in again.");
+  }
+  return result.rows[0].user_id;
+}
+
+async function deletePendingLoginToken(token: string): Promise<void> {
+  await pool.query("DELETE FROM pending_login_tokens WHERE token_hash = $1", [hashRefreshToken(token)]);
+}
+
+/**
+ * Step 2 of login for an account that already has a PIN. Reuses the
+ * exact same lockout-aware verification as the app-relaunch
+ * quick-unlock (verifyPinForUser) — one wrong-PIN policy, enforced in
+ * one place, whether the student is unlocking an existing session or
+ * completing a brand new login.
+ */
+export async function completeLoginWithPin(pendingToken: string, pin: string): Promise<AuthResult> {
+  const userId = await lookupPendingLoginToken(pendingToken);
+  const user = await findUserById(userId);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(401, "LOGIN_EXPIRED", "This login attempt has expired. Please log in again.");
+  }
+  await verifyPinForUser(user, pin);
+  await deletePendingLoginToken(pendingToken);
+  const fullName = await lookupFullName(user);
+  return issueTokens(user.id, user.role, fullName, user.email);
+}
+
+/**
+ * Step 2 of login for an account with no PIN yet (pinSet: false in
+ * the step-1 response) — creates it on the spot. No currentPassword
+ * re-check needed here the way the settings-screen setPin() requires
+ * one: the pendingToken itself already proves the password was just
+ * verified seconds ago in step 1.
+ */
+export async function completeLoginWithNewPin(pendingToken: string, pin: string): Promise<AuthResult> {
+  const userId = await lookupPendingLoginToken(pendingToken);
+  const user = await findUserById(userId);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(401, "LOGIN_EXPIRED", "This login attempt has expired. Please log in again.");
+  }
+  if (user.pin_hash) {
+    throw new ApiError(400, "PIN_ALREADY_SET", "A PIN is already set for this account — enter it instead.");
+  }
+  const pinHash = await hashPassword(pin);
+  await setUserPin(user.id, pinHash);
+  await deletePendingLoginToken(pendingToken);
   const fullName = await lookupFullName(user);
   return issueTokens(user.id, user.role, fullName, user.email);
 }
@@ -415,6 +503,24 @@ export async function verifyPinAndRefresh(refreshToken: string, pin: string): Pr
   if (!user || user.account_status === "suspended") {
     throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
   }
+  await verifyPinForUser(user, pin);
+
+  // Rotate, exactly like the ordinary refresh() path — a PIN-unlock
+  // is still, underneath, a token refresh; it just skips re-asking
+  // for the password.
+  await revokeRefreshTokenByHash(tokenHash);
+  const fullName = await lookupFullName(user);
+  return issueTokens(user.id, user.role, fullName, user.email);
+}
+
+/**
+ * Shared by both PIN paths — the mandatory second-factor step right
+ * after a fresh password login (completeLoginWithPin) and the
+ * app-relaunch quick-unlock (verifyPinAndRefresh above). One
+ * lockout/attempt policy, enforced in exactly one place, so the two
+ * flows can never drift apart on what "4 attempts" actually means.
+ */
+async function verifyPinForUser(user: UserRow, pin: string): Promise<void> {
   if (!user.pin_hash) {
     throw new ApiError(400, "PIN_NOT_SET", "No PIN has been set for this account yet.");
   }
@@ -443,13 +549,6 @@ export async function verifyPinAndRefresh(refreshToken: string, pin: string): Pr
   }
 
   await resetPinAttempts(user.id);
-
-  // Rotate, exactly like the ordinary refresh() path — a PIN-unlock
-  // is still, underneath, a token refresh; it just skips re-asking
-  // for the password.
-  await revokeRefreshTokenByHash(tokenHash);
-  const fullName = await lookupFullName(user);
-  return issueTokens(user.id, user.role, fullName, user.email);
 }
 
 async function assertNoDuplicateAccount(email: string, phoneNumber: string): Promise<void> {
