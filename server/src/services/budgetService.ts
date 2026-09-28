@@ -17,6 +17,7 @@ export interface BudgetRow {
   last_spend_date: string | null;
   banked_amount: string;
   pending_tomorrow_amount: string;
+  pending_rollover_amount: string;
   created_at: string;
   updated_at: string;
 }
@@ -174,17 +175,27 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
  * succeed when only one should.
  */
 /**
- * Rolls forward any unused daily allowance into `banked_amount`,
- * lazily — there's no cron job "closing out the day" at midnight;
- * instead, whenever the budget is touched (read or spent against),
- * this catches it up to the current date first. This is what makes
- * it safe against clock games: the server's own CURRENT_DATE is the
- * only clock that matters, never anything the client sends.
+ * Catches the budget up to the current date, lazily — there's no cron
+ * job "closing out the day" at midnight; instead, whenever the budget
+ * is touched (read or spent against), this catches it up first. This
+ * is what makes it safe against clock games: the server's own
+ * CURRENT_DATE is the only clock that matters, never anything the
+ * client sends.
  *
+ * Unused daily allowance from a day that's now passed does NOT
+ * auto-credit to banked_amount here — it accumulates in
+ * pending_rollover_amount instead, and only becomes spendable once
+ * the student explicitly confirms it (see confirmRollover/
+ * declineRollover below and StudentHomeScreen's rollover prompt).
  * Handles gaps of more than one day correctly (e.g. a student who
- * doesn't open the app for 3 days doesn't lose that rollover — each
- * fully-skipped day's ENTIRE daily_allowance banks, not just the
- * most recent day's leftover).
+ * doesn't open the app for 3 days doesn't lose that pending amount —
+ * each fully-skipped day's ENTIRE daily_allowance adds to the pending
+ * total, still awaiting one combined decision).
+ *
+ * pending_tomorrow_amount is different: it's an already-explicit
+ * manual transfer the student confirmed on a previous day (see
+ * transferRemainingToNextDay below), so it keeps crediting into
+ * banked_amount automatically here, unaffected by this gate.
  *
  * Must be called with a client already inside a transaction that has
  * the budget row locked (SELECT...FOR UPDATE) — this function itself
@@ -211,7 +222,7 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
   }
 
   const dailyAllowance = Number(budget.daily_allowance);
-  let banked = Number(budget.banked_amount);
+  let pendingRollover = Number(budget.pending_rollover_amount);
 
   if (lastSpendDate === null) {
     // First-ever spend on this budget — nothing to roll over yet,
@@ -225,22 +236,108 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
     );
     const unusedFromLastActiveDay = Math.max(0, dailyAllowance - Number(budget.spent_today));
     const fullySkippedDays = daysElapsed - 1;
-    banked = Math.round((banked + unusedFromLastActiveDay + fullySkippedDays * dailyAllowance) * 100) / 100;
+    pendingRollover =
+      Math.round((pendingRollover + unusedFromLastActiveDay + fullySkippedDays * dailyAllowance) * 100) / 100;
   }
 
   // A day has genuinely passed — this is the ONE moment any manually
   // transferred amount (via transferRemainingToNextDay) actually
   // becomes spendable. Before this point, pending_tomorrow_amount is
   // deliberately excluded from every "available today" calculation.
+  // Unlike the silent rollover above, this was already explicitly
+  // confirmed by the student on a previous day, so it credits
+  // straight into banked_amount without a second confirmation.
   const pendingTomorrow = Number(budget.pending_tomorrow_amount);
-  banked = Math.round((banked + pendingTomorrow) * 100) / 100;
+  const banked = Math.round((Number(budget.banked_amount) + pendingTomorrow) * 100) / 100;
 
   const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET spent_today = 0, last_spend_date = $1, banked_amount = $2, pending_tomorrow_amount = 0, updated_at = now()
-     WHERE id = $3 RETURNING *`,
-    [today, banked, budget.id]
+    `UPDATE budgets SET spent_today = 0, last_spend_date = $1, banked_amount = $2, pending_tomorrow_amount = 0, pending_rollover_amount = $3, updated_at = now()
+     WHERE id = $4 RETURNING *`,
+    [today, banked, pendingRollover, budget.id]
   );
   return updated.rows[0];
+}
+
+/**
+ * The student's explicit answer to "carry this over?" (see
+ * applyDailyRollover above for why this exists instead of
+ * auto-crediting). Confirming moves pending_rollover_amount into
+ * banked_amount, where it finally becomes spendable.
+ */
+export async function confirmRollover(userId: string): Promise<BudgetRow & { remainingDays: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<BudgetRow>(
+      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+      [userId]
+    );
+    let budget = result.rows[0];
+    if (!budget) {
+      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
+    }
+    budget = await applyDailyRollover(client, budget);
+
+    const pending = Number(budget.pending_rollover_amount);
+    if (pending > 0) {
+      const newBanked = Math.round((Number(budget.banked_amount) + pending) * 100) / 100;
+      const updated = await client.query<BudgetRow>(
+        `UPDATE budgets SET banked_amount = $1, pending_rollover_amount = 0, updated_at = now()
+         WHERE id = $2 RETURNING *`,
+        [newBanked, budget.id]
+      );
+      budget = updated.rows[0];
+    }
+
+    await client.query("COMMIT");
+    const remainingDays = daysBetween(new Date(), new Date(budget.end_date));
+    return { ...budget, remainingDays };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Declining forfeits pending_rollover_amount — it's dropped, not
+ * banked, and can never be spent (see the updated Mealvest terms
+ * disclaimer in BudgetOnboardingScreen: carry-forward is no longer
+ * unconditional, the student decides each time).
+ */
+export async function declineRollover(userId: string): Promise<BudgetRow & { remainingDays: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<BudgetRow>(
+      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+      [userId]
+    );
+    let budget = result.rows[0];
+    if (!budget) {
+      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
+    }
+    budget = await applyDailyRollover(client, budget);
+
+    if (Number(budget.pending_rollover_amount) > 0) {
+      const updated = await client.query<BudgetRow>(
+        `UPDATE budgets SET pending_rollover_amount = 0, updated_at = now()
+         WHERE id = $1 RETURNING *`,
+        [budget.id]
+      );
+      budget = updated.rows[0];
+    }
+
+    await client.query("COMMIT");
+    const remainingDays = daysBetween(new Date(), new Date(budget.end_date));
+    return { ...budget, remainingDays };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**

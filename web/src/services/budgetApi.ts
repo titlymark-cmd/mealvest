@@ -13,6 +13,7 @@ export interface Budget {
   spent_today: string;
   banked_amount: string;
   pending_tomorrow_amount: string;
+  pending_rollover_amount: string;
   last_spend_date: string | null;
 }
 
@@ -59,5 +60,29 @@ export async function transferToNextDay(
   const res = await authFetch("/api/student/budget/transfer-to-next-day", { method: "POST" });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Could not transfer your balance.");
+  return data.budget;
+}
+
+/**
+ * The student's "yes, carry it over" answer to budget.pending_rollover_amount
+ * (see RolloverPrompt) — moves it into banked_amount, where it becomes
+ * spendable today.
+ */
+export async function confirmRollover(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<Budget> {
+  const res = await authFetch("/api/student/budget/rollover/confirm", { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "Could not confirm the carry-over.");
+  return data.budget;
+}
+
+/** The student's "no, don't carry it over" answer — forfeits it permanently. */
+export async function declineRollover(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<Budget> {
+  const res = await authFetch("/api/student/budget/rollover/decline", { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "Could not decline the carry-over.");
   return data.budget;
 }

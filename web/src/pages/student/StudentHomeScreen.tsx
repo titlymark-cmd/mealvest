@@ -8,6 +8,7 @@ import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { getActiveBudget, transferToNextDay, Budget } from "../../services/budgetApi";
 import { fetchCustomerCarePhone } from "../../services/settingsApi";
+import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 
 export default function StudentHomeScreen() {
   const { user, logout, authFetch } = useAuth();
@@ -105,6 +106,10 @@ export default function StudentHomeScreen() {
 
   return (
     <div style={styles.container}>
+      {budget && Number(budget.pending_rollover_amount) > 0 && (
+        <RolloverPrompt budget={budget} onResolved={setBudget} />
+      )}
+
       <div style={styles.headerRow}>
         <div>
           <span style={styles.greeting}>Good day 👋</span>

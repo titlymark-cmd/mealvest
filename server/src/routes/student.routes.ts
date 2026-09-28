@@ -8,6 +8,8 @@ import {
   getWithdrawalStatus,
   requestWithdrawal,
   transferToNextDay,
+  confirmRollover,
+  declineRollover,
   requestHotelTransfer,
 } from "../controllers/student.controller";
 
@@ -19,6 +21,8 @@ studentRouter.patch("/profile", updateStudentProfile);
 studentRouter.post("/budget", createBudget);
 studentRouter.get("/budget", getBudget);
 studentRouter.post("/budget/transfer-to-next-day", transferToNextDay);
+studentRouter.post("/budget/rollover/confirm", confirmRollover);
+studentRouter.post("/budget/rollover/decline", declineRollover);
 studentRouter.get("/withdrawal-status", getWithdrawalStatus);
 studentRouter.post("/withdraw", requestWithdrawal);
 // Frozen MVP2 feature — see requestHotelTransfer's own comment.

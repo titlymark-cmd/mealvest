@@ -184,6 +184,24 @@ export async function transferToNextDay(req: AuthedRequest, res: Response, next:
   }
 }
 
+export async function confirmRollover(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const budget = await budgetService.confirmRollover(req.user!.id);
+    res.json({ budget });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function declineRollover(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const budget = await budgetService.declineRollover(req.user!.id);
+    res.json({ budget });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /**
  * Hotel Transfer (switching a student's active plan to a different
  * hotel mid-contract for a KSh 50 fee) is intentionally frozen for
