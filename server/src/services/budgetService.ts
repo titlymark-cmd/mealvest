@@ -194,21 +194,33 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
   const todayResult = await client.query("SELECT CURRENT_DATE AS today");
   const today: string = todayResult.rows[0].today.toISOString().slice(0, 10);
 
-  if (budget.last_spend_date === today) {
+  // node-postgres parses the DATE column as a JS Date object by
+  // default, not the plain "YYYY-MM-DD" string this file's own
+  // BudgetRow type claims — comparing it to `today` directly with
+  // `===` never matched, so this "already caught up" guard never
+  // actually short-circuited and the rollover math below ran on
+  // EVERY read, crediting banked_amount again and again instead of
+  // once per calendar day. Normalizing to the same string shape
+  // before comparing fixes it (safe for a string, a Date, or null).
+  const lastSpendDate: string | null = budget.last_spend_date
+    ? new Date(budget.last_spend_date).toISOString().slice(0, 10)
+    : null;
+
+  if (lastSpendDate === today) {
     return budget; // Already caught up — the common case, no write needed.
   }
 
   const dailyAllowance = Number(budget.daily_allowance);
   let banked = Number(budget.banked_amount);
 
-  if (budget.last_spend_date === null) {
+  if (lastSpendDate === null) {
     // First-ever spend on this budget — nothing to roll over yet,
     // just start tracking from today.
   } else {
     const daysElapsed = Math.max(
       1,
       Math.round(
-        (new Date(today).getTime() - new Date(budget.last_spend_date).getTime()) / (24 * 60 * 60 * 1000)
+        (new Date(today).getTime() - new Date(lastSpendDate).getTime()) / (24 * 60 * 60 * 1000)
       )
     );
     const unusedFromLastActiveDay = Math.max(0, dailyAllowance - Number(budget.spent_today));
