@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ShieldCheck, XCircle } from "lucide-react";
 import { Card } from "../../components/Card";
@@ -8,6 +8,7 @@ import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { verifyQr, redeemQr, QrCheckResult } from "../../services/hotelStaffApi";
 import { useQrScanner } from "../../hooks/useQrScanner";
+import { getCameraUnblockInstructions } from "../../utils/browserInstructions";
 
 type ScanState = "scanning" | "verifying" | "confirmed" | "redeeming" | "error";
 
@@ -43,6 +44,7 @@ export default function HotelScannerScreen() {
   const lastScannedRef = useRef<string | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const unblockInstructions = useMemo(() => getCameraUnblockInstructions(), []);
 
   const handleBarcodeScanned = useCallback(
     async (data: string) => {
@@ -132,9 +134,17 @@ export default function HotelScannerScreen() {
           </PrimaryButton>
         ) : (
           <>
-            <p style={{ ...styles.permBody, marginTop: 20 }}>
-              Camera access was blocked. Check your browser's site settings for this page and allow camera access, then try again.
-            </p>
+            <p style={{ ...styles.permBody, marginTop: 20 }}>Camera access was blocked. Here's how to turn it back on:</p>
+            <Card style={styles.unblockCard}>
+              <span style={styles.unblockBrowser}>{unblockInstructions.label}</span>
+              <ol style={styles.unblockList}>
+                {unblockInstructions.steps.map((step, i) => (
+                  <li key={i} style={styles.unblockStep}>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </Card>
             <PrimaryButton onPress={() => window.location.reload()} style={{ marginTop: 16, width: 220 }}>
               Reload and try again
             </PrimaryButton>
@@ -226,6 +236,10 @@ const styles: Record<string, React.CSSProperties> = {
   center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
   permTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
   permBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },
+  unblockCard: { marginTop: 16, width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", alignItems: "flex-start" },
+  unblockBrowser: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 11, color: COLORS.primary, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  unblockList: { margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 },
+  unblockStep: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.text, textAlign: "left", lineHeight: "17px" },
   headerRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 54, paddingLeft: 18, paddingRight: 18, paddingBottom: 14 },
   backBtn: { width: 34, height: 34, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   headerText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 14, color: "#fff" },
