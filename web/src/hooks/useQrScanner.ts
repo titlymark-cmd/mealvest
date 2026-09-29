@@ -18,7 +18,7 @@ export type CameraPermissionState = "unknown" | "granted" | "denied" | "unsuppor
  * (lastScannedRef) rather than this hook needing one of its own.
  */
 export function useQrScanner(onDetected: (data: string) => void, active: boolean) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -44,7 +44,7 @@ export function useQrScanner(onDetected: (data: string) => void, active: boolean
   }, []);
 
   const tick = useCallback(() => {
-    const video = videoRef.current;
+    const video = videoElRef.current;
     const canvas = canvasRef.current;
     if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
       canvas.width = video.videoWidth;
@@ -70,9 +70,20 @@ export function useQrScanner(onDetected: (data: string) => void, active: boolean
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       streamRef.current = stream;
       setPermission("granted");
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      // On the very first grant, permission is still "unknown" right up
+      // until the setPermission call above — the <video> element only
+      // exists in the DOM once that state flips, which React commits
+      // AFTER this function keeps running, not before. So videoElRef.current
+      // here is reliably null on a first grant, and this assignment used
+      // to just silently no-op, leaving a permitted, actually-streaming
+      // camera attached to nothing: a black box with no error anywhere.
+      // The attachStream callback ref below is what actually attaches it
+      // once that element exists; this block still matters for a RESUMED
+      // scan (video already mounted from the state toggle, stream arrives
+      // slightly later).
+      if (videoElRef.current) {
+        videoElRef.current.srcObject = stream;
+        await videoElRef.current.play();
       }
       rafRef.current = requestAnimationFrame(tick);
     } catch {
@@ -87,5 +98,20 @@ export function useQrScanner(onDetected: (data: string) => void, active: boolean
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  return { videoRef, canvasRef, permission, canAskAgain, requestPermission };
+  // Fires on every real mount of the <video> element — including the
+  // very first one, which is the case requestPermission's own inline
+  // assignment above can miss (see its comment). A callback ref fires
+  // exactly when the DOM node actually exists, so this is what
+  // guarantees an already-acquired stream always ends up attached,
+  // regardless of which happens first: the permission grant or the
+  // element mounting.
+  const attachStream = useCallback((node: HTMLVideoElement | null) => {
+    videoElRef.current = node;
+    if (node && streamRef.current) {
+      node.srcObject = streamRef.current;
+      node.play().catch(() => {});
+    }
+  }, []);
+
+  return { videoRef: attachStream, canvasRef, permission, canAskAgain, requestPermission };
 }
