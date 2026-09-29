@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { ShieldCheck, Store, User, Eye, EyeOff } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../styles/theme";
 import { useAuth } from "../context/AuthContext";
 import { ApiError, SettlementInput } from "../services/authApi";
+import { isGoogleAuthConfigured } from "../services/googleAuth";
+import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
 type Mode = "student" | "hotel";
 
@@ -51,7 +53,31 @@ const SETTLEMENT_METHODS: { value: SettlementMethod; label: string }[] = [
  * (View/TextInput/TouchableOpacity -> div/input/button).
  */
 export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onSwitchToLogin: () => void }) {
-  const { registerStudent, registerHotel } = useAuth();
+  const { registerStudent, registerHotel, loginWithGoogle } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+
+  // Google sign-up always creates a STUDENT account server-side
+  // (authService.loginWithGoogle has no concept of a hotel role for a
+  // brand-new account) — offering this button in hotel mode would
+  // silently hand a hotel owner a student account instead of the
+  // hotel one they asked for, so it's student-only, not a limitation
+  // of this screen.
+  const handleGoogleIdToken = useCallback(
+    async (idToken: string) => {
+      setGoogleError(null);
+      setGoogleLoading(true);
+      try {
+        await loginWithGoogle(idToken);
+      } catch (err) {
+        setGoogleError(err instanceof ApiError ? err.message : "Google sign-in failed. Please try again.");
+      } finally {
+        setGoogleLoading(false);
+      }
+    },
+    [loginWithGoogle]
+  );
+  const googleConfigured = mode === "student" && isGoogleAuthConfigured();
 
   // Shared
   const [email, setEmail] = useState("");
@@ -179,6 +205,18 @@ export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onS
       <p style={styles.subtitle}>
         {mode === "student" ? "Takes less than a minute." : "Just the essentials for now — you can complete your full profile later."}
       </p>
+
+      {googleConfigured && (
+        <>
+          <GoogleSignInButton onIdToken={handleGoogleIdToken} loading={googleLoading} />
+          <div style={styles.dividerRow}>
+            <div style={styles.dividerLine} />
+            <span style={styles.dividerText}>OR</span>
+            <div style={styles.dividerLine} />
+          </div>
+        </>
+      )}
+      {googleError && <p style={styles.error}>{googleError}</p>}
 
       {mode === "student" && (
         <input style={styles.input} placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
@@ -419,6 +457,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: { fontSize: 21, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, flexShrink: 1, margin: 0 },
   subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 22 },
+  dividerRow: { display: "flex", flexDirection: "row", alignItems: "center", marginTop: 18, marginBottom: 18 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  dividerText: { marginLeft: 10, marginRight: 10, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.textOnDarkMuted },
   sectionLabel: {
     display: "block",
     fontSize: 11,
