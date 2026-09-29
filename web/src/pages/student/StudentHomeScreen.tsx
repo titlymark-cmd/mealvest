@@ -9,6 +9,7 @@ import { useAuth } from "../../context/AuthContext";
 import { getActiveBudget, transferToNextDay, Budget } from "../../services/budgetApi";
 import { fetchCustomerCarePhone } from "../../services/settingsApi";
 import { RolloverPrompt } from "../../components/student/RolloverPrompt";
+import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
 
 export default function StudentHomeScreen() {
   const { user, logout, authFetch } = useAuth();
@@ -62,6 +63,9 @@ export default function StudentHomeScreen() {
   const spentToday = budget ? Number(budget.spent_today) : 0;
   const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday);
   const pct = dailyCredit + bankedAmount > 0 ? spentToday / (dailyCredit + bankedAmount) : 0;
+  const dailyCreditStatus = getDailyCreditStatus(spentToday, dailyCredit + bankedAmount);
+  const dailyCreditColor =
+    dailyCreditStatus === "unused" ? COLORS.success : dailyCreditStatus === "low" ? COLORS.danger : COLORS.warning;
 
   const showRolloverInfo = () => {
     window.alert(
@@ -173,7 +177,7 @@ export default function StudentHomeScreen() {
           </button>
 
           <Card style={styles.ringCard}>
-            <PlateRing pct={pct}>
+            <PlateRing pct={pct} color={dailyCreditColor}>
               <span style={styles.ringLabel}>DAILY CREDIT</span>
               <span style={styles.ringValue}>KSh {dailyCredit.toLocaleString()}</span>
             </PlateRing>

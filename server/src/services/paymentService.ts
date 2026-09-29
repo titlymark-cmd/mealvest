@@ -147,19 +147,40 @@ export async function activatePaymentIfNeeded(
       // here, just credit the referenced budget.
       await applyBoost(tx.budget_id, Number(tx.amount));
     } else {
-      await createBudget({
-        userId: tx.user_id,
-        totalAmount: Number(tx.amount),
-        numberOfDays: tx.number_of_days || 30,
-        hotelId: tx.hotel_id,
-        // Already required and validated at POST /payments/paystack/initialize
-        // (initializeSchema.termsAccepted) — this payment could not have
-        // been initiated at all without it, so it's safe to assert true
-        // here rather than re-collecting it at activation time (which
-        // happens via webhook/verify, where there is no user present to
-        // ask).
-        termsAccepted: true,
-      });
+      // A "new plan" top-up can still land here while the student
+      // already has an active budget — e.g. a retried checkout after
+      // an earlier attempt that looked failed/abandoned client-side
+      // but actually settled, or simply paying twice by mistake.
+      // createBudget() rejects that (ACTIVE_BUDGET_EXISTS) since a
+      // student can only ever have one active plan — but by the time
+      // we're here, the payment is ALREADY durably committed as
+      // 'success' a few lines up. Letting createBudget's rejection
+      // propagate used to mean real, successfully-charged money simply
+      // vanished: no budget created, nothing credited, and the error
+      // was silently swallowed by the webhook handler. Crediting it
+      // into the existing active budget instead (exactly like a boost)
+      // means a student's money is never lost to this, whichever path
+      // triggered the payment.
+      const existing = await pool.query("SELECT id FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1", [
+        tx.user_id,
+      ]);
+      if (existing.rows.length > 0) {
+        await applyBoost(existing.rows[0].id, Number(tx.amount));
+      } else {
+        await createBudget({
+          userId: tx.user_id,
+          totalAmount: Number(tx.amount),
+          numberOfDays: tx.number_of_days || 30,
+          hotelId: tx.hotel_id,
+          // Already required and validated at POST /payments/paystack/initialize
+          // (initializeSchema.termsAccepted) — this payment could not have
+          // been initiated at all without it, so it's safe to assert true
+          // here rather than re-collecting it at activation time (which
+          // happens via webhook/verify, where there is no user present to
+          // ask).
+          termsAccepted: true,
+        });
+      }
     }
 
     return { alreadyProcessed: false, transactionId: tx.id };

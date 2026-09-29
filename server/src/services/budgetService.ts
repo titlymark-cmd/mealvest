@@ -250,10 +250,21 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
   const pendingTomorrow = Number(budget.pending_tomorrow_amount);
   const banked = Math.round((Number(budget.banked_amount) + pendingTomorrow) * 100) / 100;
 
+  // Hard invariant, independent of how the math above got here: a
+  // plan can never roll over more than it actually has left. Without
+  // this, any future bug in the day-crossing arithmetic (or a stale
+  // daily_allowance read at just the wrong moment) turns directly into
+  // a student being able to spend far more in one day than the plan
+  // was ever meant to release — this clamp makes that impossible
+  // regardless of what upstream produced pendingRollover/banked.
+  const remaining = Number(budget.remaining_amount);
+  const cappedPendingRollover = Math.min(pendingRollover, remaining);
+  const cappedBanked = Math.min(banked, remaining);
+
   const updated = await client.query<BudgetRow>(
     `UPDATE budgets SET spent_today = 0, last_spend_date = $1, banked_amount = $2, pending_tomorrow_amount = 0, pending_rollover_amount = $3, updated_at = now()
      WHERE id = $4 RETURNING *`,
-    [today, banked, pendingRollover, budget.id]
+    [today, cappedBanked, cappedPendingRollover, budget.id]
   );
   return updated.rows[0];
 }
@@ -280,7 +291,10 @@ export async function confirmRollover(userId: string): Promise<BudgetRow & { rem
 
     const pending = Number(budget.pending_rollover_amount);
     if (pending > 0) {
-      const newBanked = Math.round((Number(budget.banked_amount) + pending) * 100) / 100;
+      const newBanked = Math.min(
+        Math.round((Number(budget.banked_amount) + pending) * 100) / 100,
+        Number(budget.remaining_amount)
+      );
       const updated = await client.query<BudgetRow>(
         `UPDATE budgets SET banked_amount = $1, pending_rollover_amount = 0, updated_at = now()
          WHERE id = $2 RETURNING *`,
