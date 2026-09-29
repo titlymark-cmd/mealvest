@@ -1,5 +1,5 @@
 import React from "react";
-import { COLORS, FONTS, RADIUS } from "../styles/theme";
+import { COLORS } from "../styles/theme";
 import { useGoogleAuth } from "../services/googleAuth";
 import { Spinner } from "./Spinner";
 
@@ -14,72 +14,40 @@ interface Props {
  * when this component is actually mounted. Callers gate mounting on
  * isGoogleAuthConfigured() from services/googleAuth, matching the
  * original app's behavior exactly.
+ *
+ * Renders Google's own real button (via useGoogleAuth's buttonRef) —
+ * see that hook's comment for why a custom-skinned button faking a
+ * click on a hidden real one doesn't reliably work. `loading` (while
+ * the ID token is being exchanged with our backend) overlays a
+ * spinner on top of Google's button rather than replacing it, since
+ * unmounting Google's button mid-flow would lose its click state.
  */
 export function GoogleSignInButton({ onIdToken, loading }: Props) {
-  const { ready, promptAsync, hiddenButtonRef } = useGoogleAuth(onIdToken);
+  const { ready, buttonRef } = useGoogleAuth(onIdToken);
 
   return (
-    <>
-      {/* Google's own rendered button, kept off-screen — see
-          services/googleAuth.ts for why this exists instead of
-          calling accounts.id.prompt() directly. */}
-      <div ref={hiddenButtonRef} style={{ position: "absolute", top: -9999, left: -9999, opacity: 0 }} />
-      <button
-        style={styles.googleButton}
-        disabled={!ready || loading}
-        className={!ready || loading ? undefined : "mv-action"}
-        onClick={() => promptAsync()}
-      >
-        {loading ? (
+    <div style={styles.wrap}>
+      {!ready && <div style={styles.placeholder} />}
+      <div ref={buttonRef} style={{ display: "flex", justifyContent: "center", visibility: ready ? "visible" : "hidden" }} />
+      {loading && (
+        <div style={styles.loadingOverlay}>
           <Spinner color={COLORS.primary} />
-        ) : (
-          <>
-            <GoogleLogo />
-            <span style={styles.googleButtonText}>Continue with Google</span>
-          </>
-        )}
-      </button>
-    </>
-  );
-}
-
-/** Google's own official four-color "G" mark, per their sign-in branding guidelines. */
-function GoogleLogo() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" style={{ flexShrink: 0 }}>
-      <path
-        fill="#4285F4"
-        d="M17.64 9.2045c0-.6381-.0573-1.2518-.1636-1.8409H9v3.4814h4.8436c-.2086 1.125-.8427 2.0782-1.7959 2.7164v2.2581h2.9087c1.7018-1.5668 2.6836-3.8741 2.6836-6.615z"
-      />
-      <path
-        fill="#34A853"
-        d="M9 18c2.43 0 4.4673-.806 5.9564-2.1805l-2.9087-2.2581c-.8059.54-1.8368.8591-3.0477.8591-2.3436 0-4.3282-1.5831-5.036-3.7104H.9573v2.3318C2.4382 15.9832 5.4818 18 9 18z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M3.964 10.71c-.18-.54-.2822-1.1168-.2822-1.71s.1023-1.17.2823-1.71V4.9582H.9573A8.9965 8.9965 0 000 9c0 1.4527.3477 2.8268.9573 4.0418L3.964 10.71z"
-      />
-      <path
-        fill="#EA4335"
-        d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.346l2.5813-2.5814C13.4632.8918 11.426 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.964 7.29C4.6718 5.1627 6.6564 3.5795 9 3.5795z"
-      />
-    </svg>
+        </div>
+      )}
+    </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  googleButton: {
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.md,
-    border: `1px solid ${COLORS.border}`,
-    paddingTop: 14,
-    paddingBottom: 14,
-    width: "100%",
+  wrap: { position: "relative", width: "100%", minHeight: 44, display: "flex", justifyContent: "center" },
+  placeholder: { position: "absolute", inset: 0, borderRadius: 999, backgroundColor: "rgba(252,244,234,0.06)" },
+  loadingOverlay: {
+    position: "absolute",
+    inset: 0,
     display: "flex",
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    backgroundColor: "#fff",
+    borderRadius: 999,
   },
-  googleButtonText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 15, color: COLORS.text },
 };
