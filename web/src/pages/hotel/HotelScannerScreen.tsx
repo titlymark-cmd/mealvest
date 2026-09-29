@@ -131,9 +131,14 @@ export default function HotelScannerScreen() {
             Enable camera
           </PrimaryButton>
         ) : (
-          <p style={{ ...styles.permBody, marginTop: 20 }}>
-            Camera access was blocked. Check your browser's site settings for this page and allow camera access, then reload.
-          </p>
+          <>
+            <p style={{ ...styles.permBody, marginTop: 20 }}>
+              Camera access was blocked. Check your browser's site settings for this page and allow camera access, then try again.
+            </p>
+            <PrimaryButton onPress={() => window.location.reload()} style={{ marginTop: 16, width: 220 }}>
+              Reload and try again
+            </PrimaryButton>
+          </>
         )}
       </div>
     );

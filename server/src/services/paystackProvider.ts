@@ -56,6 +56,7 @@ export class PaystackPaymentProvider implements PaymentProvider {
         reference: params.reference,
         channels: ["mobile_money", "card"], // Kenyan M-Pesa arrives via Paystack's mobile_money channel
         metadata: { userId: params.userId, phoneNumber: params.phoneNumber, ...params.metadata },
+        ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
       });
 
       const data = res.data.data;

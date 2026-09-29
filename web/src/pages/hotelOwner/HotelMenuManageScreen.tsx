@@ -10,6 +10,7 @@ import { useWindowSize } from "../../hooks/useWindowSize";
 import { HOTEL_MOBILE_BREAKPOINT } from "../../components/hotel/HotelSidebar";
 import { formatKsh } from "../../components/shared/format";
 import { fetchOwnMenu, addMenuItem, updateMenuItem, deleteMenuItem, HotelMenuItem } from "../../services/hotelStaffApi";
+import { ImageUploadField } from "../../components/ImageUploadField";
 
 const CATEGORIES = ["breakfast", "lunch", "dinner", "snacks", "drinks", "other"];
 
@@ -72,6 +73,15 @@ export default function HotelMenuManageScreen() {
     }
   };
 
+  const handleChangeImage = async (item: HotelMenuItem, url: string) => {
+    try {
+      await updateMenuItem(authFetch, item.id, { imageUrl: url });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update this item's photo.");
+    }
+  };
+
   const handleDelete = async (item: HotelMenuItem) => {
     if (!window.confirm(`Remove "${item.name}" from your menu?`)) return;
     setDeletingId(item.id);
@@ -112,11 +122,12 @@ export default function HotelMenuManageScreen() {
         <Card style={{ marginBottom: 16, display: "flex", flexDirection: "column" }}>
           <input style={styles.input} placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} />
           <input style={styles.input} placeholder="Price (KSh)" inputMode="numeric" value={price} onChange={(e) => setPrice(e.target.value)} />
+          <ImageUploadField authFetch={authFetch} value={imageUrl} onChange={setImageUrl} label="Upload a photo" />
           <div style={styles.imageInputRow}>
             <ImagePlus size={14} color={COLORS.textMuted} />
             <input
               style={styles.imageInput}
-              placeholder="Image URL (optional — direct upload isn't available yet)"
+              placeholder="…or paste an image URL"
               value={imageUrl}
               onChange={(e) => setImageUrl(e.target.value)}
               autoCapitalize="none"
@@ -183,6 +194,16 @@ export default function HotelMenuManageScreen() {
                 <div style={styles.itemFooter}>
                   <span style={styles.itemPrice}>{formatKsh(item.price)}</span>
                   <span style={styles.itemCategory}>{item.category}</span>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <ImageUploadField
+                    authFetch={authFetch}
+                    value={item.image_url || ""}
+                    onChange={(url) => handleChangeImage(item, url)}
+                    itemId={item.id}
+                    hidePreview
+                    compact
+                  />
                 </div>
               </div>
               <div style={styles.itemActions}>

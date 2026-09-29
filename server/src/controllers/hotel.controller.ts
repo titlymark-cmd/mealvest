@@ -5,6 +5,7 @@ import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { updateHotelLocationSchema } from "../schemas/hotelLocationSchema";
 import * as orderService from "../services/orderService";
+import { uploadHotelImage } from "../services/storageService";
 
 /**
  * Resolves the hotel_id for the currently authenticated hotel_owner/
@@ -254,6 +255,49 @@ export async function markOrderReady(req: AuthedRequest, res: Response, next: Ne
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.markOrderReady(req.params.orderId, hotelId);
     res.json({ order });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Real device/file upload for hotel + meal photos — the frontend's
+ * image field used to only accept a pasted URL (see migration 024's
+ * own comment: "real device upload becomes a client-side-only
+ * addition later, writing to this same column"). This is that
+ * addition: it returns a real hosted URL, and the existing
+ * updateHotelLocation/addMenuItem/updateMenuItem endpoints — already
+ * expecting an `imageUrl` string — are completely unchanged; the
+ * frontend just puts the URL this returns into that same field
+ * instead of one a hotel typed in by hand. A hotel can still paste an
+ * external URL directly if it prefers to.
+ *
+ * `itemId`, when present, scopes the object path under that specific
+ * menu item (still validated as belonging to THIS hotel — an id for a
+ * different hotel's item is rejected, not just used as a path label)
+ * so a meal's photos land under hotel/{hotelId}/meals/{itemId}/...
+ * rather than the hotel's own cover/gallery path.
+ */
+export async function uploadImage(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = await getOwnHotelId(req.user!.id);
+    const file = req.file;
+    if (!file) {
+      throw new ApiError(400, "VALIDATION_ERROR", "No image file was provided.");
+    }
+
+    const itemId = typeof req.body?.itemId === "string" && req.body.itemId ? req.body.itemId : null;
+    let pathPrefix = `hotel/${hotelId}/cover`;
+    if (itemId) {
+      const owns = await pool.query("SELECT id FROM menu_items WHERE id = $1 AND hotel_id = $2", [itemId, hotelId]);
+      if (owns.rows.length === 0) {
+        throw new ApiError(404, "ITEM_NOT_FOUND", "Menu item not found.");
+      }
+      pathPrefix = `hotel/${hotelId}/meals/${itemId}`;
+    }
+
+    const url = await uploadHotelImage(pathPrefix, file);
+    res.status(201).json({ url });
   } catch (err) {
     next(err);
   }

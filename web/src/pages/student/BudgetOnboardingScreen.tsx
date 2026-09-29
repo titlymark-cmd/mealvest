@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Sparkles, Check } from "lucide-react";
 import { Card } from "../../components/Card";
@@ -6,7 +6,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { initializePayment, verifyPayment } from "../../services/paymentsApi";
+import { initializePayment } from "../../services/paymentsApi";
 
 const PRESETS = [2000, 3000, 5000, 12000, 15000];
 
@@ -17,28 +17,25 @@ const DISCLAIMER_TEXT =
   "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over or let it go; declining forfeits it.\n" +
   "• Please review your amount, days, and hotel before confirming.";
 
-type Stage = "form" | "opening_checkout" | "waiting" | "confirming" | "success" | "error";
+type Stage = "form" | "opening_checkout" | "error";
 
 /**
  * Real Paystack flow, matching exactly what the backend actually
  * enforces:
  *   1. initializePayment() — requires termsAccepted:true, or the
  *      backend rejects the request before Paystack is ever contacted.
- *   2. Open the returned checkoutUrl in a new tab — this is the ONLY
- *      place money can actually move; nothing in this screen can mark
- *      a payment successful on its own. (The original app used
- *      expo-web-browser's openBrowserAsync, which awaits until that
- *      browser session closes before polling; window.open() doesn't
- *      offer an equivalent await, so polling starts right away
- *      instead — it already retries every 6s regardless of whether
- *      the tab is still open, so this doesn't change the outcome.)
- *   3. Poll verifyPayment() — which calls Paystack's own API
- *      server-side and only THEN activates the budget. A closed
- *      browser tab is not, by itself, evidence of anything; verify()
- *      is the actual source of truth.
- *   4. Timeout after ~90s of polling if Paystack never confirms —
- *      the student can check again later rather than being stuck on
- *      an infinite spinner.
+ *   2. Full-page redirect (window.location.href) to the returned
+ *      checkoutUrl — this is the ONLY place money can actually move;
+ *      nothing in this screen can mark a payment successful on its
+ *      own. A real top-level navigation can never be blocked the way
+ *      a window.open() popup can (that was the reported bug this
+ *      replaced — see git history for the earlier popup-based version).
+ *   3. Paystack redirects back to /payment/callback once checkout
+ *      finishes, which is where polling verifyPayment() and actually
+ *      activating the budget happens (see PaymentCallbackScreen) — a
+ *      closed/returned browser is not, by itself, evidence of
+ *      anything; that screen's verify() call is the real source of
+ *      truth, same as this screen used to do inline.
  */
 export default function BudgetOnboardingScreen() {
   const location = useLocation();
@@ -53,10 +50,6 @@ export default function BudgetOnboardingScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
-  const [popupBlocked, setPopupBlocked] = useState(false);
-  const referenceRef = useRef<string | null>(null);
-  const checkoutUrlRef = useRef<string | null>(null);
-  const pollAttemptsRef = useRef(0);
 
   const dailyAllowance = (() => {
     const a = Number(amount);
@@ -78,7 +71,7 @@ export default function BudgetOnboardingScreen() {
 
     setStage("opening_checkout");
     try {
-      const { reference, checkoutUrl } = await initializePayment(authFetch, {
+      const { checkoutUrl } = await initializePayment(authFetch, {
         amount: totalAmount,
         numberOfDays,
         phone: phone.trim(),
@@ -86,103 +79,29 @@ export default function BudgetOnboardingScreen() {
         hotelId: hotelId ?? null,
         termsAccepted: true,
       });
-      referenceRef.current = reference;
-      checkoutUrlRef.current = checkoutUrl;
 
-      setStage("waiting");
-      // A browser can silently block this popup because it fires after
-      // the `await initializePayment(...)` above — outside the direct
-      // click-handler call stack most browsers require to allow
-      // window.open() without a user gesture. When that happens, fall
-      // back to a manual "Open payment page" button below (a real click
-      // on that button is its own gesture, so it always works).
-      const win = window.open(checkoutUrl, "_blank", "noopener,noreferrer");
-      setPopupBlocked(!win);
-      pollForConfirmation();
+      // hotelName only exists in this screen's in-memory navigation
+      // state, which a real page redirect to Paystack and back would
+      // otherwise lose — stashed here so PaymentCallbackScreen can
+      // hand it to the dashboard the same way this screen used to.
+      if (hotelName) sessionStorage.setItem("mealvest_pending_hotel_name", hotelName);
+
+      // Full-page redirect — not window.open(). A real top-level
+      // navigation can't be popup-blocked; Paystack redirects back to
+      // /payment/callback (see resolveCallbackUrl on the backend),
+      // which is where polling/verification now happens.
+      window.location.href = checkoutUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
       setStage("error");
     }
   };
 
-  const pollForConfirmation = async () => {
-    setStage("confirming");
-    pollAttemptsRef.current = 0;
-    poll();
-  };
-
-  const poll = async () => {
-    if (!referenceRef.current) return;
-    pollAttemptsRef.current += 1;
-
-    try {
-      const result = await verifyPayment(authFetch, referenceRef.current);
-      if (result.status === "success") {
-        setStage("success");
-        setTimeout(() => {
-          navigate("/student/home", { replace: true, state: { hotelName } });
-        }, 1200);
-        return;
-      }
-      if (result.status === "failed") {
-        setError("Payment failed or was cancelled. You have not been charged.");
-        setStage("error");
-        return;
-      }
-      // still "pending" — Paystack/M-Pesa confirmation can take a
-      // little while; keep checking for up to ~90 seconds total.
-      if (pollAttemptsRef.current >= 15) {
-        setError(
-          "We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once Paystack confirms."
-        );
-        setStage("error");
-        return;
-      }
-      setTimeout(poll, 6000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not check payment status.");
-      setStage("error");
-    }
-  };
-
-  if (stage === "opening_checkout" || stage === "waiting" || stage === "confirming") {
+  if (stage === "opening_checkout") {
     return (
       <div style={styles.center}>
         <Spinner size="large" color={COLORS.primary} />
-        <p style={styles.statusText}>
-          {stage === "opening_checkout" && "Starting payment…"}
-          {stage === "waiting" && "Opening M-Pesa checkout…"}
-          {stage === "confirming" && "Confirming your payment…"}
-        </p>
-        <p style={styles.statusSubtext}>{stage === "confirming" && "This can take up to a minute — don't close the app."}</p>
-
-        {popupBlocked && checkoutUrlRef.current && (stage === "waiting" || stage === "confirming") && (
-          <>
-            <p style={styles.statusSubtext}>Your browser blocked the checkout popup.</p>
-            <button
-              onClick={() => window.open(checkoutUrlRef.current!, "_blank", "noopener,noreferrer")}
-              style={styles.secondaryLinkBtn}
-            >
-              <span style={styles.secondaryLinkText}>Open payment page</span>
-            </button>
-          </>
-        )}
-
-        {stage === "confirming" && (
-          <button onClick={() => navigate("/student/home")} style={styles.secondaryLinkBtn}>
-            <span style={styles.secondaryLinkText}>View my dashboard now</span>
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  if (stage === "success") {
-    return (
-      <div style={styles.center}>
-        <Check size={40} color={COLORS.success} />
-        <p style={styles.statusText}>Payment confirmed!</p>
-        <p style={styles.statusSubtext}>Setting up your plan…</p>
+        <p style={styles.statusText}>Redirecting to secure checkout…</p>
       </div>
     );
   }

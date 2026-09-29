@@ -58,14 +58,43 @@ export async function priceCart(hotelId: string, lines: CartLine[]): Promise<{ p
   return { pricedLines, amount };
 }
 
-export async function createOrder(params: { userId: string; hotelId: string; lines: CartLine[] }) {
+/**
+ * `idempotencyKey` is optional so any other future caller isn't forced
+ * to supply one, but the one real caller (MealPassScreen, which places
+ * an order automatically on mount with no debounced button to click)
+ * always does — see migration 035. A repeated key returns the SAME
+ * row instead of inserting a new one, whatever that row's current
+ * status is; the caller (payOrderFromBudget) is already idempotent
+ * against an already-paid order, so retrying with the same key safely
+ * resumes payment on the original order rather than creating another
+ * "Pending Payment" duplicate.
+ */
+export async function createOrder(params: {
+  userId: string;
+  hotelId: string;
+  lines: CartLine[];
+  idempotencyKey?: string;
+}) {
+  if (params.idempotencyKey) {
+    const existing = await pool.query("SELECT * FROM orders WHERE idempotency_key = $1", [params.idempotencyKey]);
+    if (existing.rows.length > 0) {
+      const order = existing.rows[0];
+      if (order.user_id !== params.userId) {
+        throw new ApiError(403, "FORBIDDEN", "This order does not belong to you.");
+      }
+      return order;
+    }
+  }
+
   const { pricedLines, amount } = await priceCart(params.hotelId, params.lines);
 
   const result = await pool.query(
-    `INSERT INTO orders (user_id, hotel_id, items, amount, status)
-     VALUES ($1, $2, $3, $4, 'pending_payment')
+    `INSERT INTO orders (user_id, hotel_id, items, amount, status, idempotency_key)
+     VALUES ($1, $2, $3, $4, 'pending_payment', $5)
+     ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET idempotency_key = orders.idempotency_key
      RETURNING *`,
-    [params.userId, params.hotelId, JSON.stringify(pricedLines), amount]
+    [params.userId, params.hotelId, JSON.stringify(pricedLines), amount, params.idempotencyKey ?? null]
   );
   return result.rows[0];
 }

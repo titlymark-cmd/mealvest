@@ -119,10 +119,34 @@ DATABASE_URL=<supabase pooler connection string — from you, section 3>
 JWT_ACCESS_SECRET=<generated for you — see note below>
 QR_SIGNING_SECRET=<generated for you — see note below>
 PAYSTACK_SECRET_KEY=<test key for now — from you, section 4>
+PAYSTACK_CALLBACK_URL=<optional — see note below>
 GOOGLE_CLIENT_IDS=<optional — from you, section 5>
+SUPABASE_URL=https://wsfgwvmxyendrobapvsn.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<from you — see note below>
 NODE_ENV=production
 ALLOWED_ORIGINS=https://<your-project>.vercel.app
 ```
+
+`PAYSTACK_CALLBACK_URL` is optional — when unset, the payment-initialize
+endpoints derive it from the incoming request's own protocol/host
+(this app serves frontend and API from one origin, so that's reliable
+for local/preview/production alike). Set it explicitly only if the app
+ever sits behind a proxy/CDN that doesn't forward `X-Forwarded-*`
+headers accurately.
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` back the hotel/meal
+**image upload** feature only (Supabase Storage's own HTTP API, not
+the JS SDK — everything else in this app still reaches Postgres over
+the plain `pg` connection above, unchanged). `SUPABASE_URL` is public
+info, already filled in above for the project this app uses.
+`SUPABASE_SERVICE_ROLE_KEY` is the one secret I cannot fetch (Supabase
+never exposes it over its management API, same reasoning as
+`DATABASE_URL`): Supabase dashboard → this project → Project Settings
+→ API → `service_role` key → paste it into Vercel's environment
+variables, never into a committed file or into chat. Until this is
+set, hotel image uploads return a clear "not configured" error rather
+than crashing — everything else keeps working, same pattern as an
+unconfigured Paystack/Google key above.
 
 `JWT_ACCESS_SECRET` and `QR_SIGNING_SECRET` are app-internal secrets
 (not tied to any external account) — I generated these with

@@ -8,6 +8,7 @@ import StudentMenuScreen from "../pages/student/StudentMenuScreen";
 import MealPassScreen from "../pages/student/MealPassScreen";
 import OrderHistoryScreen from "../pages/student/OrderHistoryScreen";
 import MealBoostScreen from "../pages/student/MealBoostScreen";
+import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 import { StudentSidebar, STUDENT_MOBILE_BREAKPOINT, STUDENT_SIDEBAR_WIDTH } from "../components/student/StudentSidebar";
 import { useWindowSize } from "../hooks/useWindowSize";
@@ -96,6 +97,7 @@ export function StudentRoutes() {
       <Route path="/student/meal-pass" element={<MealPassScreen />} />
       <Route path="/student/orders" element={<OrderHistoryScreen />} />
       <Route path="/student/meal-boost" element={<MealBoostScreen />} />
+      <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
       <Route path="*" element={<Navigate to="/student" replace />} />
     </Routes>
   );

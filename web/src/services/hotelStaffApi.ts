@@ -79,6 +79,24 @@ export async function markOrderReady(authFetch: AuthFetch, orderId: string): Pro
   return data.order;
 }
 
+/**
+ * Real file upload — returns a hosted URL that the caller then passes
+ * into updateHotelProfile/addMenuItem/updateMenuItem's existing
+ * `imageUrl` field, exactly as if it had been typed in by hand. No
+ * Content-Type header here: the browser sets the correct multipart
+ * boundary itself for a FormData body, and would only get it wrong if
+ * we tried to set it manually.
+ */
+export async function uploadHotelImage(authFetch: AuthFetch, file: File, itemId?: string): Promise<string> {
+  const form = new FormData();
+  form.append("image", file);
+  if (itemId) form.append("itemId", itemId);
+
+  const res = await authFetch("/api/hotel/upload-image", { method: "POST", body: form });
+  const data = await parseOrError<{ url: string }>(res, "Image upload failed. Please try again.");
+  return data.url;
+}
+
 export interface HotelMenuItem {
   id: string;
   name: string;

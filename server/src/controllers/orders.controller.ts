@@ -7,6 +7,7 @@ import * as orderService from "../services/orderService";
 const createOrderSchema = z.object({
   hotelId: z.string().uuid(),
   items: z.array(z.object({ itemId: z.string().uuid(), quantity: z.number().int().min(1).max(20) })).min(1),
+  idempotencyKey: z.string().min(1).max(100).optional(),
 });
 
 export async function createOrder(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -19,6 +20,7 @@ export async function createOrder(req: AuthedRequest, res: Response, next: NextF
       userId: req.user!.id,
       hotelId: parsed.data.hotelId,
       lines: parsed.data.items,
+      idempotencyKey: parsed.data.idempotencyKey,
     });
     res.status(201).json({ order });
   } catch (err) {

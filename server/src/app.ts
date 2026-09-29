@@ -20,6 +20,13 @@ import { announcementsRouter } from "./routes/announcements.routes";
 export function createApp() {
   const app = express();
 
+  // Vercel terminates TLS at the edge and forwards over its own
+  // internal proxy — without this, req.protocol/req.secure would
+  // report the internal (often non-TLS) hop instead of what the
+  // student's browser actually used, which matters for building an
+  // accurate Paystack callback_url (see payments.controller.ts).
+  app.set("trust proxy", 1);
+
   // Security headers on every response.
   app.use(helmet());
 

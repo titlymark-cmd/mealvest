@@ -6,6 +6,7 @@ import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchHotelDashboard, HotelDashboard, updateHotelProfile } from "../../services/hotelStaffApi";
+import { ImageUploadField } from "../../components/ImageUploadField";
 
 function Row({ label, value, capitalize }: { label: string; value: string; capitalize?: boolean }) {
   return (
@@ -99,18 +100,20 @@ export default function HotelProfileScreen() {
 
             <Card style={{ display: "flex", flexDirection: "column" }}>
               <span style={styles.sectionLabel}>HOTEL BANNER</span>
-              {dashboard.hotel.image_url ? (
-                <img src={dashboard.hotel.image_url} alt="" style={styles.bannerPreview} />
-              ) : (
-                <div style={styles.bannerPreviewFallback}>
-                  <ImagePlus size={20} color={COLORS.textFaint} />
-                </div>
-              )}
+              <ImageUploadField
+                authFetch={authFetch}
+                value={bannerUrl}
+                onChange={(url) => {
+                  setBannerUrl(url);
+                  setBannerSaved(false);
+                }}
+                label="Upload a banner photo"
+              />
               <div style={styles.imageInputRow}>
                 <ImagePlus size={14} color={COLORS.textMuted} />
                 <input
                   style={styles.imageInput}
-                  placeholder="Paste a banner image URL"
+                  placeholder="…or paste a banner image URL"
                   value={bannerUrl}
                   onChange={(e) => {
                     setBannerUrl(e.target.value);
@@ -163,11 +166,6 @@ const styles: Record<string, React.CSSProperties> = {
   rowLabel: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, flexShrink: 0 },
   rowValue: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text, textAlign: "right" },
   note: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, margin: "10px 0 0 0", lineHeight: "16px" },
-  bannerPreview: { width: "100%", height: 140, borderRadius: RADIUS.sm, objectFit: "cover", backgroundColor: COLORS.borderSoft, marginBottom: 10 },
-  bannerPreviewFallback: {
-    width: "100%", height: 140, borderRadius: RADIUS.sm, backgroundColor: COLORS.accentSoft,
-    display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${COLORS.borderSoft}`, marginBottom: 10,
-  },
   imageInputRow: {
     display: "flex", flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: COLORS.cardWhite, borderRadius: RADIUS.sm,
     border: `1px solid ${COLORS.borderSoft}`, paddingLeft: 14, paddingRight: 14, marginBottom: 10,

@@ -1,23 +1,24 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap, Check } from "lucide-react";
+import { ArrowLeft, Zap } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { initializeBoostPayment, verifyPayment } from "../../services/paymentsApi";
+import { initializeBoostPayment } from "../../services/paymentsApi";
 
 const PRESETS = [200, 500, 1000, 2000];
 
-type Stage = "form" | "opening_checkout" | "waiting" | "confirming" | "success" | "error";
+type Stage = "form" | "opening_checkout" | "error";
 
 /**
  * Same verified-payment shape as BudgetOnboardingScreen (initialize ->
- * open Paystack checkout -> poll verify -> only THEN is anything
- * credited) — see that screen's own comment for the full rationale,
- * including why window.open() replaces expo-web-browser here too.
- * The only real difference is what's being paid for: this tops up
- * the plan the student already has, it doesn't start a new one.
+ * full-page redirect to Paystack checkout -> callback screen polls
+ * verify -> only THEN is anything credited) — see that screen's own
+ * comment for the full rationale, including why a real redirect
+ * replaces the old window.open()-based popup here too. The only real
+ * difference is what's being paid for: this tops up the plan the
+ * student already has, it doesn't start a new one.
  */
 export default function MealBoostScreen() {
   const { authFetch, user } = useAuth();
@@ -27,10 +28,6 @@ export default function MealBoostScreen() {
   const [phone, setPhone] = useState("");
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
-  const [popupBlocked, setPopupBlocked] = useState(false);
-  const referenceRef = useRef<string | null>(null);
-  const checkoutUrlRef = useRef<string | null>(null);
-  const pollAttemptsRef = useRef(0);
 
   const startPayment = async () => {
     setError(null);
@@ -42,103 +39,27 @@ export default function MealBoostScreen() {
 
     setStage("opening_checkout");
     try {
-      const { reference, checkoutUrl } = await initializeBoostPayment(authFetch, {
+      const { checkoutUrl } = await initializeBoostPayment(authFetch, {
         amount: boostAmount,
         phone: phone.trim(),
         email: user.email,
       });
-      referenceRef.current = reference;
-      checkoutUrlRef.current = checkoutUrl;
 
-      setStage("waiting");
-      // See BudgetOnboardingScreen's identical comment: this call fires
-      // after an await, so a browser can block it as a popup; fall back
-      // to a manual "Open payment page" button when that happens.
-      const win = window.open(checkoutUrl, "_blank", "noopener,noreferrer");
-      setPopupBlocked(!win);
-      pollForConfirmation();
+      // Full-page redirect — see BudgetOnboardingScreen's identical
+      // comment. Paystack redirects back to /payment/callback, which
+      // is where polling/verification now happens.
+      window.location.href = checkoutUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
       setStage("error");
     }
   };
 
-  const pollForConfirmation = async () => {
-    setStage("confirming");
-    pollAttemptsRef.current = 0;
-    poll();
-  };
-
-  const poll = async () => {
-    if (!referenceRef.current) return;
-    pollAttemptsRef.current += 1;
-
-    try {
-      const result = await verifyPayment(authFetch, referenceRef.current);
-      if (result.status === "success") {
-        setStage("success");
-        setTimeout(() => {
-          navigate("/student/home", { replace: true });
-        }, 1200);
-        return;
-      }
-      if (result.status === "failed") {
-        setError("Payment failed or was cancelled. You have not been charged.");
-        setStage("error");
-        return;
-      }
-      if (pollAttemptsRef.current >= 15) {
-        setError(
-          "We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once Paystack confirms."
-        );
-        setStage("error");
-        return;
-      }
-      setTimeout(poll, 6000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not check payment status.");
-      setStage("error");
-    }
-  };
-
-  if (stage === "opening_checkout" || stage === "waiting" || stage === "confirming") {
+  if (stage === "opening_checkout") {
     return (
       <div style={styles.center}>
         <Spinner size="large" color={COLORS.primary} />
-        <p style={styles.statusText}>
-          {stage === "opening_checkout" && "Starting payment…"}
-          {stage === "waiting" && "Opening M-Pesa checkout…"}
-          {stage === "confirming" && "Confirming your payment…"}
-        </p>
-        <p style={styles.statusSubtext}>{stage === "confirming" && "This can take up to a minute — don't close the app."}</p>
-
-        {popupBlocked && checkoutUrlRef.current && (stage === "waiting" || stage === "confirming") && (
-          <>
-            <p style={styles.statusSubtext}>Your browser blocked the checkout popup.</p>
-            <button
-              onClick={() => window.open(checkoutUrlRef.current!, "_blank", "noopener,noreferrer")}
-              style={styles.secondaryLinkBtn}
-            >
-              <span style={styles.secondaryLinkText}>Open payment page</span>
-            </button>
-          </>
-        )}
-
-        {stage === "confirming" && (
-          <button onClick={() => navigate("/student/home")} style={styles.secondaryLinkBtn}>
-            <span style={styles.secondaryLinkText}>View my dashboard now</span>
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  if (stage === "success") {
-    return (
-      <div style={styles.center}>
-        <Check size={40} color={COLORS.success} />
-        <p style={styles.statusText}>Boost confirmed!</p>
-        <p style={styles.statusSubtext}>Updating your plan…</p>
+        <p style={styles.statusText}>Redirecting to secure checkout…</p>
       </div>
     );
   }

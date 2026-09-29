@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import multer from "multer";
 
 export class ApiError extends Error {
   status: number;
@@ -19,6 +20,12 @@ export class ApiError extends Error {
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ApiError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+
+  if (err instanceof multer.MulterError) {
+    const message = err.code === "LIMIT_FILE_SIZE" ? "Image is too large — 4MB maximum." : "Could not process the uploaded file.";
+    res.status(400).json({ error: { code: err.code, message } });
     return;
   }
 

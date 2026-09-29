@@ -24,11 +24,16 @@ async function parseOrError<T>(res: Response, fallback: string): Promise<T> {
   return data;
 }
 
-export async function createOrder(authFetch: AuthFetch, hotelId: string, items: OrderItem[]): Promise<Order> {
+export async function createOrder(
+  authFetch: AuthFetch,
+  hotelId: string,
+  items: OrderItem[],
+  idempotencyKey?: string
+): Promise<Order> {
   const res = await authFetch("/api/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hotelId, items }),
+    body: JSON.stringify({ hotelId, items, idempotencyKey }),
   });
   const data = await parseOrError<{ order: Order }>(res, "Could not create your order.");
   return data.order;

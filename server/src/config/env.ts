@@ -66,6 +66,30 @@ export const env = {
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
   paymentProviderDefault: process.env.PAYMENT_PROVIDER_DEFAULT || "paystack",
+  // Where Paystack redirects the student's browser back to after
+  // checkout (GET /payment/callback?reference=...). Optional — when
+  // unset, the initialize endpoints derive it from the incoming
+  // request's own protocol/host instead (this app serves frontend and
+  // API from the same origin, so that's a reliable fallback and avoids
+  // needing per-environment config for local/preview deployments).
+  // Set this explicitly in production if the app ever sits behind a
+  // proxy/CDN that doesn't forward X-Forwarded-* headers accurately.
+  paystackCallbackUrl: process.env.PAYSTACK_CALLBACK_URL || "",
+
+  // -----------------------------------------------------------------
+  // Supabase Storage — used ONLY for hotel/meal image uploads (see
+  // storageService.ts). This app has never used the Supabase JS SDK or
+  // its REST API for anything else (Postgres is reached over a plain
+  // pg connection, per DEPLOYMENT.md) — this is a thin axios client
+  // against Storage's own HTTP API, matching how every other
+  // third-party integration in this codebase (Paystack, Google,
+  // Daraja) is a hand-rolled client rather than an SDK. Not in
+  // REQUIRED_VARS: image upload is one feature among many, and an
+  // unconfigured deployment shouldn't fail to boot over it — the
+  // upload route itself returns a clear error if these are unset.
+  // -----------------------------------------------------------------
+  supabaseUrl: process.env.SUPABASE_URL || "",
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
 };
 
 // Loud, boot-blocking guard: a live-looking secret key outside a

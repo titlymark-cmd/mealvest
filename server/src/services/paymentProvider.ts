@@ -14,6 +14,8 @@ export interface InitializePaymentParams {
   email: string;
   reference: string; // our own unique reference, generated before calling the provider
   metadata?: Record<string, unknown>;
+  /** Where the provider should redirect the browser back to after checkout (Paystack only). */
+  callbackUrl?: string;
 }
 
 export interface InitializePaymentResult {

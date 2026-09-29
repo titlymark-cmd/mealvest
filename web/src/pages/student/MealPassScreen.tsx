@@ -29,21 +29,38 @@ export default function MealPassScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A stable key per (hotel, item) order attempt, persisted across
+  // remounts of this screen — a retry after a failed payOrder (or the
+  // student navigating back and re-selecting the same item) reuses the
+  // SAME key, so the backend returns the one order it already created
+  // instead of inserting another "Pending Payment" row (see migration
+  // 035 + orderService.createOrder). Cleared only once payment actually
+  // succeeds, so the NEXT time this item is ordered — a new attempt,
+  // not a retry — gets its own fresh order.
+  const idempotencyStorageKey = `mealvest_order_key:${hotelId}:${itemId}`;
+
   const runFlow = useCallback(async () => {
     setStage("creating");
     setError(null);
     try {
-      const created = await createOrder(authFetch, hotelId, [{ itemId, quantity: 1 }]);
+      let idempotencyKey = sessionStorage.getItem(idempotencyStorageKey);
+      if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        sessionStorage.setItem(idempotencyStorageKey, idempotencyKey);
+      }
+
+      const created = await createOrder(authFetch, hotelId, [{ itemId, quantity: 1 }], idempotencyKey);
       setStage("paying");
       const paid = await payOrder(authFetch, created.id);
       setOrder(paid);
       setStage("ready");
+      sessionStorage.removeItem(idempotencyStorageKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setStage("error");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authFetch, hotelId, itemId]);
+  }, [authFetch, hotelId, itemId, idempotencyStorageKey]);
 
   useEffect(() => {
     runFlow();

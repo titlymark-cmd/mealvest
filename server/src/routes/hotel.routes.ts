@@ -1,5 +1,7 @@
 import { Router } from "express";
+import multer from "multer";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { MAX_IMAGE_BYTES } from "../services/storageService";
 import {
   getHotelDashboard,
   getHotelWeeklyRevenue,
@@ -13,7 +15,13 @@ import {
   addMenuItem,
   updateMenuItem,
   deleteMenuItem,
+  uploadImage,
 } from "../controllers/hotel.controller";
+
+// Memory storage — files are small (4MB cap, enforced here AND again
+// in storageService as defense in depth) and are streamed straight
+// through to Supabase Storage, never written to local disk.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } });
 
 export const hotelRouter = Router();
 hotelRouter.use(requireAuth);
@@ -45,6 +53,7 @@ hotelRouter.patch("/orders/:orderId/ready", requireRole("hotel_staff", "hotel_ow
 hotelRouter.post("/qr/verify", requireRole("hotel_staff", "hotel_owner"), verifyQr);
 hotelRouter.post("/qr/redeem", requireRole("hotel_staff", "hotel_owner"), redeemQr);
 hotelRouter.patch("/location", requireRole("hotel_owner"), updateHotelLocation);
+hotelRouter.post("/upload-image", requireRole("hotel_owner"), upload.single("image"), uploadImage);
 hotelRouter.post("/menu", requireRole("hotel_owner"), addMenuItem);
 hotelRouter.patch("/menu/:itemId", requireRole("hotel_owner"), updateMenuItem);
 hotelRouter.delete("/menu/:itemId", requireRole("hotel_owner"), deleteMenuItem);
