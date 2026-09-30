@@ -218,22 +218,23 @@ export async function markAllRead(userId: string): Promise<number> {
 }
 
 /**
- * Users due for a meal reminder in the current 15-minute bucket
- * (bucketIndex = floor(minutesSinceMidnight / 15), computed by the
- * caller from Nairobi wall-clock time — see cron.controller.ts).
- * Bucketing both sides the same way means a student's chosen
- * reminder_time doesn't need to land on an exact cron tick to match.
- * Only students with a currently active plan are reminded — a reminder
- * to fund/order for someone with nothing active would be noise.
+ * Users due for a meal reminder. Vercel Cron on this project's current
+ * (Hobby) plan only allows one run per day — see vercel.json, which
+ * schedules a single daily run at 09:00 UTC / 12:00 Nairobi, matching
+ * notification_preferences.reminder_time's own default. Every opted-in
+ * user with a currently active plan is reminded on that one daily run,
+ * regardless of their individual reminder_time; the column is kept and
+ * still settable from the UI so per-time-slot delivery can be turned on
+ * later purely by upgrading the Vercel plan and restoring bucketed
+ * matching here, without another schema change. A reminder to someone
+ * with no active plan would be noise, so that's excluded too.
  */
-export async function listUsersDueForMealReminder(bucketIndex: number): Promise<string[]> {
+export async function listUsersDueForMealReminder(): Promise<string[]> {
   const result = await pool.query(
     `SELECT DISTINCT np.user_id
      FROM notification_preferences np
      JOIN budgets b ON b.user_id = np.user_id AND b.status = 'active'
-     WHERE np.meal_reminders = true
-       AND FLOOR((EXTRACT(HOUR FROM np.reminder_time) * 60 + EXTRACT(MINUTE FROM np.reminder_time)) / 15) = $1`,
-    [bucketIndex]
+     WHERE np.meal_reminders = true`
   );
   return result.rows.map((r) => r.user_id);
 }

@@ -28,28 +28,25 @@ function nairobiNow(): Date {
 }
 
 /**
- * GET /api/cron/meal-reminders — triggered on a schedule by Vercel
- * Cron (see vercel.json). Finds every student whose chosen reminder
- * time falls in the current 15-minute bucket and has an active plan,
- * and fires one reminder each. Fire-and-forget + dedupeKeyed per user
- * per day (see notificationEvents.mealReminder), so an overlapping or
- * retried cron invocation can never double-send.
+ * GET /api/cron/meal-reminders — triggered once daily by Vercel Cron
+ * (see vercel.json; Hobby-plan accounts can't schedule more often than
+ * daily). Reminds every opted-in student with an active plan. Fire-
+ * and-forget + dedupeKeyed per user per day (see
+ * notificationEvents.mealReminder), so a retried or duplicate cron
+ * invocation can never double-send.
  */
 export async function runMealReminders(req: Request, res: Response, next: NextFunction) {
   try {
     requireCronSecret(req);
 
-    const now = nairobiNow();
-    const minutesSinceMidnight = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const bucketIndex = Math.floor(minutesSinceMidnight / 15);
-    const nairobiDateStr = now.toISOString().slice(0, 10);
+    const nairobiDateStr = nairobiNow().toISOString().slice(0, 10);
 
-    const userIds = await model.listUsersDueForMealReminder(bucketIndex);
+    const userIds = await model.listUsersDueForMealReminder();
     for (const userId of userIds) {
       notificationEvents.mealReminder(userId, nairobiDateStr);
     }
 
-    res.json({ queued: userIds.length, bucketIndex, nairobiDateStr });
+    res.json({ queued: userIds.length, nairobiDateStr });
   } catch (err) {
     next(err);
   }
