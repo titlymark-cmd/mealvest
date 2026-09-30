@@ -66,15 +66,6 @@ export const env = {
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
   paymentProviderDefault: process.env.PAYMENT_PROVIDER_DEFAULT || "paystack",
-  // Where Paystack redirects the student's browser back to after
-  // checkout (GET /payment/callback?reference=...). Optional — when
-  // unset, the initialize endpoints derive it from the incoming
-  // request's own protocol/host instead (this app serves frontend and
-  // API from the same origin, so that's a reliable fallback and avoids
-  // needing per-environment config for local/preview deployments).
-  // Set this explicitly in production if the app ever sits behind a
-  // proxy/CDN that doesn't forward X-Forwarded-* headers accurately.
-  paystackCallbackUrl: process.env.PAYSTACK_CALLBACK_URL || "",
 
   // -----------------------------------------------------------------
   // Supabase Storage — used ONLY for hotel/meal image uploads (see

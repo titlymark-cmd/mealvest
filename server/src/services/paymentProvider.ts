@@ -14,14 +14,13 @@ export interface InitializePaymentParams {
   email: string;
   reference: string; // our own unique reference, generated before calling the provider
   metadata?: Record<string, unknown>;
-  /** Where the provider should redirect the browser back to after checkout (Paystack only). */
-  callbackUrl?: string;
 }
 
 export interface InitializePaymentResult {
   reference: string;
   providerReference: string;
-  checkoutUrl?: string; // present for redirect-based providers (Paystack); absent for STK-push-based ones
+  checkoutUrl?: string; // present for redirect-based providers/flows; absent for STK-push-based ones
+  displayText?: string; // present for STK-push-based flows — what to show the student while they wait (e.g. "Enter your M-Pesa PIN")
   raw: unknown; // full provider response, stored for audit but never trusted for status
 }
 

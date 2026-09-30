@@ -3,7 +3,6 @@ import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { normalizeKenyanPhone } from "../lib/phone";
-import { env } from "../config/env";
 import { paystackProvider } from "../services/paystackProvider";
 import {
   generatePaymentReference,
@@ -24,17 +23,6 @@ const MAX_AMOUNT = 50000;
 // an existing budget rather than funding a new multi-week one.
 const MIN_BOOST_AMOUNT = 100;
 const MAX_BOOST_AMOUNT = 20000;
-
-/**
- * Full-page redirect target Paystack sends the student's browser back
- * to once checkout finishes — see PaymentCallbackScreen.tsx. Replaces
- * the earlier window.open()-based popup flow, which browsers can (and,
- * per the reported bug, did) block outright with no reliable fallback.
- */
-function resolveCallbackUrl(req: AuthedRequest): string {
-  const base = env.paystackCallbackUrl || `${req.protocol}://${req.get("host")}`;
-  return `${base.replace(/\/$/, "")}/payment/callback`;
-}
 
 // No `plans` table exists in this codebase (see migration history) —
 // a student chooses their own amount + day count rather than picking
@@ -93,12 +81,11 @@ export async function initializePaystackPayment(req: AuthedRequest, res: Respons
       phoneNumber,
       email,
       reference,
-      callbackUrl: resolveCallbackUrl(req),
     });
 
     res.status(201).json({
       reference: result.reference,
-      checkoutUrl: result.checkoutUrl,
+      displayText: result.displayText,
     });
   } catch (err) {
     next(err);
@@ -160,12 +147,11 @@ export async function initializeBoostPayment(req: AuthedRequest, res: Response, 
       phoneNumber,
       email,
       reference,
-      callbackUrl: resolveCallbackUrl(req),
     });
 
     res.status(201).json({
       reference: result.reference,
-      checkoutUrl: result.checkoutUrl,
+      displayText: result.displayText,
     });
   } catch (err) {
     next(err);

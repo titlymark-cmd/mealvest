@@ -1,33 +1,57 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Zap } from "lucide-react";
+import { ArrowLeft, Zap, Smartphone, Check } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { initializeBoostPayment } from "../../services/paymentsApi";
+import { usePaymentStatusPoll } from "../../hooks/usePaymentStatusPoll";
 
 const PRESETS = [200, 500, 1000, 2000];
 
-type Stage = "form" | "opening_checkout" | "error";
+type Stage = "form" | "awaiting_stk" | "success" | "error";
 
 /**
  * Same verified-payment shape as BudgetOnboardingScreen (initialize ->
- * full-page redirect to Paystack checkout -> callback screen polls
- * verify -> only THEN is anything credited) — see that screen's own
- * comment for the full rationale, including why a real redirect
- * replaces the old window.open()-based popup here too. The only real
- * difference is what's being paid for: this tops up the plan the
- * student already has, it doesn't start a new one.
+ * M-Pesa STK push straight to the phone -> this screen polls verify in
+ * place -> only THEN is anything credited) — see that screen's own
+ * comment for the full rationale. The only real difference is what's
+ * being paid for: this tops up the plan the student already has, it
+ * doesn't start a new one.
  */
 export default function MealBoostScreen() {
   const { authFetch, user } = useAuth();
   const navigate = useNavigate();
+  const poll = usePaymentStatusPoll(authFetch);
 
   const [amount, setAmount] = useState("500");
   const [phone, setPhone] = useState("");
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
+  const [displayText, setDisplayText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (poll.status === "success") {
+      setStage("success");
+      const timer = setTimeout(() => {
+        navigate("/student/home", { replace: true });
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+    if (poll.status === "failed") {
+      setError("Payment failed or was cancelled. You have not been charged.");
+      setStage("error");
+    } else if (poll.status === "timeout") {
+      setError(
+        "We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once Paystack confirms."
+      );
+      setStage("error");
+    } else if (poll.status === "error") {
+      setError(poll.error || "Could not check payment status.");
+      setStage("error");
+    }
+  }, [poll.status, poll.error, navigate]);
 
   const startPayment = async () => {
     setError(null);
@@ -37,29 +61,40 @@ export default function MealBoostScreen() {
     if (phone.replace(/\D/g, "").length < 9) return setError("Enter a valid phone number for M-Pesa.");
     if (!user?.email) return setError("Your account has no email on file — please contact support.");
 
-    setStage("opening_checkout");
+    setStage("awaiting_stk");
     try {
-      const { checkoutUrl } = await initializeBoostPayment(authFetch, {
+      const { reference, displayText: dt } = await initializeBoostPayment(authFetch, {
         amount: boostAmount,
         phone: phone.trim(),
         email: user.email,
       });
-
-      // Full-page redirect — see BudgetOnboardingScreen's identical
-      // comment. Paystack redirects back to /payment/callback, which
-      // is where polling/verification now happens.
-      window.location.href = checkoutUrl;
+      setDisplayText(dt || "Enter your M-Pesa PIN on your phone to complete payment.");
+      poll.start(reference);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
       setStage("error");
     }
   };
 
-  if (stage === "opening_checkout") {
+  if (stage === "success") {
     return (
       <div style={styles.center}>
-        <Spinner size="large" color={COLORS.primary} />
-        <p style={styles.statusText}>Redirecting to secure checkout…</p>
+        <Check size={40} color={COLORS.success} />
+        <p style={styles.statusText}>Payment confirmed!</p>
+        <p style={styles.statusSubtext}>Taking you to your dashboard…</p>
+      </div>
+    );
+  }
+
+  if (stage === "awaiting_stk") {
+    return (
+      <div style={styles.center}>
+        <Smartphone size={40} color={COLORS.primary} />
+        <p style={styles.statusText}>Check your phone</p>
+        <p style={styles.statusSubtext}>{displayText}</p>
+        <div style={{ marginTop: 20 }}>
+          <Spinner color={COLORS.primary} />
+        </div>
       </div>
     );
   }

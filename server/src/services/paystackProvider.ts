@@ -42,9 +42,21 @@ function mapPaystackStatus(status: string): VerifyPaymentResult["status"] {
 }
 
 export class PaystackPaymentProvider implements PaymentProvider {
+  /**
+   * Charge API (/charge), not /transaction/initialize — this sends an
+   * M-Pesa STK push straight to the student's phone instead of
+   * returning a hosted-checkout authorization_url to redirect to.
+   * There's no checkout page to visit at all: the student enters their
+   * M-Pesa PIN on the STK prompt itself, and the frontend polls
+   * verifyPayment (below, via GET /transaction/verify) until Paystack
+   * confirms it — same verification path as before, only how the
+   * charge gets INITIATED changed. Works identically in test and live
+   * mode (Paystack's test mode simulates the STK push/PIN entry), so
+   * nothing here needs to change when live keys go in later.
+   */
   async initializePayment(params: InitializePaymentParams): Promise<InitializePaymentResult> {
     try {
-      const res = await client().post("/transaction/initialize", {
+      const res = await client().post("/charge", {
         email: params.email,
         // Paystack amounts are in the currency's smallest subunit —
         // for KES that's cents, so whole-KSh amounts are x100 here.
@@ -54,16 +66,18 @@ export class PaystackPaymentProvider implements PaymentProvider {
         amount: Math.round(params.amount * 100),
         currency: "KES",
         reference: params.reference,
-        channels: ["mobile_money", "card"], // Kenyan M-Pesa arrives via Paystack's mobile_money channel
+        mobile_money: {
+          phone: params.phoneNumber, // already normalized to 254XXXXXXXXX
+          provider: "mpesa",
+        },
         metadata: { userId: params.userId, phoneNumber: params.phoneNumber, ...params.metadata },
-        ...(params.callbackUrl ? { callback_url: params.callbackUrl } : {}),
       });
 
       const data = res.data.data;
       return {
         reference: params.reference,
         providerReference: data.reference,
-        checkoutUrl: data.authorization_url,
+        displayText: data.display_text || "Enter your M-Pesa PIN on your phone to complete payment.",
         raw: res.data,
       };
     } catch (err) {

@@ -1,12 +1,13 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, Check } from "lucide-react";
+import { ArrowLeft, Sparkles, Check, Smartphone } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { initializePayment } from "../../services/paymentsApi";
+import { usePaymentStatusPoll } from "../../hooks/usePaymentStatusPoll";
 
 const PRESETS = [2000, 3000, 5000, 12000, 15000];
 
@@ -17,31 +18,28 @@ const DISCLAIMER_TEXT =
   "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over or let it go; declining forfeits it.\n" +
   "• Please review your amount, days, and hotel before confirming.";
 
-type Stage = "form" | "opening_checkout" | "error";
+type Stage = "form" | "awaiting_stk" | "success" | "error";
 
 /**
  * Real Paystack flow, matching exactly what the backend actually
  * enforces:
  *   1. initializePayment() — requires termsAccepted:true, or the
  *      backend rejects the request before Paystack is ever contacted.
- *   2. Full-page redirect (window.location.href) to the returned
- *      checkoutUrl — this is the ONLY place money can actually move;
- *      nothing in this screen can mark a payment successful on its
- *      own. A real top-level navigation can never be blocked the way
- *      a window.open() popup can (that was the reported bug this
- *      replaced — see git history for the earlier popup-based version).
- *   3. Paystack redirects back to /payment/callback once checkout
- *      finishes, which is where polling verifyPayment() and actually
- *      activating the budget happens (see PaymentCallbackScreen) — a
- *      closed/returned browser is not, by itself, evidence of
- *      anything; that screen's verify() call is the real source of
- *      truth, same as this screen used to do inline.
+ *      Triggers an M-Pesa STK push straight to the student's phone
+ *      (paystackProvider.ts's /charge call) — there's no checkout
+ *      page to visit.
+ *   2. This screen polls verifyPayment() in place (usePaymentStatusPoll,
+ *      same logic PaymentCallbackScreen used to run after a redirect)
+ *      until Paystack confirms — nothing in this screen can mark a
+ *      payment successful on its own; the poll is just watching for
+ *      the backend's own activatePaymentIfNeeded to have run.
  */
 export default function BudgetOnboardingScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const { hotelId, hotelName, selectedItemName, selectedItemPrice } = (location.state as any) || {};
   const { authFetch, user } = useAuth();
+  const poll = usePaymentStatusPoll(authFetch);
 
   const [amount, setAmount] = useState("5000");
   const [amountFocused, setAmountFocused] = useState(false);
@@ -50,6 +48,29 @@ export default function BudgetOnboardingScreen() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
+  const [displayText, setDisplayText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (poll.status === "success") {
+      setStage("success");
+      const timer = setTimeout(() => {
+        navigate("/student/home", { replace: true, state: hotelName ? { hotelName } : undefined });
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+    if (poll.status === "failed") {
+      setError("Payment failed or was cancelled. You have not been charged.");
+      setStage("error");
+    } else if (poll.status === "timeout") {
+      setError(
+        "We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once Paystack confirms."
+      );
+      setStage("error");
+    } else if (poll.status === "error") {
+      setError(poll.error || "Could not check payment status.");
+      setStage("error");
+    }
+  }, [poll.status, poll.error, navigate, hotelName]);
 
   const dailyAllowance = (() => {
     const a = Number(amount);
@@ -69,9 +90,9 @@ export default function BudgetOnboardingScreen() {
     if (!termsAccepted) return setError("Please accept the Mealvest payment terms to continue.");
     if (!user?.email) return setError("Your account has no email on file — please contact support.");
 
-    setStage("opening_checkout");
+    setStage("awaiting_stk");
     try {
-      const { checkoutUrl } = await initializePayment(authFetch, {
+      const { reference, displayText: dt } = await initializePayment(authFetch, {
         amount: totalAmount,
         numberOfDays,
         phone: phone.trim(),
@@ -79,29 +100,33 @@ export default function BudgetOnboardingScreen() {
         hotelId: hotelId ?? null,
         termsAccepted: true,
       });
-
-      // hotelName only exists in this screen's in-memory navigation
-      // state, which a real page redirect to Paystack and back would
-      // otherwise lose — stashed here so PaymentCallbackScreen can
-      // hand it to the dashboard the same way this screen used to.
-      if (hotelName) sessionStorage.setItem("mealvest_pending_hotel_name", hotelName);
-
-      // Full-page redirect — not window.open(). A real top-level
-      // navigation can't be popup-blocked; Paystack redirects back to
-      // /payment/callback (see resolveCallbackUrl on the backend),
-      // which is where polling/verification now happens.
-      window.location.href = checkoutUrl;
+      setDisplayText(dt || "Enter your M-Pesa PIN on your phone to complete payment.");
+      poll.start(reference);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
       setStage("error");
     }
   };
 
-  if (stage === "opening_checkout") {
+  if (stage === "success") {
     return (
       <div style={styles.center}>
-        <Spinner size="large" color={COLORS.primary} />
-        <p style={styles.statusText}>Redirecting to secure checkout…</p>
+        <Check size={40} color={COLORS.success} />
+        <p style={styles.statusText}>Payment confirmed!</p>
+        <p style={styles.statusSubtext}>Taking you to your dashboard…</p>
+      </div>
+    );
+  }
+
+  if (stage === "awaiting_stk") {
+    return (
+      <div style={styles.center}>
+        <Smartphone size={40} color={COLORS.primary} />
+        <p style={styles.statusText}>Check your phone</p>
+        <p style={styles.statusSubtext}>{displayText}</p>
+        <div style={{ marginTop: 20 }}>
+          <Spinner color={COLORS.primary} />
+        </div>
       </div>
     );
   }

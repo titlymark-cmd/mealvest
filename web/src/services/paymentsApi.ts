@@ -17,17 +17,19 @@ async function parseOrError<T>(res: Response, fallback: string): Promise<T> {
 }
 
 /**
- * Real Paystack initialize call — returns `checkoutUrl`, which the
- * screen opens (e.g. via window.location) for the student to
- * actually pay. This function never marks anything as paid itself —
- * that only happens after Paystack confirms via webhook/verify, per
- * the backend's activatePaymentIfNeeded, which the frontend has no
- * way to shortcut.
+ * Real Paystack initialize call — sends an M-Pesa STK push straight
+ * to the student's phone (Paystack's /charge endpoint under the
+ * hood, see paystackProvider.ts) and returns `displayText`, what to
+ * show the student while they enter their PIN on the prompt. There's
+ * no checkout page to open. This function never marks anything as
+ * paid itself — that only happens after Paystack confirms via
+ * webhook/verify (see verifyPayment below), per the backend's
+ * activatePaymentIfNeeded, which the frontend has no way to shortcut.
  */
 export async function initializePayment(
   authFetch: AuthFetch,
   input: InitializePaymentInput
-): Promise<{ reference: string; checkoutUrl: string }> {
+): Promise<{ reference: string; displayText?: string }> {
   const res = await authFetch("/api/payments/paystack/initialize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -44,7 +46,7 @@ export interface InitializeBoostInput {
 
 /**
  * Meal Boost — tops up the student's EXISTING active plan instead of
- * starting a new one. Shares the same checkoutUrl/verify shape as
+ * starting a new one. Shares the same STK-push/verify shape as
  * initializePayment (and reuses verifyPayment below unchanged) — only
  * the initialize endpoint differs, since the backend needs to know
  * this is a top-up (see payments.controller.ts initializeBoostPayment).
@@ -52,7 +54,7 @@ export interface InitializeBoostInput {
 export async function initializeBoostPayment(
   authFetch: AuthFetch,
   input: InitializeBoostInput
-): Promise<{ reference: string; checkoutUrl: string }> {
+): Promise<{ reference: string; displayText?: string }> {
   const res = await authFetch("/api/payments/paystack/boost/initialize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
