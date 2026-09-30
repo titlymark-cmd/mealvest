@@ -10,6 +10,8 @@ import {
   verifyPin,
   verifyLoginPin,
   setLoginPin,
+  forgotPassword,
+  resetPassword,
 } from "../controllers/auth.controller";
 import { authRateLimiter } from "../middleware/rateLimit";
 import { requireAuth } from "../middleware/auth";
@@ -39,3 +41,10 @@ authRouter.post("/logout", logout);
 // authService.verifyPinAndRefresh already enforces.
 authRouter.post("/pin", requireAuth, setPin);
 authRouter.post("/pin/verify", authRateLimiter, verifyPin);
+
+// No requireAuth on either — by definition, a caller here doesn't
+// (or can't) hold a valid session. Rate-limited the same as login,
+// since /forgot-password is the same "attacker fishes for valid
+// accounts" surface login itself is.
+authRouter.post("/forgot-password", authRateLimiter, forgotPassword);
+authRouter.post("/reset-password", authRateLimiter, resetPassword);

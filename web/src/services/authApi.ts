@@ -146,6 +146,26 @@ export async function loginWithGoogle(idToken: string): Promise<AuthResult> {
   return res.json();
 }
 
+/** Always resolves — the backend responds identically whether or not the identifier matched a real account. */
+export async function forgotPassword(identifier: string): Promise<{ message: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, newPassword }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+}
+
 export async function logoutRequest(refreshToken: string): Promise<void> {
   await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: "POST",

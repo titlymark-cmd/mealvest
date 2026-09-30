@@ -9,6 +9,8 @@ import {
   setPinSchema,
   verifyPinSchema,
   loginPinSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from "../schemas/authSchemas";
 import { verifyGoogleIdToken } from "../lib/googleAuth";
 import { ApiError } from "../middleware/errorHandler";
@@ -138,6 +140,47 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
     const profile = await verifyGoogleIdToken(parsed.data.idToken);
     const result = await authService.loginWithGoogle(profile);
     res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Same fallback payments.controller.ts's resolveCallbackUrl uses:
+ * this app serves frontend and API from the same origin, so deriving
+ * the reset link's base from the incoming request is reliable without
+ * needing a dedicated env var for it.
+ */
+function resolveAppBaseUrl(req: Request): string {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+/**
+ * Always responds 200 with the same generic message whether or not
+ * the identifier matched a real account — see authService.
+ * requestPasswordReset's own doc comment for why.
+ */
+export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = forgotPasswordSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    await authService.requestPasswordReset(parsed.data.identifier, resolveAppBaseUrl(req));
+    res.status(200).json({
+      message: "If an account exists for that email or phone number, we've sent a password reset link to its email address.",
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+
+    await authService.resetPassword(parsed.data.token, parsed.data.newPassword);
+    res.status(200).json({ passwordReset: true });
   } catch (err) {
     next(err);
   }

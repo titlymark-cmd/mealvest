@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -22,6 +23,7 @@ export function LoginFormContent({
 }: {
   onSwitchToRegister: (role: "student" | "hotel") => void;
 }) {
+  const navigate = useNavigate();
   const { loginWithPassword, loginWithGoogle } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -105,6 +107,10 @@ export function LoginFormContent({
         </button>
       </div>
 
+      <button type="button" style={styles.forgotButton} onClick={() => navigate("/forgot-password")}>
+        <span style={styles.forgotText}>Forgot password?</span>
+      </button>
+
       {error && <p style={styles.error}>{error}</p>}
 
       <PrimaryButton onPress={() => {}} loading={loading} showArrow={false} style={{ marginTop: 8 }}>
@@ -148,6 +154,8 @@ const styles: Record<string, React.CSSProperties> = {
   passwordInput: { paddingRight: 44 },
   eyeButton: { position: "absolute", right: 14, height: "100%", display: "flex", justifyContent: "center", alignItems: "center" },
   error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, marginTop: 0, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
+  forgotButton: { alignSelf: "flex-end", marginBottom: 16, marginTop: -4 },
+  forgotText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
   linkButton: { marginTop: 16, alignSelf: "center" },
   link: {
     color: COLORS.primary,

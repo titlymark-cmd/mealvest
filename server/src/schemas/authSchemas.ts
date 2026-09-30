@@ -125,6 +125,15 @@ export const loginPinSchema = z.object({
   pin: pinSchema,
 });
 
+export const forgotPasswordSchema = z.object({
+  identifier: z.string().trim().min(1, "Email or phone number is required."),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, "Reset token is required."),
+  newPassword: passwordSchema,
+});
+
 export type RegisterStudentInput = z.infer<typeof registerStudentSchema>;
 export type RegisterHotelInput = z.infer<typeof registerHotelSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

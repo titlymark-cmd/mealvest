@@ -21,6 +21,8 @@ import {
 import { GoogleProfile } from "../lib/googleAuth";
 import { Role } from "../types/roles";
 import { RegisterStudentInput, RegisterHotelInput, LoginInput } from "../schemas/authSchemas";
+import { revokeAllRefreshTokensForUser } from "../models/refreshTokenModel";
+import { sendPasswordResetEmail } from "./emailService";
 
 interface AuthResult {
   accessToken: string;
@@ -453,6 +455,71 @@ export async function logout(refreshToken: string): Promise<void> {
 
 export function decodeAccessToken(token: string) {
   return verifyAccessToken(token);
+}
+
+const PASSWORD_RESET_TTL_MINUTES = 30;
+
+/**
+ * Step 1 — always resolves successfully regardless of whether the
+ * identifier matches a real account (same anti-enumeration philosophy
+ * as login's generic INVALID_CREDENTIALS): the caller only ever learns
+ * "check your email," never whether an account exists. A Google-only
+ * account (no password_hash) has no password a reset would help —
+ * quietly treated the same as no match at all, for the same reason.
+ *
+ * The email SEND failing (e.g. RESEND_API_KEY unset) is logged
+ * server-side but never surfaces to the caller — surfacing it would
+ * itself be an oracle (a real account triggers a send attempt and a
+ * fake one doesn't), defeating the whole point of the generic response.
+ */
+export async function requestPasswordReset(identifier: string, resetBaseUrl: string): Promise<void> {
+  const user = await findUserByEmailOrPhone(identifier);
+  if (!user || !user.password_hash) {
+    return;
+  }
+
+  const token = generateRefreshToken().token; // reusing the same high-entropy random-token generator
+  const tokenHash = hashRefreshToken(token);
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+  await pool.query("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)", [
+    user.id,
+    tokenHash,
+    expiresAt,
+  ]);
+
+  const resetUrl = `${resetBaseUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
+  try {
+    await sendPasswordResetEmail(user.email, resetUrl);
+  } catch (err) {
+    console.error("[requestPasswordReset] Could not send reset email:", err);
+  }
+}
+
+/**
+ * Step 2 — redeems the token, sets the new password, and revokes
+ * every existing session for the account. A password reset is a
+ * strong signal the old password may have been compromised; anyone
+ * still holding an old refresh token gets logged out by it.
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const tokenHash = hashRefreshToken(token);
+  const result = await pool.query(
+    "SELECT user_id FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now()",
+    [tokenHash]
+  );
+  if (result.rows.length === 0) {
+    throw new ApiError(
+      400,
+      "INVALID_RESET_TOKEN",
+      "This reset link is invalid or has expired. Please request a new one."
+    );
+  }
+  const userId = result.rows[0].user_id;
+
+  const passwordHash = await hashPassword(newPassword);
+  await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [passwordHash, userId]);
+  await pool.query("DELETE FROM password_reset_tokens WHERE token_hash = $1", [tokenHash]);
+  await revokeAllRefreshTokensForUser(userId);
 }
 
 // 4 attempts, then a 15-minute timed lockout — matches the window

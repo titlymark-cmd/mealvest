@@ -2,6 +2,8 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import AuthScreen from "../pages/AuthScreen";
 import WelcomeScreen from "../pages/WelcomeScreen";
+import { ForgotPasswordScreen } from "../pages/ForgotPasswordScreen";
+import { ResetPasswordScreen } from "../pages/ResetPasswordScreen";
 
 /**
  * Web port of RootNavigator's UnauthenticatedNavigator. /login,
@@ -18,6 +20,8 @@ export function UnauthenticatedRoutes() {
     <Routes>
       <Route path="/login" element={<AuthScreen mode="login" />} />
       <Route path="/welcome" element={<WelcomeScreen />} />
+      <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+      <Route path="/reset-password" element={<ResetPasswordScreen />} />
       <Route path="/register/student" element={<AuthScreen mode="register-student" />} />
       <Route path="/register/hotel" element={<AuthScreen mode="register-hotel" />} />
       <Route path="*" element={<Navigate to="/login" replace />} />

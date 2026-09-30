@@ -90,6 +90,20 @@ export const env = {
   // -----------------------------------------------------------------
   supabaseUrl: process.env.SUPABASE_URL || "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+
+  // -----------------------------------------------------------------
+  // Email (Resend) — used only for the forgot-password reset link, per
+  // the same "not in REQUIRED_VARS" reasoning as Paystack/Google/
+  // Supabase above: the whole server shouldn't refuse to boot over one
+  // feature. requestPasswordReset itself returns a clear error if this
+  // is unset, rather than silently pretending to send anything.
+  // onboarding@resend.dev works immediately with just an API key (no
+  // domain verification needed) — fine to start with, but swap
+  // EMAIL_FROM to a verified sending domain before relying on this for
+  // real delivery to Gmail/Outlook, which are stricter about it.
+  // -----------------------------------------------------------------
+  resendApiKey: process.env.RESEND_API_KEY || "",
+  emailFrom: process.env.EMAIL_FROM || "MEALVEST <onboarding@resend.dev>",
 };
 
 // Loud, boot-blocking guard: a live-looking secret key outside a
