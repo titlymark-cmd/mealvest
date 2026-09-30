@@ -6,6 +6,9 @@
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
+  "crons": [
+    { "path": "/api/cron/meal-reminders", "schedule": "*/15 * * * *" }
+  ],
   "headers": [
     {
       "source": "/((?!api/).*)",

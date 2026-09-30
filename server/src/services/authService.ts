@@ -23,6 +23,7 @@ import { Role } from "../types/roles";
 import { RegisterStudentInput, RegisterHotelInput, LoginInput } from "../schemas/authSchemas";
 import { revokeAllRefreshTokensForUser } from "../models/refreshTokenModel";
 import { sendPasswordResetEmail } from "./emailService";
+import * as notificationEvents from "./notificationEvents";
 
 interface AuthResult {
   accessToken: string;
@@ -74,6 +75,7 @@ export async function registerStudent(input: RegisterStudentInput): Promise<Auth
     );
 
     await client.query("COMMIT");
+    notificationEvents.welcomeStudent(userId, input.fullName);
     return issueTokens(userId, "student", input.fullName, input.email);
   } catch (err) {
     await client.query("ROLLBACK");
@@ -208,6 +210,7 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
     );
 
     await client.query("COMMIT");
+    notificationEvents.welcomeHotel(userId, input.hotelName);
     const tokens = await issueTokens(userId, "hotel_owner", input.contactFullName, input.email);
     return { ...tokens, applicationId };
   } catch (err) {
@@ -520,6 +523,7 @@ export async function resetPassword(token: string, newPassword: string): Promise
   await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [passwordHash, userId]);
   await pool.query("DELETE FROM password_reset_tokens WHERE token_hash = $1", [tokenHash]);
   await revokeAllRefreshTokensForUser(userId);
+  notificationEvents.securityPasswordChanged(userId);
 }
 
 // 4 attempts, then a 15-minute timed lockout — matches the window

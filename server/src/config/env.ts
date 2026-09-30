@@ -95,6 +95,54 @@ export const env = {
   // -----------------------------------------------------------------
   resendApiKey: process.env.RESEND_API_KEY || "",
   emailFrom: process.env.EMAIL_FROM || "MEALVEST <onboarding@resend.dev>",
+
+  // -----------------------------------------------------------------
+  // Firebase Cloud Messaging (web push) — SERVER-SIDE credentials only,
+  // used to actually send push messages via FCM's HTTP v1 API (see
+  // fcmService.ts, which calls it directly with an access token from
+  // google-auth-library rather than pulling in the firebase-admin SDK
+  // — same hand-rolled-client convention as every other integration in
+  // this codebase). The PUBLIC web config (apiKey, projectId,
+  // messagingSenderId, appId, vapidKey) is a separate, non-secret set
+  // of values baked into the CRA frontend at build time via
+  // REACT_APP_FIREBASE_* — never read here, never sent through this
+  // server. Not in REQUIRED_VARS: push is one notification channel
+  // among several: the server boots fine without it, notificationService
+  // just can't actually send push until these are set.
+  // -----------------------------------------------------------------
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID || "",
+  firebaseClientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
+  // Vercel's env var UI can't store real newlines reliably, so the
+  // private key is stored with literal "\n" sequences and unescaped
+  // here — a well-known gotcha with this exact credential shape.
+  firebasePrivateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+
+  // -----------------------------------------------------------------
+  // SMS — provider-agnostic (see smsService.ts's SmsProvider
+  // interface). smsProvider selects which concrete implementation to
+  // use; only that provider's own credentials below are ever read.
+  // Africa's Talking is the only implementation shipped now (the
+  // standard SMS gateway for Kenya, pairing naturally with this
+  // M-Pesa-centric app) — swapping to another provider later means
+  // adding one new file implementing the same interface, not rewriting
+  // the notification system. Not in REQUIRED_VARS, same reasoning as
+  // Firebase above.
+  // -----------------------------------------------------------------
+  smsProvider: process.env.SMS_PROVIDER || "",
+  africasTalkingApiKey: process.env.AFRICASTALKING_API_KEY || "",
+  africasTalkingUsername: process.env.AFRICASTALKING_USERNAME || "",
+  africasTalkingSenderId: process.env.AFRICASTALKING_SENDER_ID || "",
+
+  // -----------------------------------------------------------------
+  // Cron — Vercel automatically sends `Authorization: Bearer
+  // <CRON_SECRET>` on requests it triggers for a path listed under
+  // "crons" in vercel.json, when CRON_SECRET is set. The meal-reminder
+  // endpoint (routes/cron.routes.ts) checks the incoming header against
+  // this value so the endpoint can't be triggered by an arbitrary
+  // public request — never set in REQUIRED_VARS since the server boots
+  // fine without scheduled reminders configured yet.
+  // -----------------------------------------------------------------
+  cronSecret: process.env.CRON_SECRET || "",
 };
 
 // Loud, boot-blocking guard: a live-looking secret key outside a

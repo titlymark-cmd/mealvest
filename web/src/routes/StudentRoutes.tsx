@@ -11,6 +11,7 @@ import MealBoostScreen from "../pages/student/MealBoostScreen";
 import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 import { StudentSidebar, STUDENT_MOBILE_BREAKPOINT, STUDENT_SIDEBAR_WIDTH } from "../components/student/StudentSidebar";
+import { NotificationBell } from "../components/notifications/NotificationBell";
 import { useWindowSize } from "../hooks/useWindowSize";
 import { useAuth } from "../context/AuthContext";
 import { getActiveBudget } from "../services/budgetApi";
@@ -32,6 +33,9 @@ function StudentDashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
       <StudentSidebar />
+      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
+        <NotificationBell />
+      </div>
       <div
         style={{
           height: "100%",

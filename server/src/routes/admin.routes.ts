@@ -22,6 +22,8 @@ import {
   updateAnnouncement,
   deleteAnnouncement,
 } from "../controllers/announcements.controller";
+import { adminBroadcast, adminTestSend } from "../controllers/notifications.controller";
+import { adminNotificationRateLimiter } from "../middleware/rateLimit";
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireRole("mealvest_admin"));
@@ -44,3 +46,5 @@ adminRouter.get("/announcements", listAnnouncements);
 adminRouter.post("/announcements", createAnnouncement);
 adminRouter.patch("/announcements/:id", updateAnnouncement);
 adminRouter.delete("/announcements/:id", deleteAnnouncement);
+adminRouter.post("/notifications/broadcast", adminNotificationRateLimiter, adminBroadcast);
+adminRouter.post("/notifications/test-send", adminNotificationRateLimiter, adminTestSend);

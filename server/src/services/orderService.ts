@@ -2,6 +2,7 @@ import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { deductFromBudget } from "./budgetService";
 import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
+import * as notificationEvents from "./notificationEvents";
 
 export interface CartLine {
   itemId: string;
@@ -162,7 +163,14 @@ export async function payOrderFromBudget(orderId: string, userId: string) {
     );
 
     await client.query("COMMIT");
-    return updated.rows[0];
+
+    const paidOrder = updated.rows[0];
+    const hotelResult = await pool.query("SELECT name FROM hotels WHERE id = $1", [paidOrder.hotel_id]);
+    const hotelName = hotelResult.rows[0]?.name || "your hotel";
+    notificationEvents.mealPassGenerated(userId, hotelName, Number(paidOrder.amount));
+    notificationEvents.hotelOrderReceived(paidOrder.hotel_id, Number(paidOrder.amount), paidOrder.id);
+
+    return paidOrder;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
@@ -229,7 +237,14 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
     );
 
     await client.query("COMMIT");
-    return updated.rows[0];
+
+    const redeemedOrder = updated.rows[0];
+    const hotelNameResult = await pool.query("SELECT name FROM hotels WHERE id = $1", [hotelId]);
+    const hotelName = hotelNameResult.rows[0]?.name || "the hotel";
+    notificationEvents.mealRedeemed(redeemedOrder.user_id, hotelName, Number(redeemedOrder.amount));
+    notificationEvents.hotelMealRedeemed(hotelId, hotelAmount, redeemedOrder.id);
+
+    return redeemedOrder;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;

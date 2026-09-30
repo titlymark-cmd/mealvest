@@ -1,5 +1,6 @@
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
+import * as notificationEvents from "./notificationEvents";
 
 export interface BudgetRow {
   id: string;
@@ -456,7 +457,20 @@ export async function deductFromBudget(userId: string, amount: number): Promise<
       [newRemaining, newSpent, newSpentToday, Math.max(0, newBanked), budget.id]
     );
     await client.query("COMMIT");
-    return updated.rows[0];
+
+    const updatedBudget = updated.rows[0];
+    // Same "below a quarter of today's daily amount" threshold the
+    // student dashboard's credit-ring color coding already uses
+    // (dailyCreditStatus.ts) — consistent red-alert definition in one
+    // place conceptually, even though the actual threshold constant
+    // is duplicated here since that file is frontend-only.
+    const newSpendableToday =
+      Math.round((Number(updatedBudget.daily_allowance) + Number(updatedBudget.banked_amount) - Number(updatedBudget.spent_today)) * 100) / 100;
+    if (newSpendableToday < Number(updatedBudget.daily_allowance) / 4) {
+      notificationEvents.lowBudgetWarning(userId, updatedBudget.id, newSpendableToday);
+    }
+
+    return updatedBudget;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;

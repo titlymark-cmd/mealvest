@@ -1,6 +1,7 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AdminSidebar, ADMIN_MOBILE_BREAKPOINT, ADMIN_SIDEBAR_WIDTH } from "../components/admin/AdminSidebar";
+import { NotificationBell } from "../components/notifications/NotificationBell";
 import { useWindowSize } from "../hooks/useWindowSize";
 import AdminOverviewScreen from "../pages/admin/AdminOverviewScreen";
 import AdminAnalyticsScreen from "../pages/admin/AdminAnalyticsScreen";
@@ -8,6 +9,7 @@ import AdminHotelsScreen from "../pages/admin/AdminHotelsScreen";
 import AdminStudentsScreen from "../pages/admin/AdminStudentsScreen";
 import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
 import AdminPaymentsScreen from "../pages/admin/AdminPaymentsScreen";
+import AdminNotificationsScreen from "../pages/admin/AdminNotificationsScreen";
 
 /**
  * The sidebar (desktop) / tab bar (mobile) is always position:fixed —
@@ -27,6 +29,9 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
       <AdminSidebar />
+      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
+        <NotificationBell />
+      </div>
       <div
         style={{
           height: "100%",
@@ -52,6 +57,7 @@ export function AdminRoutes() {
       <Route path="/admin/students" element={<AdminShell><AdminStudentsScreen /></AdminShell>} />
       <Route path="/admin/orders" element={<AdminShell><AdminOrdersScreen /></AdminShell>} />
       <Route path="/admin/payments" element={<AdminShell><AdminPaymentsScreen /></AdminShell>} />
+      <Route path="/admin/notifications" element={<AdminShell><AdminNotificationsScreen /></AdminShell>} />
       <Route path="*" element={<Navigate to="/admin/home" replace />} />
     </Routes>
   );

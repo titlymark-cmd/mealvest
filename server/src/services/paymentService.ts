@@ -3,6 +3,7 @@ import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import { createBudget, applyBoost } from "./budgetService";
 import { VerifyPaymentResult } from "./paymentProvider";
+import * as notificationEvents from "./notificationEvents";
 
 export function generatePaymentReference(): string {
   // MV- prefix makes these instantly recognizable as ours in the
@@ -111,6 +112,11 @@ export async function activatePaymentIfNeeded(
         [verified.status === "pending" ? "processing" : "failed", verified.providerTransactionId, tx.id]
       );
       await client.query("COMMIT");
+      // Only a real, final "failed" — "pending" (STK push still awaiting
+      // PIN entry, etc.) is not a failure and shouldn't notify anyone yet.
+      if (verified.status === "failed") {
+        notificationEvents.paymentFailed(tx.user_id, Number(tx.amount), reference);
+      }
       return { alreadyProcessed: false, transactionId: tx.id };
     }
 
@@ -146,6 +152,7 @@ export async function activatePaymentIfNeeded(
       // accepted terms for at plan creation — nothing new to collect
       // here, just credit the referenced budget.
       await applyBoost(tx.budget_id, Number(tx.amount));
+      notificationEvents.paymentSuccess(tx.user_id, Number(tx.amount), reference, true);
     } else {
       // A "new plan" top-up can still land here while the student
       // already has an active budget — e.g. a retried checkout after
@@ -181,6 +188,7 @@ export async function activatePaymentIfNeeded(
           termsAccepted: true,
         });
       }
+      notificationEvents.paymentSuccess(tx.user_id, Number(tx.amount), reference, false);
     }
 
     return { alreadyProcessed: false, transactionId: tx.id };

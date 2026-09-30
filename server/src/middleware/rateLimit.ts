@@ -30,3 +30,32 @@ export const financialActionRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: { code: "TOO_MANY_ATTEMPTS", message: "Too many requests. Please slow down and try again shortly." } },
 });
+
+/**
+ * Self-service "Test Notification" button and admin device-registration
+ * churn — generous enough that legitimate use (a student re-testing
+ * after fixing browser permissions, a device re-registering on every
+ * app load) never trips it, tight enough to blunt abuse of an endpoint
+ * that ultimately triggers a real push/SMS send.
+ */
+export const notificationActionRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: "TOO_MANY_ATTEMPTS", message: "Too many requests. Please slow down and try again shortly." } },
+});
+
+/**
+ * Admin broadcast/test-send — tighter than the self-service limiter
+ * above since a single call can fan out to hundreds of recipients;
+ * this is defense against an accidental double-click or a compromised
+ * admin session, not normal admin usage.
+ */
+export const adminNotificationRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: "TOO_MANY_ATTEMPTS", message: "Too many broadcast requests. Please wait before sending another." } },
+});

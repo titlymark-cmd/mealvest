@@ -1,6 +1,7 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { HotelSidebar, HOTEL_MOBILE_BREAKPOINT, HOTEL_SIDEBAR_WIDTH } from "../components/hotel/HotelSidebar";
+import { NotificationBell } from "../components/notifications/NotificationBell";
 import { useWindowSize } from "../hooks/useWindowSize";
 import HotelScannerScreen from "../pages/hotel/HotelScannerScreen";
 import HotelOwnerOverviewScreen from "../pages/hotelOwner/HotelOwnerOverviewScreen";
@@ -16,6 +17,9 @@ function HotelOwnerShell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
       <HotelSidebar />
+      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
+        <NotificationBell />
+      </div>
       <div
         style={{
           height: "100%",

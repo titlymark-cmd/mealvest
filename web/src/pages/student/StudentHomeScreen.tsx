@@ -10,6 +10,7 @@ import { getActiveBudget, transferToNextDay, Budget } from "../../services/budge
 import { fetchCustomerCarePhone } from "../../services/settingsApi";
 import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
+import { NotificationPermissionBanner } from "../../components/notifications/NotificationPermissionBanner";
 
 export default function StudentHomeScreen() {
   const { user, logout, authFetch } = useAuth();
@@ -110,6 +111,8 @@ export default function StudentHomeScreen() {
 
   return (
     <div style={styles.container}>
+      <NotificationPermissionBanner />
+
       {budget && Number(budget.pending_rollover_amount) > 0 && (
         <RolloverPrompt budget={budget} onResolved={setBudget} />
       )}

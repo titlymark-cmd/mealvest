@@ -5,6 +5,7 @@ import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchStudentProfile, updateStudentProfile, StudentProfile } from "../../services/studentProfileApi";
+import { NotificationSettingsSection } from "../../components/notifications/NotificationSettingsSection";
 
 /** Single row: static label above, either the plain value or (in edit mode) an input. */
 function Field({
@@ -178,6 +179,8 @@ export default function StudentProfileScreen() {
           )}
         </Card>
       )}
+
+      {!loading && !loadError && profile && <NotificationSettingsSection />}
     </div>
   );
 }

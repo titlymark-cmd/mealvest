@@ -16,6 +16,8 @@ import { ordersRouter } from "./routes/orders.routes";
 import { plansRouter } from "./routes/plans.routes";
 import { settingsRouter } from "./routes/settings.routes";
 import { announcementsRouter } from "./routes/announcements.routes";
+import { notificationsRouter } from "./routes/notifications.routes";
+import { cronRouter } from "./routes/cron.routes";
 
 export function createApp() {
   const app = express();
@@ -73,6 +75,8 @@ export function createApp() {
   app.use("/api/plans", plansRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/announcements", announcementsRouter);
+  app.use("/api/notifications", notificationsRouter);
+  app.use("/api/cron", cronRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
