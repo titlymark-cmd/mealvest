@@ -13,6 +13,7 @@ import {
   getTopHotels,
   getAlerts,
   listStudents,
+  getRevenueAnalytics,
 } from "../controllers/admin.controller";
 import { updateCustomerCarePhone } from "../controllers/settings.controller";
 import {
@@ -28,6 +29,7 @@ adminRouter.use(requireAuth, requireRole("mealvest_admin"));
 adminRouter.get("/overview", getAdminOverview);
 adminRouter.get("/alerts", getAlerts);
 adminRouter.get("/ledger", getDailyLedger);
+adminRouter.get("/analytics/revenue", getRevenueAnalytics);
 adminRouter.get("/hotels/top", getTopHotels);
 adminRouter.get("/students", listStudents);
 adminRouter.get("/hotels", listHotels);

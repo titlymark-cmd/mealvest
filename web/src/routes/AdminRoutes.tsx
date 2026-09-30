@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { AdminSidebar, ADMIN_MOBILE_BREAKPOINT, ADMIN_SIDEBAR_WIDTH } from "../components/admin/AdminSidebar";
 import { useWindowSize } from "../hooks/useWindowSize";
 import AdminOverviewScreen from "../pages/admin/AdminOverviewScreen";
+import AdminAnalyticsScreen from "../pages/admin/AdminAnalyticsScreen";
 import AdminHotelsScreen from "../pages/admin/AdminHotelsScreen";
 import AdminStudentsScreen from "../pages/admin/AdminStudentsScreen";
 import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
@@ -46,6 +47,7 @@ export function AdminRoutes() {
   return (
     <Routes>
       <Route path="/admin/home" element={<AdminShell><AdminOverviewScreen /></AdminShell>} />
+      <Route path="/admin/analytics" element={<AdminShell><AdminAnalyticsScreen /></AdminShell>} />
       <Route path="/admin/hotels" element={<AdminShell><AdminHotelsScreen /></AdminShell>} />
       <Route path="/admin/students" element={<AdminShell><AdminStudentsScreen /></AdminShell>} />
       <Route path="/admin/orders" element={<AdminShell><AdminOrdersScreen /></AdminShell>} />

@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut } from "lucide-react";
+import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut, BarChart3 } from "lucide-react";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
@@ -9,6 +9,7 @@ import logo from "../../assets/mealvest-logo.png";
 
 const NAV_ITEMS = [
   { to: "/admin/home", label: "Overview", icon: TrendingUp, end: true },
+  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/hotels", label: "Hotels", icon: Building2 },
   { to: "/admin/students", label: "Students", icon: Users },
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag },

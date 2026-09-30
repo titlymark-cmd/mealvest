@@ -253,3 +253,39 @@ export async function fetchAdminStudents(authFetch: AuthFetch, search?: string):
   const data = await parseOrError<{ students: AdminStudent[] }>(res, "Could not load students.");
   return data.students;
 }
+
+export interface RevenueLifetime {
+  gross_transaction_value: string;
+  total_commission: string;
+  total_redeemed: string;
+  total_plans_collected: string;
+  total_plans_count: string;
+}
+
+export interface RevenueDailyPoint {
+  date: string;
+  gross: string;
+  commission: string;
+  orders_count: string;
+  plans_amount: string;
+}
+
+export interface RevenueByHotel {
+  id: string;
+  name: string;
+  gross: string;
+  commission: string;
+  orders_count: string;
+}
+
+export interface RevenueAnalytics {
+  days: number;
+  lifetime: RevenueLifetime;
+  daily: RevenueDailyPoint[];
+  byHotel: RevenueByHotel[];
+}
+
+export async function fetchRevenueAnalytics(authFetch: AuthFetch, days: 7 | 30 | 90 = 30): Promise<RevenueAnalytics> {
+  const res = await authFetch(`/api/admin/analytics/revenue?days=${days}`);
+  return parseOrError(res, "Could not load revenue analytics.");
+}

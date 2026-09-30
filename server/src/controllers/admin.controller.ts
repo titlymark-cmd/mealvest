@@ -462,6 +462,94 @@ export async function getAlerts(_req: AuthedRequest, res: Response, next: NextFu
  * active budget still show up, with a null plan the frontend renders
  * as "No active plan" rather than inventing one.
  */
+/**
+ * GET /api/admin/analytics/revenue?days=7|30|90
+ *
+ * Everything here comes from the same frozen columns getDailyLedger
+ * already trusts (orders.commission_amount, frozen at redemption time)
+ * — this just widens the window from "today" to a real time series and
+ * lifetime totals, and adds a by-hotel commission breakdown. Nothing
+ * new is computed or estimated; it's the same source of truth, sliced
+ * differently for a trend view instead of a single day.
+ */
+const ANALYTICS_DAY_OPTIONS = [7, 30, 90] as const;
+
+export async function getRevenueAnalytics(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const daysParam = Number(req.query.days);
+    const days = (ANALYTICS_DAY_OPTIONS as readonly number[]).includes(daysParam) ? daysParam : 30;
+
+    const [lifetime, daily, byHotel] = await Promise.all([
+      // Lifetime totals — never bounded by the selected window, so the
+      // headline "how much has MEALVEST made, ever" figure doesn't
+      // silently change meaning when someone picks a different range.
+      pool.query(
+        `SELECT
+           COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_transaction_value,
+           COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS total_commission,
+           COUNT(*) FILTER (WHERE status = 'redeemed') AS total_redeemed,
+           (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'budget_topup' AND status = 'success') AS total_plans_collected,
+           (SELECT COUNT(*) FROM transactions WHERE type = 'budget_topup' AND status = 'success') AS total_plans_count
+         FROM orders`
+      ),
+      // Zero-filled daily series over the window — a day with no
+      // activity shows as a real 0, not a gap the chart has to guess
+      // how to draw.
+      pool.query(
+        `SELECT d::date AS date,
+                COALESCE(o_agg.gross, 0) AS gross,
+                COALESCE(o_agg.commission, 0) AS commission,
+                COALESCE(o_agg.orders_count, 0) AS orders_count,
+                COALESCE(t_agg.plans_amount, 0) AS plans_amount
+         FROM generate_series((CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')::date, CURRENT_DATE, INTERVAL '1 day') AS d
+         LEFT JOIN (
+           SELECT redeemed_at::date AS date,
+                  SUM(amount) AS gross, SUM(commission_amount) AS commission, COUNT(*) AS orders_count
+           FROM orders
+           WHERE status = 'redeemed' AND redeemed_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+           GROUP BY redeemed_at::date
+         ) o_agg ON o_agg.date = d::date
+         LEFT JOIN (
+           SELECT created_at::date AS date, SUM(amount) AS plans_amount
+           FROM transactions
+           WHERE type = 'budget_topup' AND status = 'success'
+             AND created_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+           GROUP BY created_at::date
+         ) t_agg ON t_agg.date = d::date
+         ORDER BY d ASC`,
+        [days]
+      ),
+      // Which hotels actually generated MEALVEST's commission in this
+      // window — distinct from getTopHotels (which ranks by the
+      // hotel's own gross revenue); zero-commission hotels are
+      // excluded rather than shown with a misleading KSh 0.
+      pool.query(
+        `SELECT h.id, h.name,
+                COALESCE(SUM(o.amount), 0) AS gross,
+                COALESCE(SUM(o.commission_amount), 0) AS commission,
+                COUNT(o.id) AS orders_count
+         FROM hotels h
+         JOIN orders o ON o.hotel_id = h.id AND o.status = 'redeemed'
+           AND o.redeemed_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+         GROUP BY h.id
+         HAVING COALESCE(SUM(o.commission_amount), 0) > 0
+         ORDER BY commission DESC
+         LIMIT 10`,
+        [days]
+      ),
+    ]);
+
+    res.json({
+      days,
+      lifetime: lifetime.rows[0],
+      daily: daily.rows,
+      byHotel: byHotel.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function listStudents(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const search = (req.query.search as string | undefined)?.trim();
