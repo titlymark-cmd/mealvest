@@ -67,7 +67,14 @@ export class PaystackPaymentProvider implements PaymentProvider {
         currency: "KES",
         reference: params.reference,
         mobile_money: {
-          phone: params.phoneNumber, // already normalized to 254XXXXXXXXX
+          // Paystack's Charge API requires E.164 with a leading "+"
+          // (confirmed via a real test call — bare "254XXXXXXXXX" gets
+          // rejected as "Invalid phone number format"). Every other
+          // part of this codebase keeps the "+"-less 254XXXXXXXXX form
+          // (DB storage, uniqueness checks, display) — this prefix is
+          // added ONLY at the Paystack API boundary, same pattern as
+          // the amount->subunit conversion above.
+          phone: `+${params.phoneNumber}`,
           provider: "mpesa",
         },
         metadata: { userId: params.userId, phoneNumber: params.phoneNumber, ...params.metadata },
