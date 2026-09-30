@@ -12,6 +12,7 @@ import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 import { StudentSidebar, STUDENT_MOBILE_BREAKPOINT, STUDENT_SIDEBAR_WIDTH } from "../components/student/StudentSidebar";
 import { NotificationBell } from "../components/notifications/NotificationBell";
+import { ComingSoonBadge } from "../components/ComingSoonBadge";
 import { useWindowSize } from "../hooks/useWindowSize";
 import { useAuth } from "../context/AuthContext";
 import { getActiveBudget } from "../services/budgetApi";
@@ -36,6 +37,7 @@ function StudentDashboardShell({ children }: { children: React.ReactNode }) {
       <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
         <NotificationBell />
       </div>
+      <ComingSoonBadge />
       <div
         style={{
           height: "100%",

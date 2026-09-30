@@ -287,3 +287,33 @@ input.mv-input-plain:focus-visible {
     animation: none;
   }
 }
+
+/* ============================================================
+   MEALVEST — "Coming Soon" floating badge
+   ------------------------------------------------------------
+   A slow breathing glow (NOT a flashing/urgent pulse) behind the
+   floating badge component (see components/ComingSoonBadge.tsx) that
+   surfaces features waiting on external setup (SMS, etc.) or still
+   planned (inter-hotel transfer, Niokolee). Colors hardcoded to
+   mirror theme.ts's COLORS.primary/primaryLight, same convention as
+   the rest of this file.
+   ============================================================ */
+@keyframes mv-comingsoon-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 46, 0.55), 0 4px 14px rgba(229, 72, 46, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(255, 138, 61, 0), 0 4px 22px rgba(255, 138, 61, 0.55);
+  }
+}
+
+.mv-comingsoon-badge {
+  animation: mv-comingsoon-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-comingsoon-badge {
+    animation: none;
+  }
+}

@@ -6,7 +6,6 @@ import { Spinner } from "../Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchPreferences, updatePreferences, sendTestNotification, NotificationPreferences } from "../../services/notificationsApi";
-import { isPushSupported, getPermissionState, enablePush, disablePushOnThisDevice } from "../../services/pushNotifications";
 
 const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; sub: string }> = [
   { key: "meal_reminders", label: "Meal Reminders", sub: "Reminders to use your meal pass" },
@@ -16,14 +15,25 @@ const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; su
   { key: "security_alerts", label: "Security Alerts", sub: "Password and account changes" },
 ];
 
-/** Embedded in StudentProfileScreen — see that file for the surrounding page. Uses the same Card/Field visual language, not a redesign. */
+/**
+ * Embedded in StudentProfileScreen — see that file for the surrounding
+ * page. Uses the same Card/Field visual language, not a redesign.
+ *
+ * Push notifications need a Firebase project configured server-side
+ * (see fcmService.ts) before they can actually send anything — until
+ * that's set up, the toggle below is shown as "Coming soon" instead of
+ * a live control (see ComingSoonBadge.tsx for the fuller explanation
+ * surfaced elsewhere in the app). The backend is fully built and
+ * wired — the ONLY thing missing is real Firebase credentials — so
+ * re-enabling this is a one-line change (swap the chip back for a
+ * <Switch> bound to prefs.push_enabled / pushNotifications.enablePush)
+ * once those are set in Vercel.
+ */
 export function NotificationSettingsSection() {
   const { authFetch } = useAuth();
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [pushBusy, setPushBusy] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<"idle" | "sending" | "sent">("idle");
 
   useEffect(() => {
@@ -49,32 +59,6 @@ export function NotificationSettingsSection() {
     }
   };
 
-  const handlePushToggle = async () => {
-    if (!prefs) return;
-    setPushError(null);
-    setPushBusy(true);
-    try {
-      if (prefs.push_enabled) {
-        await disablePushOnThisDevice(authFetch);
-        const updated = await updatePreferences(authFetch, { pushEnabled: false });
-        setPrefs(updated);
-      } else {
-        const result = await enablePush(authFetch);
-        if (!result.ok) {
-          setPushError(result.message);
-          setPushBusy(false);
-          return;
-        }
-        const updated = await updatePreferences(authFetch, { pushEnabled: true });
-        setPrefs(updated);
-      }
-    } catch (err) {
-      setPushError(err instanceof Error ? err.message : "Could not update push notifications.");
-    } finally {
-      setPushBusy(false);
-    }
-  };
-
   const handleTest = async () => {
     setTestStatus("sending");
     try {
@@ -94,9 +78,6 @@ export function NotificationSettingsSection() {
     );
   }
 
-  const permissionState = getPermissionState();
-  const showDeniedHint = isPushSupported() && permissionState === "denied";
-
   return (
     <Card style={styles.card}>
       <div style={styles.headerRow}>
@@ -107,13 +88,9 @@ export function NotificationSettingsSection() {
       <div style={styles.row}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={styles.rowLabel}>Push Notifications</span>
-          <span style={styles.rowSub}>Receive MEALVEST alerts on this device</span>
-          {showDeniedHint && (
-            <span style={styles.deniedHint}>Blocked in your browser — enable notifications for this site in your browser settings, then toggle this on again.</span>
-          )}
-          {pushError && <span style={styles.deniedHint}>{pushError}</span>}
+          <span style={styles.rowSub}>Get alerts on this device, even when the app is closed</span>
         </div>
-        <Switch value={prefs.push_enabled} onValueChange={handlePushToggle} />
+        <span style={styles.comingSoonChip}>Coming soon</span>
       </div>
 
       {TOGGLE_ROWS.map((row) => (
@@ -131,7 +108,7 @@ export function NotificationSettingsSection() {
           {testStatus === "sending" ? "Sending…" : testStatus === "sent" ? "Test sent ✓" : "Send Test Notification"}
         </span>
       </button>
-      {(savingKey || pushBusy) && <span style={styles.savingHint}>Saving…</span>}
+      {savingKey && <span style={styles.savingHint}>Saving…</span>}
     </Card>
   );
 }
@@ -151,7 +128,16 @@ const styles: Record<string, React.CSSProperties> = {
   },
   rowLabel: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
   rowSub: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-  deniedHint: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.danger, marginTop: 4 },
+  comingSoonChip: {
+    fontFamily: FONTS.bodySemibold,
+    fontWeight: 700,
+    fontSize: 10,
+    color: COLORS.primaryDark,
+    backgroundColor: COLORS.accentSoft,
+    borderRadius: RADIUS.pill,
+    padding: "4px 10px",
+    flexShrink: 0,
+  },
   testBtn: { marginTop: 14, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: RADIUS.sm, padding: "11px 12px" },
   testText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary, textAlign: "center", display: "block" },
   savingHint: { fontFamily: FONTS.body, fontSize: 10, color: COLORS.textFaint, textAlign: "center", marginTop: 6 },
