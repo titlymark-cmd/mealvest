@@ -89,6 +89,41 @@ export class PaystackPaymentProvider implements PaymentProvider {
       };
     } catch (err) {
       if (axios.isAxiosError(err)) {
+        // Known Paystack quirk on the mobile_money Charge flow: a
+        // charge that was genuinely created (async/pending on their
+        // side) can still come back wrapped in a non-2xx HTTP status
+        // with a generic body like {"message":"Charge attempted"} —
+        // the actual charge sub-object (data.data) is still present
+        // when that happens. Discarding it and hard-failing here would
+        // mean a real pending payment is reported to the student as
+        // "failed" even though the STK push may still land on their
+        // phone. If Paystack gave us a real charge object, treat it as
+        // a successful initiation regardless of the wrapping status
+        // code — the true outcome is still decided later, by
+        // verifyPayment() against Paystack's own transaction record,
+        // never by this response alone.
+        const errData = err.response?.data?.data;
+        if (errData?.reference) {
+          console.warn(
+            "[paystackProvider.initializePayment] Non-2xx from Paystack but a charge object was returned — treating as initiated.",
+            { status: err.response?.status, reference: errData.reference, chargeStatus: errData.status }
+          );
+          return {
+            reference: params.reference,
+            providerReference: errData.reference,
+            displayText: errData.display_text || "Enter your M-Pesa PIN on your phone to complete payment.",
+            raw: err.response?.data,
+          };
+        }
+
+        // Genuine failure — log the full body server-side (safe: it's
+        // Paystack's own response, never our secret key) so a report
+        // like "Charge attempted" with no other context never needs
+        // guessing at again.
+        console.error("[paystackProvider.initializePayment] Paystack rejected the charge:", {
+          status: err.response?.status,
+          body: err.response?.data,
+        });
         throw new ApiError(
           502,
           "PAYSTACK_INIT_FAILED",
