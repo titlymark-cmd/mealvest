@@ -11,11 +11,13 @@ import {
   fetchDailyLedger,
   fetchAdminAlerts,
   fetchTopHotels,
+  fetchRevenueAnalytics,
   approveHotel,
   AdminOverview,
   DailyLedger,
   AdminAlerts,
   TopHotel,
+  RevenueAnalytics,
 } from "../../services/adminApi";
 import { fetchCustomerCarePhone, updateCustomerCarePhone } from "../../services/settingsApi";
 import {
@@ -37,6 +39,53 @@ function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: s
   );
 }
 
+/**
+ * Stat-tile trend sparkline per the dataviz skill's figure spec:
+ * de-emphasized track, current period in the accent hue, no axes —
+ * this is a glance-level trend indicator, not an interactive chart
+ * (the full drill-down chart lives on the Analytics tab).
+ */
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const W = 160;
+  const H = 40;
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
+  const range = Math.max(1, max - min);
+  const points = values.map((v, i) => {
+    const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * W;
+    const y = H - ((v - min) / range) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 40, display: "block" }}>
+      <polyline points={points.join(" ")} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function RevenueTrendBlock({
+  label,
+  totalRevenue,
+  totalCommission,
+  values,
+}: {
+  label: string;
+  totalRevenue: number;
+  totalCommission: number;
+  values: number[];
+}) {
+  return (
+    <div style={styles.trendBlock}>
+      <span style={styles.trendBlockLabel}>{label}</span>
+      <span style={styles.trendBlockValue}>{formatKsh(totalRevenue)}</span>
+      <span style={styles.trendBlockSub}>{formatKsh(totalCommission)} commission</span>
+      <div style={styles.trendSparkline}>
+        <Sparkline values={values} color={COLORS.primary} />
+      </div>
+    </div>
+  );
+}
+
 export default function AdminOverviewScreen() {
   const { authFetch, logout } = useAuth();
   const navigate = useNavigate();
@@ -44,6 +93,7 @@ export default function AdminOverviewScreen() {
   const [ledger, setLedger] = useState<DailyLedger | null>(null);
   const [alerts, setAlerts] = useState<AdminAlerts | null>(null);
   const [topHotels, setTopHotels] = useState<TopHotel[]>([]);
+  const [revenueTrend, setRevenueTrend] = useState<RevenueAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
@@ -62,11 +112,12 @@ export default function AdminOverviewScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [ov, led, al, top, care, ann] = await Promise.all([
+      const [ov, led, al, top, trend, care, ann] = await Promise.all([
         fetchAdminOverview(authFetch),
         fetchDailyLedger(authFetch),
         fetchAdminAlerts(authFetch),
         fetchTopHotels(authFetch, "today"),
+        fetchRevenueAnalytics(authFetch, 30),
         fetchCustomerCarePhone(),
         fetchAllAnnouncements(authFetch),
       ]);
@@ -74,6 +125,7 @@ export default function AdminOverviewScreen() {
       setLedger(led);
       setAlerts(al);
       setTopHotels(top);
+      setRevenueTrend(trend);
       setCarePhone(care);
       setCareDraft(care || "");
       setAnnouncements(ann);
@@ -166,6 +218,27 @@ export default function AdminOverviewScreen() {
     return [...hotels, ...payments].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 4);
   }, [alerts]);
 
+  // Both blocks are derived from the same 30-day fetch — "this week" is
+  // just the trailing 7 days of the same series, not a second request.
+  const weekTrend = useMemo(() => {
+    if (!revenueTrend) return null;
+    const last7 = revenueTrend.daily.slice(-7);
+    return {
+      revenue: last7.reduce((sum, d) => sum + Number(d.gross), 0),
+      commission: last7.reduce((sum, d) => sum + Number(d.commission), 0),
+      values: last7.map((d) => Number(d.gross)),
+    };
+  }, [revenueTrend]);
+
+  const monthTrend = useMemo(() => {
+    if (!revenueTrend) return null;
+    return {
+      revenue: revenueTrend.daily.reduce((sum, d) => sum + Number(d.gross), 0),
+      commission: revenueTrend.daily.reduce((sum, d) => sum + Number(d.commission), 0),
+      values: revenueTrend.daily.map((d) => Number(d.gross)),
+    };
+  }, [revenueTrend]);
+
   if (loading) {
     return (
       <div style={styles.center}>
@@ -249,6 +322,25 @@ export default function AdminOverviewScreen() {
           />
         )}
       </div>
+
+      {weekTrend && monthTrend && (
+        <Card style={styles.trendCard}>
+          <div style={styles.panelHeaderRow}>
+            <TrendingUp size={16} color={COLORS.primary} />
+            <div>
+              <span style={styles.panelTitle}>Revenue trend</span>
+              <span style={styles.panelSubtitle}>
+                Gross meal revenue, with commission earned · full breakdown on the Analytics tab
+              </span>
+            </div>
+          </div>
+          <div style={styles.trendRow}>
+            <RevenueTrendBlock label="This week" totalRevenue={weekTrend.revenue} totalCommission={weekTrend.commission} values={weekTrend.values} />
+            <div style={styles.trendDivider} />
+            <RevenueTrendBlock label="This month" totalRevenue={monthTrend.revenue} totalCommission={monthTrend.commission} values={monthTrend.values} />
+          </div>
+        </Card>
+      )}
 
       <div style={styles.twoCol}>
         <Card style={styles.panelCard}>
@@ -510,6 +602,14 @@ const styles: Record<string, React.CSSProperties> = {
   statLabel: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted },
   statValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.text, marginTop: 2 },
   statSub: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, marginTop: 4 },
+  trendCard: { display: "flex", flexDirection: "column", padding: 18, marginBottom: 16 },
+  trendRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 24 },
+  trendDivider: { width: 1, backgroundColor: COLORS.borderSoft, alignSelf: "stretch" },
+  trendBlock: { display: "flex", flexDirection: "column", flex: 1, minWidth: 180 },
+  trendBlockLabel: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textMuted },
+  trendBlockValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 22, color: COLORS.text, marginTop: 4 },
+  trendBlockSub: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, marginTop: 2 },
+  trendSparkline: { marginTop: 10 },
   twoCol: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, alignItems: "start" },
   panelCard: { display: "flex", flexDirection: "column", padding: 18 },
   panelHeaderRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 },

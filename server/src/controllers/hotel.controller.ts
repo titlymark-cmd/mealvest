@@ -62,34 +62,58 @@ async function resolveHotelId(req: AuthedRequest): Promise<string> {
 
 /**
  * Real dashboard summary: today's/pending/redeemed order counts,
- * revenue, commission owed, net earnings, and contract/status info —
- * all computed live from `orders`/`hotels`, never hardcoded numbers.
+ * revenue, net earnings, and contract/status info — all computed live
+ * from `orders`/`hotels`, never hardcoded numbers.
+ *
+ * MEALVEST's commission (the platform's own cut) is a business term
+ * between MEALVEST and the hotel, not something the hotel's own
+ * dashboard displays — hotel_owner/hotel_staff callers get
+ * `revenue_today`/`net_earnings` computed from orders.hotel_amount
+ * (what the hotel actually receives), with commission_percent,
+ * commission_owed, and gross_revenue all omitted entirely (not just
+ * hidden in the UI — showing gross next to net would let a hotel back
+ * out the exact commission by subtraction, so gross never reaches this
+ * response for them). mealvest_admin, viewing a specific hotel via
+ * ?hotelId= for oversight, still gets the full figure set unchanged.
  */
 export async function getHotelDashboard(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const hotelId = await resolveHotelId(req);
+    const isAdminView = req.user!.role === "mealvest_admin";
 
     const [hotelResult, statsResult, menuCountResult] = await Promise.all([
       pool.query(
         `SELECT id, name, status, location, address, settlement_schedule, contract_start_date, contract_end_date,
-                commission_percent, registration_fee, payment_method, payment_details,
+                ${isAdminView ? "commission_percent," : ""} registration_fee, payment_method, payment_details,
                 image_url, description
          FROM hotels WHERE id = $1`,
         [hotelId]
       ),
-      pool.query(
-        `SELECT
-           COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_orders,
-           COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
-           COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
-           COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
-           COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
-           COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
-           COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS commission_owed,
-           COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
-         FROM orders WHERE hotel_id = $1`,
-        [hotelId]
-      ),
+      isAdminView
+        ? pool.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_orders,
+               COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
+               COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
+               COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
+               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
+               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
+               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS commission_owed,
+               COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
+             FROM orders WHERE hotel_id = $1`,
+            [hotelId]
+          )
+        : pool.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today_orders,
+               COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
+               COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
+               COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
+               COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
+               COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
+             FROM orders WHERE hotel_id = $1`,
+            [hotelId]
+          ),
       pool.query("SELECT COUNT(*) AS menu_item_count FROM menu_items WHERE hotel_id = $1", [hotelId]),
     ]);
 
@@ -110,13 +134,18 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
  * the trailing 7 days (including today), one row per day even when a
  * day has zero orders (generate_series, not just grouping existing
  * rows) so the frontend can plot a full week without gaps.
+ *
+ * Sums orders.hotel_amount (net, after MEALVEST's commission), not the
+ * gross order amount — this chart is "the hotel's own revenue," and
+ * gross would only invite back-calculating the commission against
+ * net_earnings elsewhere on the same dashboard.
  */
 export async function getHotelWeeklyRevenue(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const hotelId = await resolveHotelId(req);
     const result = await pool.query(
       `SELECT d::date AS day,
-              COALESCE(SUM(o.amount) FILTER (WHERE o.status = 'redeemed' AND o.redeemed_at::date = d::date), 0) AS revenue
+              COALESCE(SUM(o.hotel_amount) FILTER (WHERE o.status = 'redeemed' AND o.redeemed_at::date = d::date), 0) AS revenue
        FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS d
        LEFT JOIN orders o ON o.hotel_id = $1
        GROUP BY d
@@ -204,6 +233,12 @@ export async function updateHotelLocation(req: AuthedRequest, res: Response, nex
 
 const qrSchema = z.object({ qrPayload: z.string().min(1) });
 
+/** Strips MEALVEST's commission figure before an order row reaches a hotel_staff/hotel_owner response — hotel_amount (their own cut) stays. */
+function withoutCommission<T extends { commission_amount?: unknown }>(order: T): Omit<T, "commission_amount"> {
+  const { commission_amount, ...rest } = order;
+  return rest;
+}
+
 /** Read-only pre-check — the scanner UI shows details before staff commit to redeeming. */
 export async function verifyQr(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -212,7 +247,7 @@ export async function verifyQr(req: AuthedRequest, res: Response, next: NextFunc
 
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.verifyOrderQr(parsed.data.qrPayload, hotelId);
-    res.json({ valid: true, order });
+    res.json({ valid: true, order: withoutCommission(order) });
   } catch (err) {
     if (err instanceof ApiError) {
       res.json({ valid: false, code: err.code, message: err.message });
@@ -230,7 +265,7 @@ export async function redeemQr(req: AuthedRequest, res: Response, next: NextFunc
 
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.redeemOrderByQr(parsed.data.qrPayload, hotelId, req.user!.id);
-    res.json({ valid: true, order, message: "Meal redeemed successfully." });
+    res.json({ valid: true, order: withoutCommission(order), message: "Meal redeemed successfully." });
   } catch (err) {
     if (err instanceof ApiError) {
       res.json({ valid: false, code: err.code, message: err.message });
@@ -244,7 +279,8 @@ export async function listHotelOrders(req: AuthedRequest, res: Response, next: N
   try {
     const hotelId = await resolveHotelId(req);
     const orders = await orderService.getOrdersForHotel(hotelId, req.query.status as string | undefined);
-    res.json({ orders });
+    const isAdminView = req.user!.role === "mealvest_admin";
+    res.json({ orders: isAdminView ? orders : orders.map(withoutCommission) });
   } catch (err) {
     next(err);
   }

@@ -5,7 +5,6 @@ import {
   DollarSign,
   ShoppingBag,
   TrendingUp,
-  Wallet,
   MapPin,
   UtensilsCrossed,
   ChevronRight,
@@ -99,7 +98,6 @@ export default function HotelOwnerOverviewScreen() {
     );
   }
 
-  const commissionPercent = Number(dashboard?.hotel.commission_percent || 0);
   const visiblePending = pendingOrders.slice(0, 4);
 
   return (
@@ -160,16 +158,8 @@ export default function HotelOwnerOverviewScreen() {
         )}
         {dashboard && (
           <StatCard
-            icon={<Wallet size={16} color={COLORS.accent} />}
-            label="Commission owed"
-            value={formatKsh(dashboard.stats.commission_owed)}
-            sub={`${dashboard.hotel.commission_percent}% platform fee`}
-          />
-        )}
-        {dashboard && (
-          <StatCard
             icon={<TrendingUp size={16} color={COLORS.success} />}
-            label="Net payout"
+            label="Total revenue"
             value={formatKsh(dashboard.stats.net_earnings)}
             sub={dashboard.hotel.settlement_schedule || undefined}
           />
@@ -208,12 +198,8 @@ export default function HotelOwnerOverviewScreen() {
           </div>
 
           <div style={styles.chartFooterRow}>
-            <span style={styles.chartFooterLabel}>Gross sales</span>
+            <span style={styles.chartFooterLabel}>Your revenue this week</span>
             <span style={styles.chartFooterValue}>{formatKsh(weekTotal)}</span>
-          </div>
-          <div style={styles.chartFooterRow}>
-            <span style={styles.chartFooterLabel}>Platform fee ({commissionPercent}%)</span>
-            <span style={styles.chartFooterValue}>{formatKsh((weekTotal * commissionPercent) / 100)}</span>
           </div>
         </Card>
 

@@ -82,7 +82,7 @@ export default function HotelStaffHomeScreen() {
             <Card style={styles.statCard}>
               <DollarSign size={16} color={COLORS.success} />
               <span style={styles.statLabel}>Revenue</span>
-              <span style={styles.statValue}>KSh {Number(dashboard.stats.gross_revenue).toLocaleString()}</span>
+              <span style={styles.statValue}>KSh {Number(dashboard.stats.net_earnings).toLocaleString()}</span>
             </Card>
           </div>
           <div style={styles.statsRow}>
@@ -91,8 +91,8 @@ export default function HotelStaffHomeScreen() {
               <span style={styles.statValue}>{dashboard.stats.pending_orders}</span>
             </Card>
             <Card style={styles.statCard}>
-              <span style={styles.statLabel}>Net earnings</span>
-              <span style={styles.statValue}>KSh {Number(dashboard.stats.net_earnings).toLocaleString()}</span>
+              <span style={styles.statLabel}>Revenue today</span>
+              <span style={styles.statValue}>KSh {Number(dashboard.stats.revenue_today).toLocaleString()}</span>
             </Card>
           </div>
         </>

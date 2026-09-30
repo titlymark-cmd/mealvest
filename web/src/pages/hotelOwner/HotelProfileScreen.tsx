@@ -133,7 +133,6 @@ export default function HotelProfileScreen() {
           <div style={styles.col}>
             <Card style={{ marginBottom: 16, display: "flex", flexDirection: "column" }}>
               <span style={styles.sectionLabel}>COMMERCIAL TERMS</span>
-              <Row label="Commission rate" value={`${dashboard.hotel.commission_percent}%`} />
               <Row label="Registration fee" value={`KSh ${Number(dashboard.hotel.registration_fee).toLocaleString()}`} />
             </Card>
 

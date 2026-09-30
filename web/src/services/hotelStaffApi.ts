@@ -6,6 +6,14 @@ async function parseOrError<T>(res: Response, fallback: string): Promise<T> {
   return data;
 }
 
+/**
+ * commission_percent/commission_owed/gross_revenue are deliberately
+ * NOT in this type — the backend (hotel.controller.ts getHotelDashboard)
+ * never sends them to a hotel_owner/hotel_staff caller, only to
+ * mealvest_admin viewing a hotel for oversight. revenue_today/
+ * net_earnings here are already net (after MEALVEST's commission) —
+ * this IS the hotel's own revenue.
+ */
 export interface HotelDashboard {
   hotel: {
     id: string;
@@ -14,7 +22,6 @@ export interface HotelDashboard {
     location: string | null;
     address: string | null;
     settlement_schedule: string | null;
-    commission_percent: string;
     registration_fee: string;
     payment_method: string | null;
     image_url: string | null;
@@ -24,9 +31,7 @@ export interface HotelDashboard {
     today_orders: string;
     pending_orders: string;
     redeemed_orders: string;
-    gross_revenue: string;
     revenue_today: string;
-    commission_owed: string;
     net_earnings: string;
     menu_item_count: string;
   };
@@ -153,7 +158,6 @@ export interface QrCheckResult {
     status: string;
     amount: string;
     items: Array<{ name: string; quantity: number }>;
-    commission_amount?: string;
     hotel_amount?: string;
   };
   code?: string;
