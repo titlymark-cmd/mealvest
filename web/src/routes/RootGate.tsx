@@ -12,6 +12,7 @@ import { AdminRoutes } from "./AdminRoutes";
 import { AnnouncementPopup } from "../components/AnnouncementPopup";
 import InstallScreen from "../pages/InstallScreen";
 import { PinGateScreen } from "../pages/PinGateScreen";
+import DemoPage from "../demo/DemoPage";
 
 /**
  * /install is matched here, before anything else in the app — no
@@ -25,6 +26,8 @@ export function RootGate() {
   return (
     <Routes>
       <Route path="/install" element={<InstallScreen />} />
+      {/* Public animated product demo — frontend-only, mock data. */}
+      <Route path="/demo" element={<DemoPage />} />
       <Route path="*" element={<AuthGatedApp />} />
     </Routes>
   );

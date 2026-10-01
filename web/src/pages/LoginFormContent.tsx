@@ -123,6 +123,9 @@ export function LoginFormContent({
       <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("hotel")}>
         <span style={styles.link}>Registering a hotel? Sign up here</span>
       </button>
+      <button type="button" style={styles.linkButton} onClick={() => navigate("/demo")}>
+        <span style={styles.link}>▶ Watch demo</span>
+      </button>
     </form>
   );
 }
