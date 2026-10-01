@@ -9,6 +9,32 @@ import {
   VerifyPaymentResult,
 } from "./paymentProvider";
 
+/**
+ * Shared by every Paystack webhook consumer — payment (charge.*) and
+ * payout (transfer.*) events alike arrive on the same /webhooks/paystack
+ * endpoint, so the HMAC-SHA512 signature check (timing-safe compare)
+ * only needs implementing once. Returns the parsed event body; callers
+ * still never trust its `data.status` directly — each branches to its
+ * own independent re-verification (verifyPayment / verifyTransfer).
+ */
+export function verifyPaystackWebhookSignature(rawBody: Buffer, signatureHeader: string | undefined): any {
+  if (!env.paystackSecretKey) {
+    throw new ApiError(500, "PAYSTACK_NOT_CONFIGURED", "Paystack is not configured on this server yet.");
+  }
+  if (!signatureHeader) {
+    throw new ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Missing Paystack signature header.");
+  }
+
+  const expectedSignature = crypto.createHmac("sha512", env.paystackSecretKey).update(rawBody).digest("hex");
+  const sigBuffer = Buffer.from(signatureHeader);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+    throw new ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Paystack webhook signature verification failed.");
+  }
+
+  return JSON.parse(rawBody.toString("utf8"));
+}
+
 function client() {
   if (!env.paystackSecretKey) {
     throw new ApiError(
@@ -182,24 +208,7 @@ export class PaystackPaymentProvider implements PaymentProvider {
    * marking a payment successful purely because a webhook claimed so.
    */
   async handleWebhook(rawBody: Buffer, signatureHeader: string | undefined): Promise<VerifyPaymentResult> {
-    if (!env.paystackSecretKey) {
-      throw new ApiError(500, "PAYSTACK_NOT_CONFIGURED", "Paystack is not configured on this server yet.");
-    }
-    if (!signatureHeader) {
-      throw new ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Missing Paystack signature header.");
-    }
-
-    const expectedSignature = crypto.createHmac("sha512", env.paystackSecretKey).update(rawBody).digest("hex");
-
-    // Timing-safe comparison — a naive `===` on signatures is a
-    // (minor but real) timing side-channel.
-    const sigBuffer = Buffer.from(signatureHeader);
-    const expectedBuffer = Buffer.from(expectedSignature);
-    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
-      throw new ApiError(401, "INVALID_WEBHOOK_SIGNATURE", "Paystack webhook signature verification failed.");
-    }
-
-    const event = JSON.parse(rawBody.toString("utf8"));
+    const event = verifyPaystackWebhookSignature(rawBody, signatureHeader);
     const reference = event?.data?.reference;
     if (!reference) {
       throw new ApiError(400, "INVALID_WEBHOOK_PAYLOAD", "Webhook payload did not include a transaction reference.");

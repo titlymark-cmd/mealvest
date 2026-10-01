@@ -190,3 +190,17 @@ export function hotelMealRedeemed(hotelId: string, hotelAmount: number, orderId:
     dedupeKey: `hotel_meal_redeemed:${orderId}`,
   }));
 }
+
+export function hotelPayoutStatusChanged(hotelId: string, status: "successful" | "failed", amount: number): void {
+  void notifyHotelStaff(hotelId, (userId) => ({
+    userId,
+    type: "hotel_payout_status",
+    title: status === "successful" ? "Payout sent ✅" : "Payout failed",
+    body:
+      status === "successful"
+        ? `${formatKsh(amount)} has been sent to your registered M-Pesa number.`
+        : `A ${formatKsh(amount)} payout to your account failed — MEALVEST will retry or follow up.`,
+    deepLink: "/hotel-owner/home",
+    category: "payment_updates",
+  }));
+}

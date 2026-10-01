@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { normalizeKenyanPhone } from "../lib/phone";
-import { paystackProvider } from "../services/paystackProvider";
+import { paystackProvider, verifyPaystackWebhookSignature } from "../services/paystackProvider";
 import {
   generatePaymentReference,
   createPendingTransaction,
@@ -11,6 +11,8 @@ import {
   activatePaymentIfNeeded,
 } from "../services/paymentService";
 import { getActiveBudget } from "../services/budgetService";
+import { getPayoutByReference } from "../models/hotelPayoutModel";
+import { verifyPayout } from "../services/hotelPayoutService";
 import { pool } from "../config/db";
 
 const MIN_AMOUNT = 500;
@@ -199,11 +201,32 @@ export async function getPaymentStatus(req: AuthedRequest, res: Response, next: 
  * we verify against (re-serializing parsed JSON can subtly change
  * byte content and break the HMAC check).
  */
+/**
+ * One endpoint handles both payment (charge.*) and payout (transfer.*)
+ * events — Paystack posts every event type to the single webhook URL
+ * configured on the account. The signature check happens once, up
+ * front; everything after that branches by event.event, each branch
+ * still independently re-verifying against Paystack's own API rather
+ * than trusting the webhook body (verifyPayment / hotelPayoutService.
+ * verifyPayout — never activatePaymentIfNeeded or finalizePayoutStatus
+ * driven by event.data.status alone).
+ */
 export async function paystackWebhook(req: AuthedRequest, res: Response) {
   try {
     const signature = req.headers["x-paystack-signature"] as string | undefined;
-    const verified = await paystackProvider.handleWebhook(req.body as Buffer, signature);
-    await activatePaymentIfNeeded(verified.reference, verified);
+    const event = verifyPaystackWebhookSignature(req.body as Buffer, signature);
+    const eventType = event?.event as string | undefined;
+
+    if (eventType?.startsWith("transfer.")) {
+      const reference = event?.data?.reference;
+      const payout = reference ? await getPayoutByReference(reference) : null;
+      if (payout) await verifyPayout(payout.id);
+    } else {
+      // Default/charge.* path — unchanged behavior from before this
+      // function started branching.
+      const verified = await paystackProvider.handleWebhook(req.body as Buffer, signature);
+      await activatePaymentIfNeeded(verified.reference, verified);
+    }
   } catch (err) {
     // Log server-side only — Paystack just needs a fast 200 either
     // way, or it will retry the webhook repeatedly. Our own

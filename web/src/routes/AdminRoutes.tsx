@@ -10,6 +10,7 @@ import AdminStudentsScreen from "../pages/admin/AdminStudentsScreen";
 import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
 import AdminPaymentsScreen from "../pages/admin/AdminPaymentsScreen";
 import AdminNotificationsScreen from "../pages/admin/AdminNotificationsScreen";
+import AdminPayoutsScreen from "../pages/admin/AdminPayoutsScreen";
 
 /**
  * The sidebar (desktop) / tab bar (mobile) is always position:fixed —
@@ -58,6 +59,7 @@ export function AdminRoutes() {
       <Route path="/admin/orders" element={<AdminShell><AdminOrdersScreen /></AdminShell>} />
       <Route path="/admin/payments" element={<AdminShell><AdminPaymentsScreen /></AdminShell>} />
       <Route path="/admin/notifications" element={<AdminShell><AdminNotificationsScreen /></AdminShell>} />
+      <Route path="/admin/payouts" element={<AdminShell><AdminPayoutsScreen /></AdminShell>} />
       <Route path="*" element={<Navigate to="/admin/home" replace />} />
     </Routes>
   );
