@@ -138,6 +138,21 @@ export class PaystackPaymentProvider implements PaymentProvider {
     try {
       const res = await client().get(`/transaction/verify/${encodeURIComponent(reference)}`);
       const data = res.data.data;
+
+      // Paystack's own decline/outcome reason — safe to log (no
+      // secrets, just their transaction metadata) and otherwise
+      // invisible to us, since activatePaymentIfNeeded only persists
+      // our own status enum, not Paystack's free-text explanation.
+      if (data.status !== "success") {
+        console.warn("[paystackProvider.verifyPayment] Non-success from Paystack:", {
+          reference,
+          paystackStatus: data.status,
+          gatewayResponse: data.gateway_response,
+          channel: data.channel,
+          message: res.data.message,
+        });
+      }
+
       return {
         reference,
         status: mapPaystackStatus(data.status),
