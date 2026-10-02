@@ -11,6 +11,7 @@ import { HotelOwnerRoutes } from "./HotelOwnerRoutes";
 import { AdminRoutes } from "./AdminRoutes";
 import { AnnouncementPopup } from "../components/AnnouncementPopup";
 import InstallScreen from "../pages/InstallScreen";
+import DemoScreen from "../pages/demo/DemoScreen";
 import { PinGateScreen } from "../pages/PinGateScreen";
 
 /**
@@ -25,6 +26,7 @@ export function RootGate() {
   return (
     <Routes>
       <Route path="/install" element={<InstallScreen />} />
+      <Route path="/demo" element={<DemoScreen />} />
       <Route path="*" element={<AuthGatedApp />} />
     </Routes>
   );

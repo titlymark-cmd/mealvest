@@ -1,0 +1,563 @@
+/*
+ * MealVest product demo — central stylesheet.
+ *
+ * Every colour the demo uses is declared ONCE here as a CSS custom
+ * property on .mv-demo, mirroring the JS design tokens in
+ * styles/theme.ts (the "warm espresso kitchen" system: espresso canvas,
+ * tomato/orange/golden accents, cream cards). Scene components reference
+ * var(--mv-*) only — no hex literals live in the TSX.
+ *
+ * Motion is adapted from the supplied reference clip (word-by-word
+ * kinetic headlines, a headline that compresses into a pill while a
+ * dashboard scales up, count-up stats, row-sweep lists, a radial glow
+ * "bloom" wipe between sections, particle text) but recoloured to the
+ * MealVest brand and re-themed onto the dark espresso canvas.
+ */
+
+.mv-demo {
+  /* Canvas */
+  --mv-bg: #1d1511;
+  --mv-bg-deep: #2c1610;
+  --mv-border: #4a3528;
+
+  /* Cream / white card surfaces */
+  --mv-card: #fcf4ea;
+  --mv-card-white: #ffffff;
+  --mv-border-soft: #ecdcc8;
+
+  /* Brand / accent */
+  --mv-primary: #e5482e; /* tomato */
+  --mv-primary-light: #ff8a3d; /* orange */
+  --mv-primary-dark: #c23a24;
+  --mv-accent: #f5a623; /* golden */
+  --mv-accent-soft: #ffe1c7; /* peach */
+
+  /* Status */
+  --mv-success: #5faf45;
+  --mv-success-soft: #e5f1d9;
+  --mv-warning: #f5a623;
+  --mv-danger: #e5482e;
+
+  /* Text on a cream/white card */
+  --mv-text: #2c1610;
+  --mv-text-muted: #6b625c;
+  --mv-text-faint: #9a928c;
+
+  /* Text directly on the dark canvas */
+  --mv-on-dark: #fcf4ea;
+  --mv-on-dark-muted: rgba(252, 244, 234, 0.62);
+
+  /* Translucent frosted panels (the "glass" surfaces) */
+  --mv-glass: rgba(252, 244, 234, 0.07);
+  --mv-glass-strong: rgba(252, 244, 234, 0.12);
+  --mv-glass-border: rgba(252, 244, 234, 0.16);
+
+  /* Derived glows */
+  --mv-glow-primary: rgba(229, 72, 46, 0.45);
+  --mv-glow-accent: rgba(245, 166, 35, 0.4);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 80% at 50% -10%, #3a1d14 0%, transparent 60%),
+    linear-gradient(180deg, var(--mv-bg-deep), var(--mv-bg));
+  font-family: "Poppins", system-ui, sans-serif;
+  color: var(--mv-on-dark);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* The stage: the reference was shot vertical; this keeps a tall-ish
+   frame centred on any viewport, capping width so it reads well on
+   desktop while filling a phone. */
+.mv-demo-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.mv-demo-scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+/* Scene enter/exit. The orchestrator mounts one scene at a time and
+   flips data-state between "in" and "out". */
+.mv-demo-scene[data-state="in"] {
+  animation: mvSceneIn 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mv-demo-scene[data-state="out"] {
+  animation: mvSceneOut 420ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes mvSceneIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes mvSceneOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.02); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Logo bloom (scene 1)                                                */
+/* ------------------------------------------------------------------ */
+.mv-bloom-logo {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mvLogoPop 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mv-bloom-logo img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  position: relative;
+  z-index: 2;
+}
+.mv-bloom-logo::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--mv-glow-primary) 0%, transparent 65%);
+  animation: mvGlowPulse 2600ms ease-in-out infinite;
+  z-index: 1;
+}
+@keyframes mvLogoPop {
+  0% { opacity: 0; transform: scale(0.3) rotate(-18deg); }
+  60% { opacity: 1; transform: scale(1.08) rotate(4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes mvGlowPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Kinetic headline words                                              */
+/* ------------------------------------------------------------------ */
+.mv-kinetic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 0.3em;
+  max-width: 440px;
+  text-align: center;
+  line-height: 1.12;
+}
+.mv-kinetic-word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(26px) scale(0.9);
+  animation: mvWordSnap 520ms cubic-bezier(0.18, 1.3, 0.4, 1) forwards;
+}
+.mv-kinetic-accent {
+  color: var(--mv-primary-light);
+  position: relative;
+}
+.mv-kinetic-accent::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  height: 4px;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mv-primary), var(--mv-accent));
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: mvUnderline 500ms 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes mvWordSnap {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes mvUnderline {
+  to { transform: scaleX(1); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared primitives                                                   */
+/* ------------------------------------------------------------------ */
+.mv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--mv-glass-strong);
+  border: 1px solid var(--mv-glass-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mv-on-dark);
+}
+
+.mv-card {
+  background: var(--mv-card);
+  border-radius: 20px;
+  border: 1px solid var(--mv-border-soft);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  color: var(--mv-text);
+}
+
+.mv-glass-card {
+  background: var(--mv-glass);
+  border: 1px solid var(--mv-glass-border);
+  border-radius: 20px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.mv-pop {
+  opacity: 0;
+  animation: mvPopIn 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes mvPopIn {
+  0% { opacity: 0; transform: translateY(18px) scale(0.94); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.mv-rise {
+  opacity: 0;
+  animation: mvRise 560ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes mvRise {
+  0% { opacity: 0; transform: translateY(28px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.mv-drawer-in {
+  animation: mvDrawerIn 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mvDrawerIn {
+  0% { opacity: 0; transform: translateX(60px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+/* Row sweep — a highlight wipes across a list row as it "fills in" */
+.mv-row-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.mv-row-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--mv-accent-soft),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: mvSweep 900ms ease-out forwards;
+  pointer-events: none;
+  opacity: 0.7;
+}
+@keyframes mvSweep {
+  to { transform: translateX(100%); }
+}
+
+/* Bar chart growth */
+.mv-bar {
+  transform-origin: bottom;
+  transform: scaleY(0);
+  animation: mvBarGrow 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes mvBarGrow {
+  to { transform: scaleY(1); }
+}
+
+/* Success tick draw */
+.mv-tick-ring {
+  animation: mvTickRing 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mvTickRing {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.mv-tick-path {
+  stroke-dasharray: 28;
+  stroke-dashoffset: 28;
+  animation: mvTickDraw 420ms 260ms ease-out forwards;
+}
+@keyframes mvTickDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Chip flip (status change) */
+.mv-chip-flip {
+  animation: mvChipFlip 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mvChipFlip {
+  0% { transform: rotateX(90deg); opacity: 0; }
+  100% { transform: rotateX(0); opacity: 1; }
+}
+
+/* Toast */
+.mv-toast {
+  animation: mvToastIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes mvToastIn {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Radial glow bloom wipe (section transition)                         */
+/* ------------------------------------------------------------------ */
+.mv-bloom-wipe {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 40;
+}
+.mv-bloom-wipe span {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--mv-primary-light) 0%, var(--mv-primary) 45%, transparent 72%);
+  animation: mvBloomWipe 1200ms cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+@keyframes mvBloomWipe {
+  0% { transform: scale(0); opacity: 0.9; }
+  45% { opacity: 1; }
+  100% { transform: scale(60); opacity: 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Floating confetti (ambient icons drifting behind scenes)            */
+/* ------------------------------------------------------------------ */
+.mv-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.mv-confetti i {
+  position: absolute;
+  display: block;
+  opacity: 0;
+  animation: mvDrift 6s ease-in-out infinite;
+}
+@keyframes mvDrift {
+  0% { opacity: 0; transform: translateY(16px) scale(0.8); }
+  20% { opacity: 0.5; }
+  80% { opacity: 0.5; }
+  100% { opacity: 0; transform: translateY(-26px) scale(1); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Particle word                                                       */
+/* ------------------------------------------------------------------ */
+.mv-particles {
+  position: relative;
+  width: 320px;
+  height: 160px;
+}
+.mv-particle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mv-primary-light);
+  box-shadow: 0 0 8px var(--mv-glow-primary);
+  opacity: 0;
+  animation: mvGather 1300ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes mvGather {
+  0% {
+    opacity: 0;
+    transform: translate(var(--mv-from-x), var(--mv-from-y)) scale(0.4);
+  }
+  30% { opacity: 1; }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* Money-move dot (savings rollover) */
+.mv-money-move {
+  animation: mvMoneyMove 1400ms cubic-bezier(0.5, 0, 0.2, 1) forwards;
+}
+@keyframes mvMoneyMove {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  60% { opacity: 1; }
+  100% { transform: translate(var(--mv-move-x), var(--mv-move-y)) scale(0.5); opacity: 0; }
+}
+
+/* QR reveal */
+.mv-qr-cell {
+  opacity: 0;
+  animation: mvQrCell 500ms ease-out forwards;
+}
+@keyframes mvQrCell {
+  0% { opacity: 0; transform: scale(0.2); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Phone mock */
+.mv-phone {
+  position: relative;
+  width: 248px;
+  height: 508px;
+  border-radius: 40px;
+  background: #120d0a;
+  border: 2px solid var(--mv-border);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.55),
+    0 0 50px var(--mv-glow-primary);
+  padding: 12px;
+  box-sizing: border-box;
+  animation: mvPopIn 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.mv-phone-screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 30px;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--mv-bg-deep), var(--mv-bg));
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.mv-phone-notch {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 86px;
+  height: 20px;
+  border-radius: 999px;
+  background: #120d0a;
+  z-index: 5;
+}
+
+/* Scene titles on the dark canvas */
+.mv-scene-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--mv-accent);
+}
+.mv-scene-headline {
+  font-size: clamp(26px, 7vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--mv-on-dark);
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls (skip / replay / progress)                                 */
+/* ------------------------------------------------------------------ */
+.mv-demo-controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 6px;
+  padding: 16px;
+  z-index: 60;
+}
+.mv-progress-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--mv-glass-strong);
+  overflow: hidden;
+}
+.mv-progress-seg > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mv-primary), var(--mv-accent));
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.mv-progress-seg.is-done > span { transform: scaleX(1); }
+.mv-progress-seg.is-active > span {
+  animation: mvProgress linear forwards;
+  animation-duration: var(--mv-seg-ms, 2400ms);
+}
+@keyframes mvProgress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.mv-skip-btn {
+  position: absolute;
+  top: 28px;
+  right: 16px;
+  z-index: 61;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--mv-glass-strong);
+  border: 1px solid var(--mv-glass-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--mv-on-dark);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.mv-skip-btn:hover { background: var(--mv-glass-border); }
+
+.mv-replay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mv-primary), var(--mv-primary-light));
+  border: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 30px var(--mv-glow-primary);
+  opacity: 0;
+  animation: mvPopIn 520ms 400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transition: transform 150ms ease;
+}
+.mv-replay-btn:hover { transform: translateY(-2px); }
+.mv-replay-btn:active { transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-demo * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
