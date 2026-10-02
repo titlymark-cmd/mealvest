@@ -15,7 +15,7 @@ const DISCLAIMER_TEXT =
   "Before you continue, please understand:\n\n" +
   "• Money committed to your Mealvest plan is intended for meals during the selected plan period.\n" +
   "• Committed funds are not immediately withdrawable or refundable before the plan period ends, except where a supported cancellation policy applies.\n" +
-  "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over or let it go; declining forfeits it.\n" +
+  "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over to the next day. (A Savings option is coming soon.)\n" +
   "• Please review your amount, days, and hotel before confirming.";
 
 type Stage = "form" | "awaiting_stk" | "success" | "error";
