@@ -533,6 +533,27 @@
 }
 .mv-skip-btn:hover { background: var(--mv-glass-border); }
 
+.mv-close-btn {
+  position: absolute;
+  top: 28px;
+  left: 16px;
+  z-index: 61;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--mv-glass-strong);
+  border: 1px solid var(--mv-glass-border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--mv-on-dark);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.mv-close-btn:hover { background: var(--mv-glass-border); }
+
 .mv-replay-btn {
   display: inline-flex;
   align-items: center;

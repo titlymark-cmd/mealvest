@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { X } from "lucide-react";
 import "./demo.css";
 import { DEMO_SCENES } from "./demoData";
 import {
@@ -36,10 +38,17 @@ import {
 const LAST = DEMO_SCENES.length - 1;
 
 export default function DemoScreen() {
+  const navigate = useNavigate();
   const [index, setIndex] = useState(0);
 
   const replay = useCallback(() => setIndex(0), []);
   const skip = useCallback(() => setIndex(LAST), []);
+  const close = useCallback(() => {
+    // Return where the viewer came from (e.g. the login page); fall back
+    // to the app entry if the demo was opened directly as a fresh tab.
+    if (window.history.length > 1) navigate(-1);
+    else navigate("/login");
+  }, [navigate]);
 
   // Auto-advance, except on the final (end) scene which holds.
   useEffect(() => {
@@ -106,6 +115,15 @@ export default function DemoScreen() {
           </div>
         ))}
       </div>
+
+      <button
+        className="mv-close-btn"
+        onClick={close}
+        type="button"
+        aria-label="Close demo"
+      >
+        <X size={18} />
+      </button>
 
       {index < LAST && (
         <button className="mv-skip-btn" onClick={skip} type="button">

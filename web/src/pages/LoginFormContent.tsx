@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, PlayCircle } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../styles/theme";
@@ -123,6 +123,11 @@ export function LoginFormContent({
       <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("hotel")}>
         <span style={styles.link}>Registering a hotel? Sign up here</span>
       </button>
+
+      <button type="button" style={styles.demoButton} onClick={() => navigate("/demo")}>
+        <PlayCircle size={16} color={COLORS.accent} />
+        <span style={styles.demoText}>Watch the 60-second demo</span>
+      </button>
     </form>
   );
 }
@@ -157,6 +162,19 @@ const styles: Record<string, React.CSSProperties> = {
   forgotButton: { alignSelf: "flex-end", marginBottom: 16, marginTop: -4 },
   forgotText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
   linkButton: { marginTop: 16, alignSelf: "center" },
+  demoButton: {
+    marginTop: 20,
+    alignSelf: "center",
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    padding: "9px 16px",
+    borderRadius: RADIUS.pill,
+    border: `1px solid ${COLORS.border}`,
+    backgroundColor: "rgba(252,244,234,0.04)",
+  },
+  demoText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.accent },
   link: {
     color: COLORS.primary,
     fontFamily: FONTS.bodySemibold,
