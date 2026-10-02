@@ -115,6 +115,89 @@ export async function suspendHotel(authFetch: AuthFetch, hotelId: string): Promi
   return data.hotel;
 }
 
+/**
+ * Permanently removes a hotel. The backend only allows this for a hotel
+ * with no order/payout history (financial records are protected); a
+ * hotel that has transacted returns a 409 whose message tells the admin
+ * to suspend it instead — surfaced here as a thrown Error.
+ */
+export async function deleteHotel(authFetch: AuthFetch, hotelId: string): Promise<void> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}`, { method: "DELETE" });
+  await parseOrError<{ removed: boolean }>(res, "Could not remove this hotel.");
+}
+
+export interface HotelDetail {
+  hotel: {
+    id: string;
+    name: string;
+    location: string | null;
+    address: string | null;
+    business_type: string | null;
+    status: string;
+    contact_phone: string | null;
+    contact_email: string | null;
+    owner_contact_name: string | null;
+    admin_username: string | null;
+    payment_method: string | null;
+    payment_details: Record<string, unknown> | null;
+    registration_fee: string;
+    commission_percent: string;
+    loyalty_incentive_percent: string;
+    terms_accepted: boolean;
+    terms_accepted_at: string | null;
+    terms_version: string | null;
+    contract_start_date: string | null;
+    contract_end_date: string | null;
+    image_url: string | null;
+    created_at: string;
+    updated_at: string | null;
+  };
+  owner: { full_name: string; email: string; phone_number: string } | null;
+  stats: { total_orders: string; redeemed_orders: string; gross_redeemed: string; last_order_at: string | null };
+  counts: { staff_count: string; menu_count: string };
+  removable: boolean;
+}
+
+export async function fetchHotelDetail(authFetch: AuthFetch, hotelId: string): Promise<HotelDetail> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}`);
+  return parseOrError(res, "Could not load this hotel's details.");
+}
+
+export interface StudentDetail {
+  student: {
+    id: string;
+    email: string;
+    phone_number: string | null;
+    alternate_phone_number: string | null;
+    account_status: string;
+    auth_provider: string;
+    email_verified: boolean;
+    created_at: string;
+    full_name: string;
+    institution: string | null;
+    admission_number: string | null;
+    avatar_url: string | null;
+  };
+  currentBudget: {
+    id: string;
+    total_amount: string;
+    remaining_amount: string;
+    daily_allowance: string;
+    number_of_days: number;
+    start_date: string;
+    end_date: string;
+    status: string;
+    hotel_name: string | null;
+  } | null;
+  stats: { total_orders: string; redeemed_orders: string; total_spent: string; last_order_at: string | null };
+  recentOrders: Array<{ id: string; amount: string; status: string; created_at: string; hotel_name: string | null }>;
+}
+
+export async function fetchStudentDetail(authFetch: AuthFetch, userId: string): Promise<StudentDetail> {
+  const res = await authFetch(`/api/admin/students/${userId}`);
+  return parseOrError(res, "Could not load this student's details.");
+}
+
 export interface LedgerFigure {
   amount: string;
   count: string;

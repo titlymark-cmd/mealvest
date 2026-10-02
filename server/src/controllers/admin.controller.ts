@@ -550,6 +550,192 @@ export async function getRevenueAnalytics(req: AuthedRequest, res: Response, nex
   }
 }
 
+/**
+ * GET /api/admin/students/:userId
+ *
+ * A single student's full profile for the admin detail view. Returns
+ * the user + student columns, the current active budget (if any), and
+ * lifetime order stats — but NEVER password_hash or pin_hash: those are
+ * not selected at all, so they can't leak through this endpoint even by
+ * accident.
+ */
+export async function getStudentDetail(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const { userId } = req.params;
+
+    const profile = await pool.query(
+      `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
+              u.auth_provider, u.email_verified, u.created_at,
+              s.full_name, s.institution, s.admission_number, s.avatar_url
+       FROM users u
+       JOIN students s ON s.user_id = u.id
+       WHERE u.id = $1 AND u.role = 'student'`,
+      [userId]
+    );
+    if (profile.rows.length === 0) throw new ApiError(404, "STUDENT_NOT_FOUND", "Student not found.");
+
+    const [budget, stats, recent] = await Promise.all([
+      pool.query(
+        `SELECT b.id, b.total_amount, b.remaining_amount, b.daily_allowance,
+                b.number_of_days, b.start_date, b.end_date, b.status, h.name AS hotel_name
+         FROM budgets b
+         LEFT JOIN hotels h ON h.id = b.hotel_id
+         WHERE b.user_id = $1 AND b.status = 'active'
+         ORDER BY b.created_at DESC LIMIT 1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total_orders,
+                COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS total_spent,
+                MAX(created_at) AS last_order_at
+         FROM orders WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT o.id, o.amount, o.status, o.created_at, h.name AS hotel_name
+         FROM orders o
+         LEFT JOIN hotels h ON h.id = o.hotel_id
+         WHERE o.user_id = $1
+         ORDER BY o.created_at DESC LIMIT 5`,
+        [userId]
+      ),
+    ]);
+
+    res.json({
+      student: profile.rows[0],
+      currentBudget: budget.rows[0] || null,
+      stats: stats.rows[0],
+      recentOrders: recent.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/hotels/:hotelId
+ *
+ * A single hotel's full profile for the admin detail view: the hotel
+ * columns, its owner's contact (from the owner hotel_staff row), and
+ * lifetime stats. `removable` is true only when the hotel has no order
+ * or payout history — the exact condition under which deleteHotel can
+ * actually hard-delete it (orders/payouts are ON DELETE RESTRICT), so
+ * the UI can show Remove as enabled vs. "suspend instead".
+ */
+export async function getHotelDetail(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const { hotelId } = req.params;
+
+    const hotel = await pool.query(
+      `SELECT id, name, location, address, business_type, status,
+              contact_phone, contact_email, owner_contact_name, admin_username,
+              payment_method, payment_details,
+              registration_fee, commission_percent, loyalty_incentive_percent,
+              terms_accepted, terms_accepted_at, terms_version,
+              contract_start_date, contract_end_date, image_url, created_at, updated_at
+       FROM hotels WHERE id = $1`,
+      [hotelId]
+    );
+    if (hotel.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+
+    const [owner, stats, counts, payouts] = await Promise.all([
+      pool.query(
+        `SELECT st.full_name, u.email, u.phone_number
+         FROM hotel_staff st
+         JOIN users u ON u.id = st.user_id
+         WHERE st.hotel_id = $1 AND st.permission_level = 'owner'
+         ORDER BY st.created_at ASC LIMIT 1`,
+        [hotelId]
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total_orders,
+                COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
+                COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_redeemed,
+                MAX(created_at) AS last_order_at
+         FROM orders WHERE hotel_id = $1`,
+        [hotelId]
+      ),
+      pool.query(
+        `SELECT
+           (SELECT COUNT(*) FROM hotel_staff WHERE hotel_id = $1) AS staff_count,
+           (SELECT COUNT(*) FROM menu_items WHERE hotel_id = $1) AS menu_count`,
+        [hotelId]
+      ),
+      pool.query("SELECT COUNT(*) AS payout_count FROM hotel_payouts WHERE hotel_id = $1", [hotelId]),
+    ]);
+
+    const totalOrders = Number(stats.rows[0].total_orders);
+    const payoutCount = Number(payouts.rows[0].payout_count);
+
+    res.json({
+      hotel: hotel.rows[0],
+      owner: owner.rows[0] || null,
+      stats: stats.rows[0],
+      counts: counts.rows[0],
+      removable: totalOrders === 0 && payoutCount === 0,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/admin/hotels/:hotelId
+ *
+ * Permanently removes a hotel that has no financial history. orders and
+ * hotel_payouts both reference hotels with ON DELETE RESTRICT, so a
+ * hotel that has ever transacted CANNOT be deleted — Postgres aborts
+ * the delete and we return a 409 telling the admin to suspend it
+ * instead (financial history is never destroyed). For a hotel with no
+ * such history (e.g. an erroneous or never-used registration), the
+ * delete cascades its staff/menu/onboarding rows and nulls its
+ * references on budgets/transactions/withdrawals; we then remove the
+ * now-orphaned owner/staff login accounts (role-guarded so only
+ * hotel_owner/hotel_staff users are ever touched).
+ */
+export async function deleteHotel(req: AuthedRequest, res: Response, next: NextFunction) {
+  const client = await pool.connect();
+  try {
+    const { hotelId } = req.params;
+    await client.query("BEGIN");
+
+    const staff = await client.query("SELECT user_id FROM hotel_staff WHERE hotel_id = $1", [hotelId]);
+    const staffUserIds = staff.rows.map((r) => r.user_id);
+
+    const deleted = await client.query("DELETE FROM hotels WHERE id = $1 RETURNING name", [hotelId]);
+    if (deleted.rows.length === 0) {
+      await client.query("ROLLBACK");
+      throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+    }
+
+    if (staffUserIds.length > 0) {
+      await client.query(
+        "DELETE FROM users WHERE id = ANY($1::uuid[]) AND role IN ('hotel_owner', 'hotel_staff')",
+        [staffUserIds]
+      );
+    }
+
+    await client.query("COMMIT");
+    res.json({ removed: true, hotelId, name: deleted.rows[0].name });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if ((err as { code?: string }).code === "23503") {
+      next(
+        new ApiError(
+          409,
+          "HOTEL_HAS_HISTORY",
+          "This hotel has order or payout history and can't be removed. Suspend it instead to keep its records intact."
+        )
+      );
+      return;
+    }
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
 export async function listStudents(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const search = (req.query.search as string | undefined)?.trim();

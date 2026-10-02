@@ -13,6 +13,9 @@ import {
   getTopHotels,
   getAlerts,
   listStudents,
+  getStudentDetail,
+  getHotelDetail,
+  deleteHotel,
   getRevenueAnalytics,
 } from "../controllers/admin.controller";
 import { updateCustomerCarePhone } from "../controllers/settings.controller";
@@ -35,8 +38,11 @@ adminRouter.get("/ledger", getDailyLedger);
 adminRouter.get("/analytics/revenue", getRevenueAnalytics);
 adminRouter.get("/hotels/top", getTopHotels);
 adminRouter.get("/students", listStudents);
+adminRouter.get("/students/:userId", getStudentDetail);
 adminRouter.get("/hotels", listHotels);
 adminRouter.post("/hotels", createHotel);
+adminRouter.get("/hotels/:hotelId", getHotelDetail);
+adminRouter.delete("/hotels/:hotelId", deleteHotel);
 adminRouter.patch("/hotels/:hotelId/suspend", suspendHotel);
 adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);

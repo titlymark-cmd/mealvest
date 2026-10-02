@@ -7,6 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { ADMIN_MOBILE_BREAKPOINT } from "../../components/admin/AdminSidebar";
 import { badgeColorFor, formatKsh } from "../../components/admin/adminFormat";
+import { StudentDetailModal } from "../../components/admin/StudentDetailModal";
 import { fetchAdminStudents, AdminStudent } from "../../services/adminApi";
 
 export default function AdminStudentsScreen() {
@@ -19,6 +20,7 @@ export default function AdminStudentsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [detail, setDetail] = useState<{ userId: string; name: string } | null>(null);
 
   const DISPLAY_LIMIT = 30;
 
@@ -95,7 +97,12 @@ export default function AdminStudentsScreen() {
           {filtered.map((s) => {
             const hasPlan = s.budget_status === "active" && !!s.total_amount;
             return (
-              <Card key={s.id} style={styles.studentCard}>
+              <div
+                key={s.id}
+                onClick={() => setDetail({ userId: s.id, name: s.full_name })}
+                style={{ cursor: "pointer" }}
+              >
+              <Card style={styles.studentCard}>
                 <div style={styles.avatarRow}>
                   <div style={{ ...styles.avatar, backgroundColor: badgeColorFor(s.id) }}>
                     <span style={styles.avatarText}>{s.full_name.trim().charAt(0).toUpperCase()}</span>
@@ -130,9 +137,18 @@ export default function AdminStudentsScreen() {
                   <span style={styles.hotelText}>{s.hotel_name || "No hotel contract"}</span>
                 </div>
               </Card>
+              </div>
             );
           })}
         </div>
+      )}
+
+      {detail && (
+        <StudentDetailModal
+          userId={detail.userId}
+          fallbackName={detail.name}
+          onClose={() => setDetail(null)}
+        />
       )}
     </div>
   );

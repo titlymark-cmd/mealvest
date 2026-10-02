@@ -6,6 +6,7 @@ import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { timeAgo, badgeColorFor } from "../../components/admin/adminFormat";
 import { AddHotelModal } from "../../components/admin/AddHotelModal";
+import { HotelDetailModal } from "../../components/admin/HotelDetailModal";
 import {
   fetchAdminHotels,
   approveHotel,
@@ -37,6 +38,7 @@ export default function AdminHotelsScreen() {
   const [editingCommissionId, setEditingCommissionId] = useState<string | null>(null);
   const [commissionDraft, setCommissionDraft] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [detailHotelId, setDetailHotelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -130,9 +132,18 @@ export default function AdminHotelsScreen() {
 
       {error && <p style={styles.errorText}>{error}</p>}
 
+      {detailHotelId && (
+        <HotelDetailModal
+          hotelId={detailHotelId}
+          onClose={() => setDetailHotelId(null)}
+          onRemoved={load}
+        />
+      )}
+
       <div style={styles.grid}>
         {hotels.map((item) => (
-          <Card key={item.id} style={styles.hotelCard}>
+          <div key={item.id} onClick={() => setDetailHotelId(item.id)} style={{ cursor: "pointer" }}>
+          <Card style={styles.hotelCard}>
             <div style={styles.bannerWrap}>
               {item.image_url ? (
                 <img src={item.image_url} alt="" style={styles.banner} />
@@ -161,7 +172,7 @@ export default function AdminHotelsScreen() {
               </span>
 
               {editingCommissionId === item.id ? (
-                <div style={styles.commissionEditRow}>
+                <div style={styles.commissionEditRow} onClick={(e) => e.stopPropagation()}>
                   <input
                     style={styles.commissionInput}
                     value={commissionDraft}
@@ -174,13 +185,19 @@ export default function AdminHotelsScreen() {
                   </button>
                 </div>
               ) : (
-                <button onClick={() => startEditCommission(item)} style={styles.commissionRow}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startEditCommission(item);
+                  }}
+                  style={styles.commissionRow}
+                >
                   <span style={styles.commissionText}>Commission: {item.commission_percent}%</span>
                   <Pencil size={10} color={COLORS.textFaint} />
                 </button>
               )}
 
-              <div style={styles.actionsRow}>
+              <div style={styles.actionsRow} onClick={(e) => e.stopPropagation()}>
                 {item.status === "pending_verification" && (
                   <button
                     onClick={() => handleApprove(item.id)}
@@ -211,6 +228,7 @@ export default function AdminHotelsScreen() {
               </div>
             </div>
           </Card>
+          </div>
         ))}
       </div>
     </div>

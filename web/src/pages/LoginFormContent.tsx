@@ -117,16 +117,16 @@ export function LoginFormContent({
         Sign in
       </PrimaryButton>
 
+      <button type="button" style={styles.demoButton} onClick={() => navigate("/demo")}>
+        <PlayCircle size={18} color={COLORS.primary} />
+        <span style={styles.demoText}>Watch the 60-second demo</span>
+      </button>
+
       <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("student")}>
         <span style={styles.link}>New student? Create an account</span>
       </button>
       <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("hotel")}>
         <span style={styles.link}>Registering a hotel? Sign up here</span>
-      </button>
-
-      <button type="button" style={styles.demoButton} onClick={() => navigate("/demo")}>
-        <PlayCircle size={16} color={COLORS.accent} />
-        <span style={styles.demoText}>Watch the 60-second demo</span>
       </button>
     </form>
   );
@@ -163,18 +163,20 @@ const styles: Record<string, React.CSSProperties> = {
   forgotText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
   linkButton: { marginTop: 16, alignSelf: "center" },
   demoButton: {
-    marginTop: 20,
-    alignSelf: "center",
+    marginTop: 12,
+    width: "100%",
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    padding: "9px 16px",
-    borderRadius: RADIUS.pill,
-    border: `1px solid ${COLORS.border}`,
-    backgroundColor: "rgba(252,244,234,0.04)",
+    justifyContent: "center",
+    gap: 9,
+    padding: "13px 16px",
+    borderRadius: RADIUS.sm,
+    border: `1.5px solid ${COLORS.primary}`,
+    backgroundColor: "rgba(229,72,46,0.10)",
+    cursor: "pointer",
   },
-  demoText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.accent },
+  demoText: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 14, color: COLORS.primary },
   link: {
     color: COLORS.primary,
     fontFamily: FONTS.bodySemibold,
