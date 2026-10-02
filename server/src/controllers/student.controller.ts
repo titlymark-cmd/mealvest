@@ -6,12 +6,13 @@ import * as budgetService from "../services/budgetService";
 import { createBudgetSchema } from "../schemas/budgetSchemas";
 import { updateStudentProfileSchema } from "../schemas/studentSchemas";
 import { ApiError } from "../middleware/errorHandler";
+import { uploadStudentAvatar } from "../services/storageService";
 
 export async function getStudentProfile(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
-              s.full_name, s.institution, s.admission_number
+              s.full_name, s.institution, s.admission_number, s.avatar_url
        FROM users u JOIN students s ON s.user_id = u.id
        WHERE u.id = $1`,
       [req.user!.id]
@@ -70,7 +71,7 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
 
       const result = await client.query(
         `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
-                s.full_name, s.institution, s.admission_number
+                s.full_name, s.institution, s.admission_number, s.avatar_url
          FROM users u JOIN students s ON s.user_id = u.id
          WHERE u.id = $1`,
         [req.user!.id]
@@ -84,6 +85,27 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
     } finally {
       client.release();
     }
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Multer-handled multipart upload (see student.routes.ts) — userId for
+ * the storage path comes from req.user!.id, never from client input,
+ * so a student can only ever overwrite their own avatar object.
+ */
+export async function uploadAvatar(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const file = req.file;
+    if (!file) {
+      throw new ApiError(400, "VALIDATION_ERROR", "No image file was provided.");
+    }
+
+    const url = await uploadStudentAvatar(req.user!.id, file);
+    await pool.query("UPDATE students SET avatar_url = $1 WHERE user_id = $2", [url, req.user!.id]);
+
+    res.status(201).json({ avatarUrl: url });
   } catch (err) {
     next(err);
   }

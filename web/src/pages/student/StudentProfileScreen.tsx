@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { User } from "lucide-react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { User, Camera } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { fetchStudentProfile, updateStudentProfile, StudentProfile } from "../../services/studentProfileApi";
+import { fetchStudentProfile, updateStudentProfile, uploadStudentAvatar, StudentProfile } from "../../services/studentProfileApi";
 import { NotificationSettingsSection } from "../../components/notifications/NotificationSettingsSection";
+
+const MAX_AVATAR_BYTES = 4 * 1024 * 1024;
 
 /** Single row: static label above, either the plain value or (in edit mode) an input. */
 function Field({
@@ -55,6 +57,10 @@ export default function StudentProfileScreen() {
   const [institution, setInstitution] = useState("");
   const [admissionNumber, setAdmissionNumber] = useState("");
 
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   const applyProfileToDraft = (p: StudentProfile) => {
     setFullName(p.full_name || "");
     setPhoneNumber(p.phone_number || "");
@@ -91,6 +97,32 @@ export default function StudentProfileScreen() {
     setEditing(false);
   };
 
+  const handleAvatarSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setAvatarError("Only JPEG, PNG, or WebP images are allowed.");
+      return;
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError("Image is too large — 4MB maximum.");
+      return;
+    }
+
+    setAvatarError(null);
+    setAvatarUploading(true);
+    try {
+      const avatarUrl = await uploadStudentAvatar(authFetch, file);
+      setProfile((p) => (p ? { ...p, avatar_url: avatarUrl } : p));
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : "Could not upload your profile picture.");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   const save = async () => {
     setSaveError(null);
     setSaving(true);
@@ -115,11 +147,33 @@ export default function StudentProfileScreen() {
   return (
     <div style={styles.container}>
       <div style={styles.titleRow}>
-        <div style={styles.avatarCircle}>
-          <User size={20} color={COLORS.primary} />
-        </div>
+        <button
+          style={styles.avatarCircle}
+          onClick={() => avatarInputRef.current?.click()}
+          disabled={avatarUploading}
+          aria-label="Change profile picture"
+        >
+          {avatarUploading ? (
+            <Spinner color={COLORS.primary} />
+          ) : profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="" style={styles.avatarImage} />
+          ) : (
+            <User size={20} color={COLORS.primary} />
+          )}
+          <div style={styles.avatarBadge}>
+            <Camera size={11} color="#fff" />
+          </div>
+        </button>
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={handleAvatarSelected}
+          style={{ display: "none" }}
+        />
         <h1 style={styles.title}>My Profile</h1>
       </div>
+      {avatarError && <p style={styles.errorText}>{avatarError}</p>}
 
       {loading && (
         <div style={{ marginTop: 30, display: "flex" }}>
@@ -198,6 +252,27 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    position: "relative",
+    overflow: "visible",
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: RADIUS.pill,
+    objectFit: "cover",
+  },
+  avatarBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 16,
+    height: 16,
+    borderRadius: RADIUS.pill,
+    backgroundColor: COLORS.primary,
+    border: `1.5px solid ${COLORS.bg}`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, margin: 0 },
   errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, textAlign: "center", marginTop: 20 },

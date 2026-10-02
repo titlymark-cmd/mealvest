@@ -9,6 +9,7 @@ export interface StudentProfile {
   full_name: string;
   institution: string | null;
   admission_number: string | null;
+  avatar_url: string | null;
 }
 
 export interface UpdateStudentProfileInput {
@@ -42,4 +43,14 @@ export async function updateStudentProfile(
   });
   const data = await parseOrError<{ profile: StudentProfile }>(res, "Could not save your profile.");
   return data.profile;
+}
+
+/** No Content-Type header — the browser sets the correct multipart boundary itself for a FormData body. */
+export async function uploadStudentAvatar(authFetch: AuthFetch, file: File): Promise<string> {
+  const form = new FormData();
+  form.append("image", file);
+
+  const res = await authFetch("/api/student/profile/avatar", { method: "POST", body: form });
+  const data = await parseOrError<{ avatarUrl: string }>(res, "Could not upload your profile picture.");
+  return data.avatarUrl;
 }
