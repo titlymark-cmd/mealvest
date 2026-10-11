@@ -431,6 +431,14 @@ export function RegisterFormContent({ mode, onSwitchToLogin }: { mode: Mode; onS
 
       {error && <p style={styles.error}>{error}</p>}
 
+      <p style={styles.termsNote}>
+        By creating an account you agree to MEALVEST's{" "}
+        <a href="/terms" target="_blank" rel="noreferrer" style={styles.termsLink}>
+          terms, payments &amp; savings policy and privacy policy
+        </a>
+        .
+      </p>
+
       <PrimaryButton onPress={() => {}} loading={loading} showArrow={false} style={{ marginTop: 8 }}>
         Create account
       </PrimaryButton>
@@ -514,6 +522,8 @@ const styles: Record<string, React.CSSProperties> = {
   verifyNote: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   verifyNoteText: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, flexShrink: 1 },
   error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, marginTop: 0, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
+  termsNote: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textOnDarkMuted, lineHeight: "16px", margin: "10px 0 0 0", textAlign: "center" },
+  termsLink: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
   linkButton: { alignSelf: "center" },
   link: { color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, textAlign: "center", marginTop: 20, marginBottom: 20 },
 };

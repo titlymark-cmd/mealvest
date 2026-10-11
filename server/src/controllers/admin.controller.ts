@@ -2,6 +2,7 @@ import { Response, NextFunction } from "express";
 import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { pool } from "../config/db";
+import * as notificationEvents from "../services/notificationEvents";
 import { ApiError } from "../middleware/errorHandler";
 import { hashPassword } from "../lib/password";
 import { normalizeKenyanPhone } from "../lib/phone";
@@ -473,11 +474,45 @@ export async function getAlerts(_req: AuthedRequest, res: Response, next: NextFu
  * differently for a trend view instead of a single day.
  */
 const ANALYTICS_DAY_OPTIONS = [7, 30, 90] as const;
+const ANALYTICS_MAX_RANGE_DAYS = 366;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Resolves the analytics window. Either an explicit custom range
+ * (?from=YYYY-MM-DD&to=YYYY-MM-DD, inclusive, at most a year) or one
+ * of the preset day counts (?days=7|30|90, ending today). Dates are
+ * validated as real calendar dates before touching SQL.
+ */
+function resolveAnalyticsWindow(query: Record<string, unknown>): { from: string; to: string; days: number; preset: boolean } {
+  const fromParam = typeof query.from === "string" ? query.from : undefined;
+  const toParam = typeof query.to === "string" ? query.to : undefined;
+  if (fromParam || toParam) {
+    if (!fromParam || !toParam || !ISO_DATE.test(fromParam) || !ISO_DATE.test(toParam)) {
+      throw new ApiError(400, "VALIDATION_ERROR", "from and to must both be given as YYYY-MM-DD.");
+    }
+    const from = new Date(fromParam + "T00:00:00Z");
+    const to = new Date(toParam + "T00:00:00Z");
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from.toISOString().slice(0, 10) !== fromParam || to.toISOString().slice(0, 10) !== toParam) {
+      throw new ApiError(400, "VALIDATION_ERROR", "from/to are not valid calendar dates.");
+    }
+    if (to < from) throw new ApiError(400, "VALIDATION_ERROR", "to must not be before from.");
+    const days = Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1;
+    if (days > ANALYTICS_MAX_RANGE_DAYS) {
+      throw new ApiError(400, "VALIDATION_ERROR", `Date range may cover at most ${ANALYTICS_MAX_RANGE_DAYS} days.`);
+    }
+    return { from: fromParam, to: toParam, days, preset: false };
+  }
+  const daysParam = Number(query.days);
+  const days = (ANALYTICS_DAY_OPTIONS as readonly number[]).includes(daysParam) ? daysParam : 30;
+  const to = new Date();
+  const from = new Date(to.getTime() - (days - 1) * 86_400_000);
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), days, preset: true };
+}
 
 export async function getRevenueAnalytics(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const daysParam = Number(req.query.days);
-    const days = (ANALYTICS_DAY_OPTIONS as readonly number[]).includes(daysParam) ? daysParam : 30;
+    const window = resolveAnalyticsWindow(req.query as Record<string, unknown>);
+    const { from, to, days } = window;
 
     const [lifetime, daily, byHotel] = await Promise.all([
       // Lifetime totals — never bounded by the selected window, so the
@@ -501,23 +536,23 @@ export async function getRevenueAnalytics(req: AuthedRequest, res: Response, nex
                 COALESCE(o_agg.commission, 0) AS commission,
                 COALESCE(o_agg.orders_count, 0) AS orders_count,
                 COALESCE(t_agg.plans_amount, 0) AS plans_amount
-         FROM generate_series((CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day')::date, CURRENT_DATE, INTERVAL '1 day') AS d
+         FROM generate_series($1::date, $2::date, INTERVAL '1 day') AS d
          LEFT JOIN (
            SELECT redeemed_at::date AS date,
                   SUM(amount) AS gross, SUM(commission_amount) AS commission, COUNT(*) AS orders_count
            FROM orders
-           WHERE status = 'redeemed' AND redeemed_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+           WHERE status = 'redeemed' AND redeemed_at::date BETWEEN $1::date AND $2::date
            GROUP BY redeemed_at::date
          ) o_agg ON o_agg.date = d::date
          LEFT JOIN (
            SELECT created_at::date AS date, SUM(amount) AS plans_amount
            FROM transactions
            WHERE type = 'budget_topup' AND status = 'success'
-             AND created_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+             AND created_at::date BETWEEN $1::date AND $2::date
            GROUP BY created_at::date
          ) t_agg ON t_agg.date = d::date
          ORDER BY d ASC`,
-        [days]
+        [from, to]
       ),
       // Which hotels actually generated MEALVEST's commission in this
       // window — distinct from getTopHotels (which ranks by the
@@ -530,18 +565,34 @@ export async function getRevenueAnalytics(req: AuthedRequest, res: Response, nex
                 COUNT(o.id) AS orders_count
          FROM hotels h
          JOIN orders o ON o.hotel_id = h.id AND o.status = 'redeemed'
-           AND o.redeemed_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+           AND o.redeemed_at::date BETWEEN $1::date AND $2::date
          GROUP BY h.id
          HAVING COALESCE(SUM(o.commission_amount), 0) > 0
          ORDER BY commission DESC
          LIMIT 10`,
-        [days]
+        [from, to]
       ),
     ]);
 
+    // Window totals — what the selected dates add up to, alongside the
+    // unchanging lifetime figures.
+    const windowTotals = daily.rows.reduce(
+      (acc, r) => ({
+        gross: acc.gross + Number(r.gross),
+        commission: acc.commission + Number(r.commission),
+        orders_count: acc.orders_count + Number(r.orders_count),
+        plans_amount: acc.plans_amount + Number(r.plans_amount),
+      }),
+      { gross: 0, commission: 0, orders_count: 0, plans_amount: 0 }
+    );
+
     res.json({
       days,
+      from,
+      to,
+      preset: window.preset,
       lifetime: lifetime.rows[0],
+      window: windowTotals,
       daily: daily.rows,
       byHotel: byHotel.rows,
     });
@@ -765,6 +816,149 @@ export async function listStudents(req: AuthedRequest, res: Response, next: Next
     );
 
     res.json({ students: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/transactions?from&to&status&provider&type&search&limit
+ *
+ * The full payment ledger (transactions table) for the admin Payments
+ * screen — every plan payment / boost attempt with its provider, our
+ * reference, the provider's own id and the student it belongs to.
+ * Dates are inclusive calendar days (YYYY-MM-DD); every filter is
+ * optional and validated before it reaches SQL. Newest first, capped.
+ */
+const TRANSACTION_STATUSES = ["pending", "processing", "success", "failed", "cancelled", "expired", "refunded"] as const;
+const TRANSACTION_PROVIDERS = ["daraja", "paystack", "cyzora"] as const;
+const TRANSACTION_TYPES = ["order_payment", "budget_topup", "refund", "plan_boost"] as const;
+
+export async function listTransactions(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const q = req.query as Record<string, unknown>;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    const add = (sql: string, value: unknown) => {
+      params.push(value);
+      conditions.push(sql.replace("?", `$${params.length}`));
+    };
+
+    for (const key of ["from", "to"] as const) {
+      const v = q[key];
+      if (v !== undefined) {
+        if (typeof v !== "string" || !ISO_DATE.test(v) || Number.isNaN(new Date(v + "T00:00:00Z").getTime())) {
+          throw new ApiError(400, "VALIDATION_ERROR", `${key} must be a valid YYYY-MM-DD date.`);
+        }
+        add(key === "from" ? "t.created_at::date >= ?::date" : "t.created_at::date <= ?::date", v);
+      }
+    }
+    if (typeof q.status === "string" && q.status) {
+      if (!(TRANSACTION_STATUSES as readonly string[]).includes(q.status)) throw new ApiError(400, "VALIDATION_ERROR", "Unknown status filter.");
+      add("t.status = ?", q.status);
+    }
+    if (typeof q.provider === "string" && q.provider) {
+      if (!(TRANSACTION_PROVIDERS as readonly string[]).includes(q.provider)) throw new ApiError(400, "VALIDATION_ERROR", "Unknown provider filter.");
+      add("t.provider = ?", q.provider);
+    }
+    if (typeof q.type === "string" && q.type) {
+      if (!(TRANSACTION_TYPES as readonly string[]).includes(q.type)) throw new ApiError(400, "VALIDATION_ERROR", "Unknown type filter.");
+      add("t.type = ?", q.type);
+    }
+    if (typeof q.search === "string" && q.search.trim()) {
+      const term = `%${q.search.trim().slice(0, 80)}%`;
+      params.push(term);
+      conditions.push(
+        `(t.provider_reference ILIKE $${params.length} OR t.provider_transaction_id ILIKE $${params.length} OR u.email ILIKE $${params.length} OR s.full_name ILIKE $${params.length} OR t.phone_number ILIKE $${params.length})`
+      );
+    }
+    const limitRaw = Number(q.limit);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 100;
+    params.push(limit);
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const [rows, totals] = await Promise.all([
+      pool.query(
+        `SELECT t.id, t.type, t.amount, t.status, t.provider, t.provider_reference, t.provider_transaction_id,
+                t.provider_channel, t.phone_number, t.number_of_days, t.result_description, t.created_at, t.updated_at,
+                u.email AS student_email, s.full_name AS student_name, h.name AS hotel_name
+         FROM transactions t
+         JOIN users u ON u.id = t.user_id
+         LEFT JOIN students s ON s.user_id = t.user_id
+         LEFT JOIN hotels h ON h.id = t.hotel_id
+         ${where}
+         ORDER BY t.created_at DESC
+         LIMIT $${params.length}`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS count,
+                COALESCE(SUM(t.amount) FILTER (WHERE t.status = 'success'), 0) AS success_amount,
+                COUNT(*) FILTER (WHERE t.status = 'success') AS success_count,
+                COALESCE(SUM(t.amount) FILTER (WHERE t.status = 'failed'), 0) AS failed_amount,
+                COUNT(*) FILTER (WHERE t.status = 'failed') AS failed_count,
+                COUNT(*) FILTER (WHERE t.status IN ('pending', 'processing')) AS pending_count
+         FROM transactions t
+         JOIN users u ON u.id = t.user_id
+         LEFT JOIN students s ON s.user_id = t.user_id
+         ${where}`,
+        params.slice(0, -1)
+      ),
+    ]);
+
+    res.json({ transactions: rows.rows, totals: totals.rows[0], limit });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/admin/withdrawals/:withdrawalId
+ *   { status: 'processing' | 'completed' | 'failed' | 'rejected', payoutReference?, note? }
+ *
+ * Records how an admin closed a student's savings withdrawal after
+ * paying it out (manually, from the business M-Pesa for now). Only an
+ * open request (pending/processing/failed) can be moved; a completed
+ * or rejected one is final, so a double-click or stale tab can't flip
+ * a paid-out withdrawal back and forth. Changing status here moves no
+ * money by itself — it's the audit record of what the admin did.
+ */
+const updateWithdrawalSchema = z.object({
+  status: z.enum(["processing", "completed", "failed", "rejected"]),
+  payoutReference: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(300).optional(),
+});
+
+export async function updateWithdrawalStatus(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = updateWithdrawalSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
+    const { status, payoutReference, note } = parsed.data;
+    if (status === "completed" && !payoutReference) {
+      throw new ApiError(400, "VALIDATION_ERROR", "Enter the M-Pesa/bank reference of the payout to mark it completed.");
+    }
+
+    const result = await pool.query(
+      `UPDATE savings_withdrawals
+       SET status = $2,
+           payout_reference = COALESCE($3, payout_reference),
+           admin_note = COALESCE($4, admin_note),
+           processed_at = CASE WHEN $2 IN ('completed', 'rejected', 'failed') THEN now() ELSE processed_at END,
+           processed_by = $5
+       WHERE id = $1 AND status IN ('pending', 'processing', 'failed')
+       RETURNING *`,
+      [req.params.withdrawalId, status, payoutReference ?? null, note ?? null, req.user!.id]
+    );
+    if (result.rows.length === 0) {
+      const exists = await pool.query("SELECT status FROM savings_withdrawals WHERE id = $1", [req.params.withdrawalId]);
+      if (exists.rows.length === 0) throw new ApiError(404, "WITHDRAWAL_NOT_FOUND", "No matching withdrawal found.");
+      throw new ApiError(409, "WITHDRAWAL_FINAL", `This withdrawal is already ${exists.rows[0].status} and can't be changed.`);
+    }
+    const w = result.rows[0];
+    if (status === "completed" || status === "rejected") {
+      notificationEvents.savingsWithdrawalStatusChanged(w.user_id, status, Number(w.student_amount));
+    }
+    res.json({ withdrawal: w });
   } catch (err) {
     next(err);
   }

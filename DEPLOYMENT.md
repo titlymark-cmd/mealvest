@@ -120,6 +120,11 @@ JWT_ACCESS_SECRET=<generated for you — see note below>
 QR_SIGNING_SECRET=<generated for you — see note below>
 PAYSTACK_SECRET_KEY=<test key for now — from you, section 4>
 PAYSTACK_CALLBACK_URL=<optional — see note below>
+PAYMENT_PROVIDER_DEFAULT=<paystack (default) or cyzora — which provider NEW payments/payouts use>
+CYZORA_SECRET_KEY=<sk_test_ for now — Cyzora dashboard → API Keys; sent as X-API-Key, server-only>
+CYZORA_WEBHOOK_SECRET=<whsec_ — Cyzora dashboard → Webhooks → the endpoint https://<your-project>.vercel.app/api/webhooks/cyzora>
+CYZORA_BASE_URL=https://api.cyzora.co.ke/api/v1
+APP_BASE_URL=https://<your-project>.vercel.app   # hosted-checkout callback/cancel URLs (must be https)
 GOOGLE_CLIENT_IDS=<optional — from you, section 5>
 SUPABASE_URL=https://wsfgwvmxyendrobapvsn.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<from you — see note below>
@@ -165,9 +170,18 @@ GOOGLE_MAPS_API_KEY=
 PAYSTACK_PUBLIC_KEY=               # public key is meant to be client-visible; this is normal for Paystack
 ```
 
-**Never put `PAYSTACK_SECRET_KEY`, `DATABASE_URL`,
-`JWT_ACCESS_SECRET`, or `QR_SIGNING_SECRET` in anything under
-`app/`** — those stay server-only.
+**Never put `PAYSTACK_SECRET_KEY`, `CYZORA_SECRET_KEY`,
+`CYZORA_WEBHOOK_SECRET`, `DATABASE_URL`, `JWT_ACCESS_SECRET`, or
+`QR_SIGNING_SECRET` in anything under `app/` or `web/`** — those stay
+server-only. Cyzora's `pk_…` public key is not needed anywhere in this
+app (the server creates hosted-checkout sessions itself).
+
+Cyzora dashboard checklist (see TESTING.md "Cyzora integration test
+checklist" for the full walkthrough): API key (test first), webhook
+endpoint `https://<your-project>.vercel.app/api/webhooks/cyzora` with
+its `whsec_` secret, and the frontend domain added as an allowed
+redirect domain if your account restricts them. Live payouts also need
+the business verified on Cyzora's side.
 
 ## 7. Accessing each dashboard securely
 

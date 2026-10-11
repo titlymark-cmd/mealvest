@@ -15,10 +15,16 @@ import { isValidCoordinate } from "../lib/geo";
 export async function listHotels(_req: Request, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
-      `SELECT id, name, location, contact_phone, latitude, longitude, image_url, description
-       FROM hotels
-       WHERE status = 'active'
-       ORDER BY name ASC`
+      `SELECT h.id, h.name, h.location, h.contact_phone, h.latitude, h.longitude, h.image_url, h.description,
+              COALESCE(r.review_count, 0)::int AS review_count,
+              r.average_rating
+       FROM hotels h
+       LEFT JOIN (
+         SELECT hotel_id, COUNT(*) AS review_count, ROUND(AVG(rating)::numeric, 1) AS average_rating
+         FROM hotel_reviews GROUP BY hotel_id
+       ) r ON r.hotel_id = h.id
+       WHERE h.status = 'active'
+       ORDER BY h.name ASC`
     );
     res.json({ hotels: result.rows });
   } catch (err) {
@@ -31,9 +37,16 @@ export async function getHotelMenu(req: Request, res: Response, next: NextFuncti
     const { hotelId } = req.params;
 
     const hotelResult = await pool.query(
-      `SELECT id, name, location, address, contact_phone, helpline, opening_hours,
-              services, latitude, longitude, image_url, description
-       FROM hotels WHERE id = $1 AND status = 'active'`,
+      `SELECT h.id, h.name, h.location, h.address, h.contact_phone, h.helpline, h.opening_hours,
+              h.services, h.latitude, h.longitude, h.image_url, h.description,
+              COALESCE(r.review_count, 0)::int AS review_count,
+              r.average_rating
+       FROM hotels h
+       LEFT JOIN (
+         SELECT hotel_id, COUNT(*) AS review_count, ROUND(AVG(rating)::numeric, 1) AS average_rating
+         FROM hotel_reviews WHERE hotel_id = $1 GROUP BY hotel_id
+       ) r ON r.hotel_id = h.id
+       WHERE h.id = $1 AND h.status = 'active'`,
       [hotelId]
     );
     if (hotelResult.rows.length === 0) {

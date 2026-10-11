@@ -524,25 +524,52 @@ export async function applyBoost(budgetId: string, amount: number): Promise<Budg
 }
 
 /**
- * Savings withdrawal — locked until the budget's contract period has
- * actually ended, checked server-side against the DB's own
- * CURRENT_DATE, never a client-supplied date. The student receives
- * their FULL remaining balance; any hotel loyalty incentive is a
- * separate, additive, platform-funded figure recorded alongside the
- * withdrawal — never subtracted. Migration 020's
- * chk_student_gets_full_savings constraint makes this invariant
- * impossible to violate even by a future bug.
+ * Withdraws the unspent balance ("savings", including every rollover
+ * amount the student carried forward) of a plan whose period has
+ * ENDED. MEALVEST keeps a platform fee — platform_settings
+ * 'savings_withdrawal_fee_percent', 10% by default — and the student
+ * receives the rest. The percentage in force is frozen onto the row
+ * (platform_fee_percent / platform_fee_amount) so a later change to
+ * the setting never rewrites history, and migration 041's
+ * chk_withdrawal_split_adds_up guarantees student + fee = gross.
+ *
+ * Any hotel loyalty incentive stays what it always was: a SEPARATE,
+ * additive, platform/hotel-funded figure recorded alongside — never a
+ * deduction from the student.
+ *
+ * The lock (end_date <= today) and the one-withdrawal-per-plan rule
+ * are enforced here, inside the row lock, regardless of what the UI
+ * showed — getWithdrawalStatus is only a convenience mirror of this.
  */
+export const DEFAULT_WITHDRAWAL_FEE_PERCENT = 10;
+
+export async function getWithdrawalFeePercent(client: Pick<import("pg").Pool, "query"> = pool): Promise<number> {
+  const result = await client.query("SELECT value FROM platform_settings WHERE key = 'savings_withdrawal_fee_percent'");
+  const parsed = Number(result.rows[0]?.value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return DEFAULT_WITHDRAWAL_FEE_PERCENT;
+  return parsed;
+}
+
+/** Cent-precise split; the fee is rounded to the cent and the student gets the exact remainder, so the two always sum to gross. */
+export function computeWithdrawalSplit(grossSavings: number, feePercent: number): { feeAmount: number; studentAmount: number } {
+  const gross = Math.round(grossSavings * 100) / 100;
+  const feeAmount = Math.round(gross * (feePercent / 100) * 100) / 100;
+  const studentAmount = Math.round((gross - feeAmount) * 100) / 100;
+  return { feeAmount, studentAmount };
+}
+
 export async function withdrawSavings(params: {
   userId: string;
   payoutMethod: "mpesa" | "bank";
   payoutDestination: string;
 }): Promise<{
+  withdrawalId: string;
   gross_savings: number;
+  platform_fee_percent: number;
+  platform_fee_amount: number;
   student_amount: number;
   hotel_incentive_amount: number;
   status: string;
-  withdrawalId: string;
 }> {
   const client = await pool.connect();
   try {
@@ -564,7 +591,7 @@ export async function withdrawSavings(params: {
       throw new ApiError(
         403,
         "CONTRACT_ACTIVE",
-        "Withdrawal becomes available after your Mealvest contract period ends."
+        "Withdrawal becomes available after your Mealvest plan period ends."
       );
     }
 
@@ -573,7 +600,17 @@ export async function withdrawSavings(params: {
       throw new ApiError(409, "ALREADY_WITHDRAWN", "This plan's savings have already been withdrawn.");
     }
 
-    const grossSavings = Number(budget.remaining_amount);
+    // Everything still unspent — today's unused credit, banked rollover,
+    // anything parked for tomorrow or awaiting a rollover decision — is
+    // part of remaining_amount, so nothing the student carried forward
+    // is left behind.
+    const grossSavings = Math.round(Number(budget.remaining_amount) * 100) / 100;
+    if (grossSavings <= 0) {
+      throw new ApiError(409, "NOTHING_TO_WITHDRAW", "There is no unspent balance left on this plan to withdraw.");
+    }
+
+    const feePercent = await getWithdrawalFeePercent(client);
+    const { feeAmount, studentAmount } = computeWithdrawalSplit(grossSavings, feePercent);
 
     let hotelId: string | null = null;
     let incentivePercent = 0;
@@ -590,24 +627,42 @@ export async function withdrawSavings(params: {
 
     const withdrawal = await client.query(
       `INSERT INTO savings_withdrawals
-         (user_id, budget_id, hotel_id, gross_savings, student_amount, hotel_incentive_amount, payout_method, payout_destination, status)
-       VALUES ($1, $2, $3, $4, $4, $5, $6, $7, 'pending')
+         (user_id, budget_id, hotel_id, gross_savings, student_amount, platform_fee_percent, platform_fee_amount,
+          hotel_incentive_amount, payout_method, payout_destination, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
        RETURNING id`,
-      [params.userId, budget.id, hotelId, grossSavings, hotelIncentiveAmount, params.payoutMethod, params.payoutDestination]
+      [
+        params.userId,
+        budget.id,
+        hotelId,
+        grossSavings,
+        studentAmount,
+        feePercent,
+        feeAmount,
+        hotelIncentiveAmount,
+        params.payoutMethod,
+        params.payoutDestination,
+      ]
     );
 
-    await client.query("UPDATE budgets SET status = 'completed', remaining_amount = 0, updated_at = now() WHERE id = $1", [
-      budget.id,
-    ]);
+    await client.query(
+      `UPDATE budgets
+       SET status = 'completed', remaining_amount = 0, banked_amount = 0, pending_tomorrow_amount = 0,
+           pending_rollover_amount = 0, updated_at = now()
+       WHERE id = $1`,
+      [budget.id]
+    );
 
     await client.query("COMMIT");
 
     return {
+      withdrawalId: withdrawal.rows[0].id,
       gross_savings: grossSavings,
-      student_amount: grossSavings,
+      platform_fee_percent: feePercent,
+      platform_fee_amount: feeAmount,
+      student_amount: studentAmount,
       hotel_incentive_amount: hotelIncentiveAmount,
       status: "pending",
-      withdrawalId: withdrawal.rows[0].id,
     };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});

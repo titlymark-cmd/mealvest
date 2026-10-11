@@ -101,7 +101,7 @@ export default function AdminPayoutsScreen() {
         <Wallet size={20} color={COLORS.primary} />
         <h1 style={styles.title}>Hotel Payouts</h1>
       </div>
-      <p style={styles.subtitle}>Review what each hotel is owed and send a real payout via Paystack Transfer.</p>
+      <p style={styles.subtitle}>Review what each hotel is owed and send a real payout through the active payout provider.</p>
 
       {error && <p style={styles.errorText}>{error}</p>}
 
@@ -109,7 +109,13 @@ export default function AdminPayoutsScreen() {
         <span style={styles.cardTitle}>Pending payouts</span>
         {pending.length === 0 && <p style={styles.emptyText}>No hotel currently has an unpaid balance.</p>}
         {pending.map((h) => {
-          const supported = h.payment_method && ["mpesa_till", "send_money", "pochi_la_biashara"].includes(h.payment_method);
+          // Server decides per the ACTIVE provider (Paystack vs Cyzora
+          // automate different settlement methods); the hardcoded list
+          // is only a fallback for an older server response.
+          const supported =
+            typeof h.payout_supported === "boolean"
+              ? h.payout_supported
+              : Boolean(h.payment_method && ["mpesa_till", "send_money", "pochi_la_biashara"].includes(h.payment_method));
           return (
             <div key={h.hotel_id} style={styles.row}>
               <div style={{ flex: 1, minWidth: 0 }}>

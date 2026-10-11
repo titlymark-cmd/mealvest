@@ -235,11 +235,16 @@ export default function StudentProfileScreen() {
       )}
 
       {!loading && !loadError && profile && <NotificationSettingsSection />}
+
+      <a href="/terms" style={styles.termsLink}>
+        Terms, payments &amp; savings policy, privacy
+      </a>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  termsLink: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textAlign: "center", marginTop: 20, display: "block" },
   container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, maxWidth: 560, display: "flex", flexDirection: "column" },
   titleRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 },
   avatarCircle: {

@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { getActiveBudget } from "../../services/budgetApi";
 import { fetchHotelMenu, Hotel, MenuItem } from "../../services/hotelsApi";
+import { HotelReviews } from "../../components/student/HotelReviews";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -155,6 +156,7 @@ export default function StudentMenuScreen() {
           ))}
         </div>
       )}
+      {hotel && <HotelReviews hotelId={hotel.id} hotelName={hotel.name} />}
     </div>
   );
 }

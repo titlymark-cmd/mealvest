@@ -191,6 +191,21 @@ export function hotelMealRedeemed(hotelId: string, hotelAmount: number, orderId:
   }));
 }
 
+/** Admin closed a student's savings withdrawal — tells the student the money was sent (or the request was declined). */
+export function savingsWithdrawalStatusChanged(userId: string, status: "completed" | "rejected", amount: number): void {
+  void notify({
+    userId,
+    type: "savings_withdrawal_status",
+    title: status === "completed" ? "Savings sent ✅" : "Savings withdrawal declined",
+    body:
+      status === "completed"
+        ? `${formatKsh(amount)} from your meal plan savings has been sent to your M-Pesa.`
+        : `Your savings withdrawal of ${formatKsh(amount)} could not be processed — MEALVEST will follow up with you.`,
+    deepLink: "/student/home",
+    category: "payment_updates",
+  });
+}
+
 export function hotelPayoutStatusChanged(hotelId: string, status: "successful" | "failed", amount: number): void {
   void notifyHotelStaff(hotelId, (userId) => ({
     userId,

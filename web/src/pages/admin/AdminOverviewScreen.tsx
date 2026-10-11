@@ -117,7 +117,7 @@ export default function AdminOverviewScreen() {
         fetchDailyLedger(authFetch),
         fetchAdminAlerts(authFetch),
         fetchTopHotels(authFetch, "today"),
-        fetchRevenueAnalytics(authFetch, 30),
+        fetchRevenueAnalytics(authFetch, { days: 30 }),
         fetchCustomerCarePhone(),
         fetchAllAnnouncements(authFetch),
       ]);

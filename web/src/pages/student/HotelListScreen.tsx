@@ -6,6 +6,7 @@ import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { fetchHotels, Hotel } from "../../services/hotelsApi";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
+import { RatingBadge } from "../../components/student/HotelReviews";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -129,6 +130,9 @@ export default function HotelListScreen() {
                 <div style={styles.locationRow}>
                   <MapPin size={12} color={COLORS.textMuted} />
                   <span style={styles.hotelLocation}>{item.location}</span>
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <RatingBadge average={item.average_rating} count={item.review_count} />
                 </div>
                 {item.description && <p style={styles.hotelDescription}>{item.description}</p>}
               </div>

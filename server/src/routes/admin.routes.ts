@@ -17,6 +17,8 @@ import {
   getHotelDetail,
   deleteHotel,
   getRevenueAnalytics,
+  listTransactions,
+  updateWithdrawalStatus,
 } from "../controllers/admin.controller";
 import { updateCustomerCarePhone } from "../controllers/settings.controller";
 import {
@@ -26,7 +28,13 @@ import {
   deleteAnnouncement,
 } from "../controllers/announcements.controller";
 import { adminBroadcast, adminTestSend } from "../controllers/notifications.controller";
-import { listPendingPayouts, listPayoutHistory, triggerPayout, refreshPayoutStatus } from "../controllers/hotelPayouts.controller";
+import {
+  listPendingPayouts,
+  listPayoutHistory,
+  triggerPayout,
+  refreshPayoutStatus,
+  previewPayoutFee,
+} from "../controllers/hotelPayouts.controller";
 import { adminNotificationRateLimiter, financialActionRateLimiter } from "../middleware/rateLimit";
 
 export const adminRouter = Router();
@@ -48,6 +56,8 @@ adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
 adminRouter.get("/orders", listAllOrders);
 adminRouter.get("/withdrawals", listWithdrawals);
+adminRouter.patch("/withdrawals/:withdrawalId", financialActionRateLimiter, updateWithdrawalStatus);
+adminRouter.get("/transactions", listTransactions);
 adminRouter.patch("/settings/customer-care", updateCustomerCarePhone);
 adminRouter.get("/announcements", listAnnouncements);
 adminRouter.post("/announcements", createAnnouncement);
@@ -56,6 +66,7 @@ adminRouter.delete("/announcements/:id", deleteAnnouncement);
 adminRouter.post("/notifications/broadcast", adminNotificationRateLimiter, adminBroadcast);
 adminRouter.post("/notifications/test-send", adminNotificationRateLimiter, adminTestSend);
 adminRouter.get("/payouts/pending", listPendingPayouts);
+adminRouter.get("/payouts/fee-preview", previewPayoutFee);
 adminRouter.get("/payouts", listPayoutHistory);
 adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
 adminRouter.post("/payouts/:payoutId/refresh", financialActionRateLimiter, refreshPayoutStatus);

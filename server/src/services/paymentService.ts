@@ -12,25 +12,87 @@ export function generatePaymentReference(): string {
   return `MV-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+export type PaymentProviderName = "paystack" | "daraja" | "cyzora";
+export type PaymentChannel = "stk_push" | "hosted_checkout";
+
 interface CreatePendingParams {
   userId: string;
   hotelId: string | null;
   amount: number;
   phoneNumber: string;
-  provider: "paystack" | "daraja";
+  provider: PaymentProviderName;
   reference: string;
   numberOfDays: number; // carried through so activation can create the right-length budget
+  channel?: PaymentChannel; // Cyzora only — which verify endpoint this row belongs to (migration 040)
 }
 
 export async function createPendingTransaction(params: CreatePendingParams) {
   const result = await pool.query(
     `INSERT INTO transactions
-       (user_id, hotel_id, amount, phone_number, type, status, provider, provider_reference, idempotency_key, number_of_days)
-     VALUES ($1, $2, $3, $4, 'budget_topup', 'pending', $5, $6, $6, $7)
+       (user_id, hotel_id, amount, phone_number, type, status, provider, provider_reference, idempotency_key, number_of_days, provider_channel)
+     VALUES ($1, $2, $3, $4, 'budget_topup', 'pending', $5, $6, $6, $7, $8)
      RETURNING *`,
-    [params.userId, params.hotelId, params.amount, params.phoneNumber, params.provider, params.reference, params.numberOfDays]
+    [
+      params.userId,
+      params.hotelId,
+      params.amount,
+      params.phoneNumber,
+      params.provider,
+      params.reference,
+      params.numberOfDays,
+      params.channel ?? null,
+    ]
   );
   return result.rows[0];
+}
+
+/**
+ * Cyzora hands back ITS identifier (charge id for an STK push, session
+ * reference for hosted checkout) at initialize time, and every later
+ * read of that payment is keyed by it — so it's stored the moment the
+ * initialize call returns, into the same provider_transaction_id
+ * column Paystack rows fill in at verify time. Status is deliberately
+ * NOT touched here: a created charge/session is still 'pending'.
+ */
+export async function recordProviderTransactionId(reference: string, providerTransactionId: string): Promise<void> {
+  await pool.query(
+    "UPDATE transactions SET provider_transaction_id = $1, updated_at = now() WHERE provider_reference = $2",
+    [providerTransactionId, reference]
+  );
+}
+
+export interface PendingTransactionLookup {
+  id: string;
+  user_id: string;
+  provider: PaymentProviderName;
+  provider_reference: string; // ours (MV-…)
+  provider_transaction_id: string | null;
+  provider_channel: PaymentChannel | null;
+  status: string;
+  amount: string;
+}
+
+/** The handful of columns verify/webhook handlers need to pick the right provider + endpoint for an existing payment. */
+export async function findTransactionByReference(reference: string): Promise<PendingTransactionLookup | null> {
+  const result = await pool.query<PendingTransactionLookup>(
+    `SELECT id, user_id, provider, provider_reference, provider_transaction_id, provider_channel, status, amount
+     FROM transactions WHERE provider_reference = $1`,
+    [reference]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Webhooks are keyed by Cyzora's own id/reference, not our MV- reference — this is the reverse lookup (index from migration 040). */
+export async function findTransactionByProviderTransactionId(
+  provider: PaymentProviderName,
+  providerTransactionId: string
+): Promise<PendingTransactionLookup | null> {
+  const result = await pool.query<PendingTransactionLookup>(
+    `SELECT id, user_id, provider, provider_reference, provider_transaction_id, provider_channel, status, amount
+     FROM transactions WHERE provider = $1 AND provider_transaction_id = $2`,
+    [provider, providerTransactionId]
+  );
+  return result.rows[0] ?? null;
 }
 
 interface CreatePendingBoostParams {
@@ -38,8 +100,9 @@ interface CreatePendingBoostParams {
   budgetId: string;
   amount: number;
   phoneNumber: string;
-  provider: "paystack" | "daraja";
+  provider: PaymentProviderName;
   reference: string;
+  channel?: PaymentChannel;
 }
 
 /**
@@ -50,18 +113,19 @@ interface CreatePendingBoostParams {
 export async function createPendingBoostTransaction(params: CreatePendingBoostParams) {
   const result = await pool.query(
     `INSERT INTO transactions
-       (user_id, budget_id, amount, phone_number, type, status, provider, provider_reference, idempotency_key)
-     VALUES ($1, $2, $3, $4, 'plan_boost', 'pending', $5, $6, $6)
+       (user_id, budget_id, amount, phone_number, type, status, provider, provider_reference, idempotency_key, provider_channel)
+     VALUES ($1, $2, $3, $4, 'plan_boost', 'pending', $5, $6, $6, $7)
      RETURNING *`,
-    [params.userId, params.budgetId, params.amount, params.phoneNumber, params.provider, params.reference]
+    [params.userId, params.budgetId, params.amount, params.phoneNumber, params.provider, params.reference, params.channel ?? null]
   );
   return result.rows[0];
 }
 
 /**
  * The ONE function that turns a verified successful payment into an
- * active budget — called by both /verify (student polling after
- * checkout) and /webhooks/paystack (Paystack's own notification).
+ * active budget — called by /verify (student polling after
+ * checkout) and by the provider webhooks (/webhooks/paystack,
+ * /webhooks/cyzora), whichever provider the row was created with.
  * Whichever one runs first does the activation; the other is a
  * guaranteed no-op. This is what makes double-crediting impossible
  * regardless of which order verify-polling and the webhook arrive in,

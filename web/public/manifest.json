@@ -1,6 +1,6 @@
 {
-  "short_name": "MEALVEST",
-  "name": "MEALVEST",
+  "short_name": "Mealvest",
+  "name": "Mealvest",
   "description": "Fund a meal plan with hotels you trust and eat well every single day.",
   "icons": [
     { "src": "favicon.ico", "sizes": "16x16 32x32 48x48", "type": "image/x-icon" },
