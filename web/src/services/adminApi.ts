@@ -293,9 +293,14 @@ export interface AdminWithdrawal {
   hotel_id: string | null;
   gross_savings: string;
   student_amount: string;
+  platform_fee_percent?: string;
+  platform_fee_amount?: string;
   hotel_incentive_amount: string;
   payout_method: string | null;
   payout_destination: string | null;
+  payout_reference?: string | null;
+  admin_note?: string | null;
+  processed_at?: string | null;
   status: string;
   created_at: string;
   student_email: string;
@@ -361,14 +366,99 @@ export interface RevenueByHotel {
   orders_count: string;
 }
 
+export interface RevenueWindowTotals {
+  gross: number;
+  commission: number;
+  orders_count: number;
+  plans_amount: number;
+}
+
 export interface RevenueAnalytics {
   days: number;
+  from: string; // YYYY-MM-DD, inclusive
+  to: string; // YYYY-MM-DD, inclusive
+  preset: boolean;
   lifetime: RevenueLifetime;
+  window: RevenueWindowTotals;
   daily: RevenueDailyPoint[];
   byHotel: RevenueByHotel[];
 }
 
-export async function fetchRevenueAnalytics(authFetch: AuthFetch, days: 7 | 30 | 90 = 30): Promise<RevenueAnalytics> {
-  const res = await authFetch(`/api/admin/analytics/revenue?days=${days}`);
+export type AnalyticsRange = { days: 7 | 30 | 90 } | { from: string; to: string };
+
+/** Either a preset ending today (`{ days }`) or an explicit inclusive date range (`{ from, to }`, max 366 days). */
+export async function fetchRevenueAnalytics(authFetch: AuthFetch, range: AnalyticsRange = { days: 30 }): Promise<RevenueAnalytics> {
+  const qs =
+    "days" in range
+      ? `days=${range.days}`
+      : `from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
+  const res = await authFetch(`/api/admin/analytics/revenue?${qs}`);
   return parseOrError(res, "Could not load revenue analytics.");
+}
+
+export interface AdminTransaction {
+  id: string;
+  type: string;
+  amount: string;
+  status: string;
+  provider: string;
+  provider_reference: string | null;
+  provider_transaction_id: string | null;
+  provider_channel: string | null;
+  phone_number: string;
+  number_of_days: number | null;
+  result_description: string | null;
+  created_at: string;
+  updated_at: string;
+  student_email: string;
+  student_name: string | null;
+  hotel_name: string | null;
+}
+
+export interface AdminTransactionTotals {
+  count: string;
+  success_amount: string;
+  success_count: string;
+  failed_amount: string;
+  failed_count: string;
+  pending_count: string;
+}
+
+export interface TransactionFilters {
+  from?: string;
+  to?: string;
+  status?: string;
+  provider?: string;
+  type?: string;
+  search?: string;
+  limit?: number;
+}
+
+/** Full payment ledger (transactions table) with optional date/status/provider/type/search filters. */
+export async function fetchTransactions(
+  authFetch: AuthFetch,
+  filters: TransactionFilters = {}
+): Promise<{ transactions: AdminTransaction[]; totals: AdminTransactionTotals; limit: number }> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== "" && v !== null) params.set(k, String(v));
+  }
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  const res = await authFetch(`/api/admin/transactions${qs}`);
+  return parseOrError(res, "Could not load the payment ledger.");
+}
+
+/** Records how an admin closed a savings withdrawal after paying it out. Completed requires the payout reference. */
+export async function updateWithdrawalStatus(
+  authFetch: AuthFetch,
+  withdrawalId: string,
+  input: { status: "processing" | "completed" | "failed" | "rejected"; payoutReference?: string; note?: string }
+): Promise<AdminWithdrawal> {
+  const res = await authFetch(`/api/admin/withdrawals/${withdrawalId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ withdrawal: AdminWithdrawal }>(res, "Could not update this withdrawal.");
+  return data.withdrawal;
 }

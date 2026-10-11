@@ -5,7 +5,7 @@ import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { formatKsh } from "../../components/admin/adminFormat";
-import { fetchRevenueAnalytics, RevenueAnalytics, RevenueDailyPoint } from "../../services/adminApi";
+import { fetchRevenueAnalytics, RevenueAnalytics, RevenueDailyPoint, AnalyticsRange } from "../../services/adminApi";
 
 // Two-series categorical pair, validated for CVD separation (see
 // dataviz skill's scripts/validate_palette.js — ALL CHECKS PASS at
@@ -19,7 +19,12 @@ const COLOR_GROSS = "#eb6834";
 const COLOR_COMMISSION = "#2a78d6";
 
 const RANGE_OPTIONS = [7, 30, 90] as const;
-type RangeOption = (typeof RANGE_OPTIONS)[number];
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const daysAgoIso = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+function longDate(iso: string): string {
+  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
 
 function formatKshCompact(value: number): string {
   if (value >= 1_000_000) return `KSh ${(value / 1_000_000).toFixed(1)}M`;
@@ -242,17 +247,22 @@ function CommissionByHotelChart({ rows }: { rows: { id: string; name: string; co
 
 export default function AdminAnalyticsScreen() {
   const { authFetch } = useAuth();
-  const [range, setRange] = useState<RangeOption>(30);
+  // Either a preset (7/30/90 days ending today) or an explicit custom
+  // range — the server validates and echoes back the exact dates used.
+  const [range, setRange] = useState<AnalyticsRange>({ days: 30 });
+  const [customFrom, setCustomFrom] = useState(daysAgoIso(29));
+  const [customTo, setCustomTo] = useState(todayIso());
+  const [customOpen, setCustomOpen] = useState(false);
   const [data, setData] = useState<RevenueAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (days: RangeOption) => {
+    async (r: AnalyticsRange) => {
       setLoading(true);
       setError(null);
       try {
-        const result = await fetchRevenueAnalytics(authFetch, days);
+        const result = await fetchRevenueAnalytics(authFetch, r);
         setData(result);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not load revenue analytics.");
@@ -266,6 +276,15 @@ export default function AdminAnalyticsScreen() {
   useEffect(() => {
     load(range);
   }, [load, range]);
+
+  const applyCustom = () => {
+    if (!customFrom || !customTo) return setError("Pick both a start and an end date.");
+    if (customTo < customFrom) return setError("The end date must not be before the start date.");
+    setRange({ from: customFrom, to: customTo });
+  };
+
+  const activePreset = "days" in range ? range.days : null;
+  const windowLabel = data ? `${longDate(data.from)} – ${longDate(data.to)} (${data.days} day${data.days === 1 ? "" : "s"})` : "";
 
   const byHotelRows = useMemo(
     () => (data?.byHotel ?? []).map((h) => ({ id: h.id, name: h.name, commission: Number(h.commission) })),
@@ -295,18 +314,47 @@ export default function AdminAnalyticsScreen() {
           <h1 style={styles.title}>Revenue &amp; Commission</h1>
           <p style={styles.subtitle}>How much MEALVEST is making from hotel commissions, over time.</p>
         </div>
-        <div style={styles.rangeRow}>
-          {RANGE_OPTIONS.map((opt) => (
+        <div style={styles.rangeCol}>
+          <div style={styles.rangeRow}>
+            {RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt}
+                onClick={() => {
+                  setCustomOpen(false);
+                  setRange({ days: opt });
+                }}
+                style={{ ...styles.rangeBtn, ...(activePreset === opt ? styles.rangeBtnActive : null) }}
+              >
+                <span style={{ ...styles.rangeBtnText, ...(activePreset === opt ? styles.rangeBtnTextActive : null) }}>
+                  {opt}d
+                </span>
+              </button>
+            ))}
             <button
-              key={opt}
-              onClick={() => setRange(opt)}
-              style={{ ...styles.rangeBtn, ...(range === opt ? styles.rangeBtnActive : null) }}
+              onClick={() => setCustomOpen((v) => !v)}
+              style={{ ...styles.rangeBtn, ...(activePreset === null ? styles.rangeBtnActive : null) }}
             >
-              <span style={{ ...styles.rangeBtnText, ...(range === opt ? styles.rangeBtnTextActive : null) }}>
-                {opt}d
+              <span style={{ ...styles.rangeBtnText, ...(activePreset === null ? styles.rangeBtnTextActive : null) }}>
+                Custom dates
               </span>
             </button>
-          ))}
+          </div>
+          {(customOpen || activePreset === null) && (
+            <div style={styles.customRow}>
+              <label style={styles.dateLabel}>
+                From
+                <input type="date" value={customFrom} max={customTo || todayIso()} onChange={(e) => setCustomFrom(e.target.value)} style={styles.dateInput} />
+              </label>
+              <label style={styles.dateLabel}>
+                To
+                <input type="date" value={customTo} min={customFrom} max={todayIso()} onChange={(e) => setCustomTo(e.target.value)} style={styles.dateInput} />
+              </label>
+              <button onClick={applyCustom} style={styles.applyBtn}>
+                <span style={styles.applyBtnText}>Apply</span>
+              </button>
+            </div>
+          )}
+          {data && <span style={styles.windowLabel}>{windowLabel}</span>}
         </div>
       </div>
 
@@ -341,10 +389,16 @@ export default function AdminAnalyticsScreen() {
             />
           </div>
 
+          <div style={styles.statsGrid}>
+            <StatTile icon={<DollarSign size={16} color={COLORS.primary} />} label="Gross in this period" value={formatKsh(data.window.gross)} sub={`${data.window.orders_count} meals redeemed · ${windowLabel}`} />
+            <StatTile icon={<TrendingUp size={16} color={COLORS.success} />} label="Commission in this period" value={formatKsh(data.window.commission)} sub={windowLabel} />
+            <StatTile icon={<Wallet size={16} color={COLORS.accent} />} label="Plans collected in this period" value={formatKsh(data.window.plans_amount)} sub={windowLabel} />
+          </div>
+
           <Card style={styles.panelCard}>
             <div style={styles.panelHeaderRow}>
-              <span style={styles.panelTitle}>Revenue over the last {range} days</span>
-              <span style={styles.panelSubtitle}>Hover the chart for exact daily figures</span>
+              <span style={styles.panelTitle}>Revenue by day</span>
+              <span style={styles.panelSubtitle}>{windowLabel} · hover the chart for exact daily figures</span>
             </div>
             <RevenueLineChart daily={data.daily} />
           </Card>
@@ -352,7 +406,7 @@ export default function AdminAnalyticsScreen() {
           <Card style={styles.panelCard}>
             <div style={styles.panelHeaderRow}>
               <span style={styles.panelTitle}>Top hotels by commission generated</span>
-              <span style={styles.panelSubtitle}>Last {range} days</span>
+              <span style={styles.panelSubtitle}>{windowLabel}</span>
             </div>
             {byHotelRows.length === 0 ? (
               <p style={styles.emptyText}>No commission has been earned in this window yet.</p>
@@ -373,7 +427,14 @@ const styles: Record<string, React.CSSProperties> = {
   headerRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 14 },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 24, color: COLORS.textOnDark, margin: 0 },
   subtitle: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, margin: "6px 0 0 0" },
-  rangeRow: { display: "flex", flexDirection: "row", gap: 6, backgroundColor: COLORS.bgDeep, borderRadius: RADIUS.pill, padding: 4 },
+  rangeCol: { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 },
+  rangeRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6, backgroundColor: COLORS.bgDeep, borderRadius: RADIUS.pill, padding: 4 },
+  customRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", gap: 10 },
+  dateLabel: { display: "flex", flexDirection: "column", gap: 4, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.textOnDarkMuted },
+  dateInput: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDark, backgroundColor: "rgba(252,244,234,0.06)", border: `1px solid ${COLORS.border}`, borderRadius: RADIUS.sm, padding: "7px 10px", colorScheme: "dark" },
+  applyBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.pill, padding: "9px 16px" },
+  applyBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: "#fff" },
+  windowLabel: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textOnDarkMuted },
   rangeBtn: { padding: "7px 16px", borderRadius: RADIUS.pill },
   rangeBtnActive: { backgroundColor: COLORS.primary },
   rangeBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },

@@ -382,6 +382,102 @@ async function webhook(event, { secret, signature, contentType = "application/js
   const history = await api("/api/admin/payouts", { token: adminToken });
   check("admin payout history lists Cyzora payouts (regression of existing endpoint)", history.status === 200 && history.data.payouts.some((p) => p.provider === "cyzora"));
 
+  // ---------- savings withdrawal (10% MEALVEST fee, locked until plan end) ----------
+  await mock("/__reset");
+  const wsLocked = await api("/api/student/withdrawal-status", { token: tokenA });
+  check("withdrawal status: locked while plan active, fee 10%, net = 90% of remaining", wsLocked.status === 200 && wsLocked.data.locked === true && wsLocked.data.reason === "CONTRACT_ACTIVE" && wsLocked.data.feePercent === 10 && Math.abs(wsLocked.data.netAmount - 0.9 * Number(wsLocked.data.availableSavings)) < 0.011, JSON.stringify(wsLocked.data));
+  const earlyWithdraw = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  check("withdraw before plan end -> 403 CONTRACT_ACTIVE (lock enforced server-side)", earlyWithdraw.status === 403 && earlyWithdraw.data.error.code === "CONTRACT_ACTIVE", JSON.stringify(earlyWithdraw.data));
+  const noAccept = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001" } });
+  check("withdraw without acceptFee -> 400", noAccept.status === 400);
+  // End the plan (server clock is the only clock: we move end_date into the past in the DB)
+  await q("UPDATE budgets SET end_date = CURRENT_DATE - 1 WHERE id = $1", [budgetId]);
+  const wsOpen = await api("/api/student/withdrawal-status", { token: tokenA });
+  const grossBefore = Number(wsOpen.data.availableSavings);
+  check("withdrawal status: unlocked once end_date passed", wsOpen.data.locked === false && wsOpen.data.reason === null && grossBefore > 0, JSON.stringify(wsOpen.data));
+  const badPhone = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0812345678", acceptFee: true } });
+  check("withdraw to a non-Kenyan number -> 400 INVALID_PHONE_NUMBER", badPhone.status === 400 && badPhone.data.error.code === "INVALID_PHONE_NUMBER");
+  const wd = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  const expectedFee = Math.round(grossBefore * 10) / 100;
+  check("withdraw -> 201 with gross/fee/net; fee is exactly 10%, student gets the remainder", wd.status === 201 && wd.data.gross_savings === grossBefore && wd.data.platform_fee_percent === 10 && wd.data.platform_fee_amount === expectedFee && Math.abs(wd.data.student_amount + wd.data.platform_fee_amount - grossBefore) < 0.001 && wd.data.status === "pending", JSON.stringify(wd.data));
+  const wdRow = (await q("SELECT * FROM savings_withdrawals WHERE id = $1", [wd.data.withdrawalId]))[0];
+  const budgetAfter = (await q("SELECT status, remaining_amount FROM budgets WHERE id = $1", [budgetId]))[0];
+  check("withdrawal row persisted with fee columns, destination normalised, plan closed with 0 remaining", wdRow && Number(wdRow.platform_fee_percent) === 10 && Number(wdRow.student_amount) + Number(wdRow.platform_fee_amount) === Number(wdRow.gross_savings) && wdRow.payout_destination === "254700000001" && budgetAfter.status === "completed" && Number(budgetAfter.remaining_amount) === 0, JSON.stringify({ wdRow: wdRow && { s: wdRow.student_amount, f: wdRow.platform_fee_amount, g: wdRow.gross_savings, d: wdRow.payout_destination }, budgetAfter }));
+  const wdAgain = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  check("second withdrawal -> 404 (plan no longer active), never a double payout", wdAgain.status === 404, `${wdAgain.status}`);
+  const myWd = await api("/api/student/withdrawals", { token: tokenA });
+  const myWdB = await api("/api/student/withdrawals", { token: tokenB });
+  check("student withdrawal history shows own row only; other student sees none", myWd.data.withdrawals.length === 1 && myWd.data.withdrawals[0].id === wd.data.withdrawalId && myWdB.data.withdrawals.length === 0);
+  const myPayments = await api("/api/student/payments", { token: tokenA });
+  const myPaymentsB = await api("/api/student/payments", { token: tokenB });
+  check("student payment ledger lists own transactions with provider refs; other student sees own only", myPayments.status === 200 && myPayments.data.payments.length >= 5 && myPayments.data.payments.every((p) => p.provider_reference) && myPaymentsB.data.payments.length === 0, `A=${myPayments.data.payments?.length} B=${myPaymentsB.data.payments?.length}`);
+
+  // admin follow-up: status transitions
+  const adminWd = await api("/api/admin/withdrawals?status=unresolved", { token: adminToken });
+  check("admin sees the pending withdrawal with fee fields", adminWd.data.withdrawals.some((w) => w.id === wd.data.withdrawalId && Number(w.platform_fee_amount) === expectedFee));
+  const completeNoRef = await api(`/api/admin/withdrawals/${wd.data.withdrawalId}`, { method: "PATCH", token: adminToken, body: { status: "completed" } });
+  check("admin completing without a payout reference -> 400", completeNoRef.status === 400);
+  const studentPatch = await api(`/api/admin/withdrawals/${wd.data.withdrawalId}`, { method: "PATCH", token: tokenA, body: { status: "completed", payoutReference: "X" } });
+  check("student cannot update a withdrawal -> 403", studentPatch.status === 403);
+  const complete = await api(`/api/admin/withdrawals/${wd.data.withdrawalId}`, { method: "PATCH", token: adminToken, body: { status: "completed", payoutReference: "QAB12345XY" } });
+  check("admin marks completed with reference -> 200, processed_at/by recorded", complete.status === 200 && complete.data.withdrawal.status === "completed" && complete.data.withdrawal.payout_reference === "QAB12345XY" && complete.data.withdrawal.processed_at && complete.data.withdrawal.processed_by === adminUser.id, JSON.stringify(complete.data));
+  const flipBack = await api(`/api/admin/withdrawals/${wd.data.withdrawalId}`, { method: "PATCH", token: adminToken, body: { status: "rejected", note: "oops" } });
+  check("completed withdrawal is final -> 409 on any further change", flipBack.status === 409 && flipBack.data.error.code === "WITHDRAWAL_FINAL");
+  const dashAfter = await api("/api/student/withdrawal-status", { token: tokenA });
+  check("withdrawal status after payout: no active budget + latest withdrawal completed", dashAfter.data.reason === "NO_ACTIVE_BUDGET" && dashAfter.data.latestWithdrawal?.status === "completed");
+
+  // ---------- reviews ----------
+  const pubReviewsEmpty = await api(`/api/hotels/${hotelSend.id}/reviews`);
+  check("public reviews: empty summary for a hotel with no reviews", pubReviewsEmpty.status === 200 && pubReviewsEmpty.data.summary.count === 0 && pubReviewsEmpty.data.reviews.length === 0);
+  const meNotEligible = await api(`/api/hotels/${hotelSend.id}/reviews/me`, { token: tokenB });
+  check("student with no redeemed order there -> not eligible", meNotEligible.status === 200 && meNotEligible.data.eligible === false && meNotEligible.data.reason === "NO_REDEEMED_ORDER");
+  const postIneligible = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: tokenB, body: { rating: 5, comment: "fake" } });
+  check("posting without a redeemed order -> 403 REVIEW_NOT_ELIGIBLE", postIneligible.status === 403 && postIneligible.data.error.code === "REVIEW_NOT_ELIGIBLE");
+  const postAnon = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", body: { rating: 5 } });
+  check("posting a review unauthenticated -> 401", postAnon.status === 401);
+  const postAdmin = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: adminToken, body: { rating: 5 } });
+  check("admin posting a review -> 403 (students only)", postAdmin.status === 403);
+  const badRating = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: tokenA, body: { rating: 7 } });
+  check("rating outside 1-5 -> 400", badRating.status === 400);
+  const longComment = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: tokenA, body: { rating: 4, comment: "x".repeat(501) } });
+  check("comment over 500 chars -> 400", longComment.status === 400);
+  const post1 = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: tokenA, body: { rating: 4, comment: "Great ugali, quick service." } });
+  check("eligible student posts review -> 201", post1.status === 201 && post1.data.review.rating === 4, JSON.stringify(post1.data));
+  const post2 = await api(`/api/hotels/${hotelSend.id}/reviews`, { method: "POST", token: tokenA, body: { rating: 5, comment: "Even better the second time." } });
+  const reviewCount = (await q("SELECT count(*)::int AS n FROM hotel_reviews WHERE hotel_id=$1", [hotelSend.id]))[0].n;
+  check("posting again updates the same review (200), never a duplicate row", post2.status === 200 && post2.data.review.rating === 5 && reviewCount === 1, `count=${reviewCount}`);
+  const pubReviews = await api(`/api/hotels/${hotelSend.id}/reviews`);
+  check("public summary: avg 5.0, count 1, reviewer shown as first name + initial, no email", pubReviews.data.summary.average === 5 && pubReviews.data.summary.count === 1 && pubReviews.data.reviews[0].reviewer === "Student A." && !JSON.stringify(pubReviews.data).includes("e2e-a@example.com"), JSON.stringify(pubReviews.data));
+  const hotelsList = await api("/api/hotels");
+  const listed = hotelsList.data.hotels.find((h) => h.id === hotelSend.id);
+  check("hotel list carries average_rating/review_count", listed && Number(listed.average_rating) === 5 && listed.review_count === 1, JSON.stringify(listed && { r: listed.average_rating, c: listed.review_count }));
+  const menuWithRating = await api(`/api/hotels/${hotelSend.id}/menu`);
+  check("hotel menu header carries rating too", Number(menuWithRating.data.hotel.average_rating) === 5 && menuWithRating.data.hotel.review_count === 1);
+  const del = await api(`/api/hotels/${hotelSend.id}/reviews/me`, { method: "DELETE", token: tokenA });
+  const delAgain = await api(`/api/hotels/${hotelSend.id}/reviews/me`, { method: "DELETE", token: tokenA });
+  check("delete own review -> 200, second delete -> 404", del.status === 200 && delAgain.status === 404);
+
+  // ---------- analytics date range + admin transaction ledger ----------
+  const presets = await api("/api/admin/analytics/revenue?days=7", { token: adminToken });
+  check("analytics preset 7d -> 7 daily points, from/to echoed", presets.status === 200 && presets.data.days === 7 && presets.data.daily.length === 7 && presets.data.preset === true && presets.data.from && presets.data.to);
+  const custom = await api("/api/admin/analytics/revenue?from=2026-01-01&to=2026-01-10", { token: adminToken });
+  check("analytics custom range -> inclusive 10 days, window totals present", custom.status === 200 && custom.data.days === 10 && custom.data.daily.length === 10 && custom.data.daily[0].date.startsWith("2026-01-01") && custom.data.window && typeof custom.data.window.gross === "number", JSON.stringify({ days: custom.data.days, n: custom.data.daily?.length, first: custom.data.daily?.[0]?.date }));
+  const badRange = await api("/api/admin/analytics/revenue?from=2026-02-30&to=2026-03-01", { token: adminToken });
+  const reversed = await api("/api/admin/analytics/revenue?from=2026-03-01&to=2026-02-01", { token: adminToken });
+  const tooLong = await api("/api/admin/analytics/revenue?from=2024-01-01&to=2026-01-01", { token: adminToken });
+  check("analytics rejects invalid date, reversed range and >366 days with 400", badRange.status === 400 && reversed.status === 400 && tooLong.status === 400, `${badRange.status}/${reversed.status}/${tooLong.status}`);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const txAll = await api(`/api/admin/transactions?from=${todayStr}&to=${todayStr}`, { token: adminToken });
+  check("admin transactions ledger: today's rows with student + provider ids + totals", txAll.status === 200 && txAll.data.transactions.length >= 5 && txAll.data.transactions.every((t) => t.student_email && t.provider_reference) && Number(txAll.data.totals.count) === txAll.data.transactions.length, `n=${txAll.data.transactions?.length}`);
+  const txFiltered = await api(`/api/admin/transactions?status=success&provider=cyzora&type=plan_boost`, { token: adminToken });
+  check("ledger filters: status+provider+type narrow to the boost row", txFiltered.status === 200 && txFiltered.data.transactions.length === 1 && txFiltered.data.transactions[0].type === "plan_boost", `n=${txFiltered.data.transactions?.length}`);
+  const txSearch = await api(`/api/admin/transactions?search=${encodeURIComponent(ref1)}`, { token: adminToken });
+  check("ledger search by our reference finds exactly that row", txSearch.data.transactions.length === 1 && txSearch.data.transactions[0].provider_reference === ref1);
+  const txBad = await api(`/api/admin/transactions?status=bogus`, { token: adminToken });
+  check("ledger rejects unknown status filter -> 400", txBad.status === 400);
+  const txStudent = await api(`/api/admin/transactions`, { token: tokenA });
+  check("student cannot read the admin ledger -> 403", txStudent.status === 403);
+
   // ---------- regression: unrelated endpoints ----------
   const health = await api("/api/health");
   const hotelsPublic = await api("/api/hotels", { token: tokenA });

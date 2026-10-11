@@ -10,6 +10,8 @@ import {
   getBudget,
   getWithdrawalStatus,
   requestWithdrawal,
+  listMyWithdrawals,
+  listMyPayments,
   transferToNextDay,
   confirmRollover,
   declineRollover,
@@ -34,5 +36,7 @@ studentRouter.post("/budget/rollover/confirm", confirmRollover);
 studentRouter.post("/budget/rollover/decline", declineRollover);
 studentRouter.get("/withdrawal-status", getWithdrawalStatus);
 studentRouter.post("/withdraw", requestWithdrawal);
+studentRouter.get("/withdrawals", listMyWithdrawals);
+studentRouter.get("/payments", listMyPayments);
 // Frozen MVP2 feature — see requestHotelTransfer's own comment.
 studentRouter.post("/hotel-transfer", requestHotelTransfer);

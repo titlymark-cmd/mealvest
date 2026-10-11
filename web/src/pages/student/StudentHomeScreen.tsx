@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Phone, Lock, UtensilsCrossed } from "lucide-react";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Lock, UtensilsCrossed, Wallet, ChevronRight } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { getActiveBudget, transferToNextDay, Budget } from "../../services/budgetApi";
-import { fetchCustomerCarePhone } from "../../services/settingsApi";
+import { getActiveBudget, transferToNextDay, getWithdrawalStatus, Budget, WithdrawalStatus } from "../../services/budgetApi";
 import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
 import { NotificationPermissionBanner } from "../../components/notifications/NotificationPermissionBanner";
@@ -22,14 +21,15 @@ export default function StudentHomeScreen() {
   const [budget, setBudget] = useState<Budget | null>(passedBudget || null);
   const [loading, setLoading] = useState(!passedBudget);
   const [error, setError] = useState<string | null>(null);
-  const [careOpen, setCareOpen] = useState(false);
-  const [carePhone, setCarePhone] = useState<string | null>(null);
+  // Savings = the unspent balance (incl. rollover) that becomes
+  // withdrawable when the plan ends; the server decides locked/unlocked.
+  const [withdrawal, setWithdrawal] = useState<WithdrawalStatus | null>(null);
 
   useEffect(() => {
-    fetchCustomerCarePhone()
-      .then(setCarePhone)
-      .catch(() => setCarePhone(null));
-  }, []);
+    getWithdrawalStatus(authFetch)
+      .then(setWithdrawal)
+      .catch(() => setWithdrawal(null));
+  }, [authFetch]);
 
   const loadBudget = useCallback(async () => {
     try {
@@ -129,34 +129,17 @@ export default function StudentHomeScreen() {
               <div style={styles.notifDot} />
             </button>
           )}
-          <button style={styles.logoutIcon} onClick={() => navigate("/student/orders")}>
+          <button style={styles.logoutIcon} onClick={() => navigate("/student/orders")} aria-label="My orders">
             <Receipt size={16} color={COLORS.primary} />
           </button>
-          <button style={styles.logoutIcon} onClick={() => setCareOpen((v) => !v)} aria-label="Customer Care">
-            <Phone size={16} color={COLORS.primary} />
+          <button style={styles.logoutIcon} onClick={() => navigate("/student/payments")} aria-label="Payments and savings">
+            <Wallet size={16} color={COLORS.primary} />
           </button>
           <button style={styles.logoutIcon} onClick={() => logout()}>
             <LogOut size={18} color={COLORS.danger} />
           </button>
         </div>
       </div>
-
-      {careOpen && (
-        <Card style={styles.careCard}>
-          <span style={styles.careLabel}>CUSTOMER CARE</span>
-          {carePhone ? (
-            <>
-              <span style={styles.carePhone}>{carePhone}</span>
-              <a href={`tel:${carePhone}`} className="mv-action" style={styles.careCallBtn}>
-                <Phone size={14} color="#fff" />
-                <span style={styles.careCallText}>Call now</span>
-              </a>
-            </>
-          ) : (
-            <span style={styles.careUnavailable}>Customer care number is not available right now.</span>
-          )}
-        </Card>
-      )}
 
       {user && <span style={styles.welcome}>Signed in as {user.fullName || user.email}</span>}
 
@@ -226,6 +209,27 @@ export default function StudentHomeScreen() {
             </Card>
           </div>
 
+          <button className="mv-action" style={styles.boostCard} onClick={() => navigate("/student/withdraw")}>
+            <div style={{ ...styles.boostIconCircle, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.primaryLight})` }}>
+              {withdrawal && !withdrawal.locked ? <PiggyBank size={16} color="#fff" /> : <Lock size={16} color="#fff" />}
+            </div>
+            <div style={{ flex: 1, textAlign: "left" }}>
+              <span style={styles.boostTitle}>
+                Savings · KSh {Number(withdrawal?.availableSavings ?? budget.remaining_amount).toLocaleString()}
+              </span>
+              <span style={styles.boostSubtitle}>
+                {withdrawal && !withdrawal.locked
+                  ? `Your plan has ended — withdraw to M-Pesa (MEALVEST fee ${withdrawal.feePercent}%).`
+                  : withdrawal?.reason === "ALREADY_WITHDRAWN"
+                    ? "This plan's savings have been requested."
+                    : `Unspent balance incl. rollover. Withdrawable when your plan ends${
+                        withdrawal?.contractEndDate ? ` on ${new Date(withdrawal.contractEndDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""
+                      }.`}
+              </span>
+            </div>
+            <ChevronRight size={16} color={COLORS.textFaint} />
+          </button>
+
           <button className="mv-action" style={styles.boostCard} onClick={() => navigate("/student/meal-boost")}>
             <div style={styles.boostIconCircle}>
               <Zap size={16} color="#fff" />
@@ -263,6 +267,15 @@ export default function StudentHomeScreen() {
       {!loading && !error && !budget && (
         <Card style={{ marginTop: 20 }}>
           <p style={styles.note}>You don't have an active meal plan yet. Ordering will bring you back through hotel selection to set one up.</p>
+          {withdrawal?.latestWithdrawal && (
+            <p style={{ ...styles.note, marginTop: 10 }}>
+              Your last savings withdrawal of KSh {Number(withdrawal.latestWithdrawal.student_amount).toLocaleString()} is{" "}
+              <strong>{withdrawal.latestWithdrawal.status}</strong>.
+            </p>
+          )}
+          <button onClick={() => navigate("/student/payments")} style={{ marginTop: 12, alignSelf: "center" }}>
+            <span style={{ fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary }}>Payments &amp; savings history</span>
+          </button>
         </Card>
       )}
     </div>
@@ -391,20 +404,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "3px 8px",
     letterSpacing: 0.4,
   },
-  careCard: { marginTop: 14, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8 },
-  careLabel: { fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 700, color: COLORS.textFaint, letterSpacing: 0.6 },
-  carePhone: { fontSize: 18, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text },
-  careCallBtn: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.pill,
-    padding: "9px 16px",
-  },
-  careCallText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12 },
-  careUnavailable: { fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted },
   aiCard: { marginTop: 12, borderRadius: RADIUS.sm, padding: 16, background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})` },
   aiHeader: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   aiHeaderText: { color: "#fff", fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, letterSpacing: 0.5 },

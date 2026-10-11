@@ -7,6 +7,7 @@ import { createBudgetSchema } from "../schemas/budgetSchemas";
 import { updateStudentProfileSchema } from "../schemas/studentSchemas";
 import { ApiError } from "../middleware/errorHandler";
 import { uploadStudentAvatar } from "../services/storageService";
+import { normalizeKenyanPhone } from "../lib/phone";
 
 export async function getStudentProfile(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -153,22 +154,39 @@ export async function getBudget(req: AuthedRequest, res: Response, next: NextFun
  */
 export async function getWithdrawalStatus(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const result = await pool.query(
-      `SELECT b.id, b.remaining_amount, b.end_date, (b.end_date <= CURRENT_DATE) AS contract_ended,
-              EXISTS(SELECT 1 FROM savings_withdrawals w WHERE w.budget_id = b.id) AS already_withdrawn
-       FROM budgets b WHERE b.user_id = $1 AND b.status = 'active' LIMIT 1`,
-      [req.user!.id]
-    );
-    if (result.rows.length === 0) {
-      res.json({ locked: true, reason: "NO_ACTIVE_BUDGET" });
+    const feePercent = await budgetService.getWithdrawalFeePercent();
+    const [active, latest] = await Promise.all([
+      pool.query(
+        `SELECT b.id, b.remaining_amount, b.end_date, (b.end_date <= CURRENT_DATE) AS contract_ended,
+                EXISTS(SELECT 1 FROM savings_withdrawals w WHERE w.budget_id = b.id) AS already_withdrawn
+         FROM budgets b WHERE b.user_id = $1 AND b.status = 'active' LIMIT 1`,
+        [req.user!.id]
+      ),
+      pool.query(
+        `SELECT id, gross_savings, student_amount, platform_fee_percent, platform_fee_amount, payout_method,
+                payout_destination, status, created_at, processed_at, payout_reference
+         FROM savings_withdrawals WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [req.user!.id]
+      ),
+    ]);
+    const latestWithdrawal = latest.rows[0] ?? null;
+
+    if (active.rows.length === 0) {
+      res.json({ locked: true, reason: "NO_ACTIVE_BUDGET", feePercent, latestWithdrawal });
       return;
     }
-    const row = result.rows[0];
+    const row = active.rows[0];
+    const gross = Number(row.remaining_amount);
+    const split = budgetService.computeWithdrawalSplit(gross, feePercent);
     res.json({
       locked: !row.contract_ended || row.already_withdrawn,
       contractEndDate: row.end_date,
       availableSavings: row.remaining_amount,
+      feePercent,
+      feeAmount: split.feeAmount,
+      netAmount: split.studentAmount,
       reason: row.already_withdrawn ? "ALREADY_WITHDRAWN" : row.contract_ended ? null : "CONTRACT_ACTIVE",
+      latestWithdrawal,
     });
   } catch (err) {
     next(err);
@@ -178,6 +196,9 @@ export async function getWithdrawalStatus(req: AuthedRequest, res: Response, nex
 const withdrawSchema = z.object({
   payoutMethod: z.enum(["mpesa", "bank"]),
   payoutDestination: z.string().trim().min(3).max(40),
+  // Same backend-authoritative acknowledgement pattern as plan creation:
+  // the student must have been shown the fee breakdown and agreed.
+  acceptFee: z.literal(true, { errorMap: () => ({ message: "Please confirm you understand the withdrawal fee." }) }),
 });
 
 export async function requestWithdrawal(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -186,12 +207,61 @@ export async function requestWithdrawal(req: AuthedRequest, res: Response, next:
     if (!parsed.success) {
       throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
     }
+    let destination = parsed.data.payoutDestination;
+    if (parsed.data.payoutMethod === "mpesa") {
+      const normalized = normalizeKenyanPhone(destination);
+      if (!normalized) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan M-Pesa number.");
+      destination = normalized;
+    }
     const result = await budgetService.withdrawSavings({
       userId: req.user!.id,
       payoutMethod: parsed.data.payoutMethod,
-      payoutDestination: parsed.data.payoutDestination,
+      payoutDestination: destination,
     });
     res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /api/student/withdrawals — the student's own withdrawal history, newest first. */
+export async function listMyWithdrawals(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await pool.query(
+      `SELECT w.id, w.gross_savings, w.student_amount, w.platform_fee_percent, w.platform_fee_amount,
+              w.hotel_incentive_amount, w.payout_method, w.payout_destination, w.status, w.created_at,
+              w.processed_at, w.payout_reference, h.name AS hotel_name
+       FROM savings_withdrawals w
+       LEFT JOIN hotels h ON h.id = w.hotel_id
+       WHERE w.user_id = $1
+       ORDER BY w.created_at DESC LIMIT 50`,
+      [req.user!.id]
+    );
+    res.json({ withdrawals: result.rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/student/payments — the student's own payment ledger: every
+ * plan payment / boost attempt (transactions table) with its provider
+ * reference and outcome. Read-only, their own rows only; the status
+ * shown is what the ledger holds (set only by verify/webhook), never
+ * anything derived client-side.
+ */
+export async function listMyPayments(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await pool.query(
+      `SELECT t.id, t.type, t.amount, t.status, t.provider, t.provider_reference, t.provider_channel,
+              t.number_of_days, t.result_description, t.created_at, t.updated_at, h.name AS hotel_name
+       FROM transactions t
+       LEFT JOIN hotels h ON h.id = t.hotel_id
+       WHERE t.user_id = $1
+       ORDER BY t.created_at DESC LIMIT 100`,
+      [req.user!.id]
+    );
+    res.json({ payments: result.rows });
   } catch (err) {
     next(err);
   }

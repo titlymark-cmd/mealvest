@@ -10,6 +10,8 @@ import OrderHistoryScreen from "../pages/student/OrderHistoryScreen";
 import MealBoostScreen from "../pages/student/MealBoostScreen";
 import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
+import WithdrawSavingsScreen from "../pages/student/WithdrawSavingsScreen";
+import StudentPaymentsScreen from "../pages/student/StudentPaymentsScreen";
 import { StudentSidebar, STUDENT_MOBILE_BREAKPOINT, STUDENT_SIDEBAR_WIDTH } from "../components/student/StudentSidebar";
 import { NotificationBell } from "../components/notifications/NotificationBell";
 import { ComingSoonBadge } from "../components/ComingSoonBadge";
@@ -103,6 +105,8 @@ export function StudentRoutes() {
       <Route path="/student/meal-pass" element={<MealPassScreen />} />
       <Route path="/student/orders" element={<OrderHistoryScreen />} />
       <Route path="/student/meal-boost" element={<MealBoostScreen />} />
+      <Route path="/student/withdraw" element={<WithdrawSavingsScreen />} />
+      <Route path="/student/payments" element={<StudentPaymentsScreen />} />
       <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
       <Route path="*" element={<Navigate to="/student" replace />} />
     </Routes>

@@ -432,7 +432,9 @@ error regression (malformed JSON → 400). `tests/setup.ts` supplies
 throwaway env values so no `.env` is needed.
 
 End-to-end against a **mock** Cyzora (real server, disposable local
-Postgres, 70+ HTTP scenarios, no real API, no money):
+Postgres, 100+ HTTP scenarios covering payments, webhooks, payouts,
+savings withdrawals with the MEALVEST fee, hotel reviews, analytics
+date ranges and the admin payment ledger; no real API, no money):
 
 ```bash
 cd server

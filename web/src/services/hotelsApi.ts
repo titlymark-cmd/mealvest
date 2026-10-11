@@ -14,6 +14,8 @@ export interface Hotel {
   image_url?: string | null;
   description?: string | null;
   distance_km?: number;
+  review_count?: number;
+  average_rating?: string | number | null;
 }
 
 export interface MenuItem {
@@ -67,4 +69,68 @@ export async function fetchNearbyHotels(
     throw new Error(data?.error?.message || "Could not find hotels near you.");
   }
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+export interface HotelReview {
+  id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+  updated_at: string;
+  reviewer: string;
+}
+
+export interface HotelReviewSummary {
+  count: number;
+  average: number;
+  distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+}
+
+export async function fetchHotelReviews(hotelId: string): Promise<{ summary: HotelReviewSummary; reviews: HotelReview[] }> {
+  const res = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}/reviews`);
+  if (!res.ok) throw new Error("Could not load reviews.");
+  return res.json();
+}
+
+type AuthFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export interface MyHotelReview {
+  eligible: boolean;
+  reason: "NO_REDEEMED_ORDER" | null;
+  review: { id: string; rating: number; comment: string | null; created_at: string; updated_at: string } | null;
+}
+
+/** Whether the signed-in student may review this hotel (needs a redeemed order there) and their existing review, if any. */
+export async function fetchMyHotelReview(authFetch: AuthFetch, hotelId: string): Promise<MyHotelReview> {
+  const res = await authFetch(`/api/hotels/${hotelId}/reviews/me`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || "Could not load your review.");
+  return data;
+}
+
+export async function submitHotelReview(
+  authFetch: AuthFetch,
+  hotelId: string,
+  input: { rating: number; comment?: string | null }
+): Promise<MyHotelReview["review"]> {
+  const res = await authFetch(`/api/hotels/${hotelId}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || "Could not save your review.");
+  return data.review;
+}
+
+export async function deleteMyHotelReview(authFetch: AuthFetch, hotelId: string): Promise<void> {
+  const res = await authFetch(`/api/hotels/${hotelId}/reviews/me`, { method: "DELETE" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error?.message || "Could not remove your review.");
+  }
 }

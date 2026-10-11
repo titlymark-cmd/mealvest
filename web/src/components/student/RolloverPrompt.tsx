@@ -48,7 +48,7 @@ export function RolloverPrompt({ budget, onResolved }: { budget: Budget; onResol
 
         <div style={styles.lockedRow}>
           <Lock size={12} color={COLORS.textFaint} />
-          <span style={styles.lockedText}>Savings — not operating yet</span>
+          <span style={styles.lockedText}>Carried-over balance you don't eat becomes withdrawable savings when your plan ends</span>
         </div>
 
         <button onClick={confirm} disabled={busy !== null} style={styles.confirmBtn}>

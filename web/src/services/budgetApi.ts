@@ -86,3 +86,83 @@ export async function declineRollover(
   if (!res.ok) throw new Error(data?.error?.message || "Could not decline the carry-over.");
   return data.budget;
 }
+
+// ---------------------------------------------------------------------------
+// Savings withdrawal (unspent plan balance, incl. rollover, after plan end)
+// ---------------------------------------------------------------------------
+
+export interface WithdrawalRecord {
+  id: string;
+  gross_savings: string;
+  student_amount: string;
+  platform_fee_percent: string;
+  platform_fee_amount: string;
+  hotel_incentive_amount?: string;
+  payout_method: "mpesa" | "bank" | null;
+  payout_destination: string | null;
+  status: "pending" | "processing" | "completed" | "failed" | "rejected";
+  created_at: string;
+  processed_at: string | null;
+  payout_reference: string | null;
+  hotel_name?: string | null;
+}
+
+export interface WithdrawalStatus {
+  locked: boolean;
+  reason: "NO_ACTIVE_BUDGET" | "CONTRACT_ACTIVE" | "ALREADY_WITHDRAWN" | null;
+  contractEndDate?: string;
+  availableSavings?: string;
+  feePercent: number;
+  feeAmount?: number;
+  netAmount?: number;
+  latestWithdrawal: WithdrawalRecord | null;
+}
+
+/** Read-only mirror of the server's withdrawal lock — the real check happens again inside POST /student/withdraw. */
+export async function getWithdrawalStatus(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<WithdrawalStatus> {
+  const res = await authFetch("/api/student/withdrawal-status");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "Could not load your savings status.");
+  return data;
+}
+
+export interface WithdrawalResult {
+  withdrawalId: string;
+  gross_savings: number;
+  platform_fee_percent: number;
+  platform_fee_amount: number;
+  student_amount: number;
+  status: string;
+}
+
+/**
+ * Requests the payout of an ENDED plan's unspent balance to the given
+ * M-Pesa number. MEALVEST's fee (10% by default) is deducted
+ * server-side and shown back in the result; the plan is closed. The
+ * actual M-Pesa send is completed by MEALVEST and the status moves to
+ * "completed" once it has gone out.
+ */
+export async function requestWithdrawal(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>,
+  input: { payoutMethod: "mpesa"; payoutDestination: string; acceptFee: true }
+): Promise<WithdrawalResult> {
+  const res = await authFetch("/api/student/withdraw", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "Could not request your withdrawal.");
+  return data;
+}
+
+export async function listMyWithdrawals(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<WithdrawalRecord[]> {
+  const res = await authFetch("/api/student/withdrawals");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error?.message || "Could not load your withdrawals.");
+  return data.withdrawals;
+}

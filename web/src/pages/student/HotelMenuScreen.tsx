@@ -7,6 +7,7 @@ import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { badgeColorFor } from "../../components/shared/format";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { fetchHotelMenu, Hotel, MenuItem } from "../../services/hotelsApi";
+import { HotelReviews, RatingBadge } from "../../components/student/HotelReviews";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -107,6 +108,11 @@ export default function HotelMenuScreen() {
             <span style={styles.locationText}>{hotel.location}</span>
           </div>
         )}
+        {hotel && (
+          <div style={{ marginTop: 6 }}>
+            <RatingBadge average={hotel.average_rating} count={hotel.review_count} onDark />
+          </div>
+        )}
       </div>
 
       <p style={styles.subtitle}>Take a look at their menu before you commit to a plan.</p>
@@ -150,6 +156,10 @@ export default function HotelMenuScreen() {
           ))}
         </div>
       )}
+
+      <div style={{ paddingLeft: 20, paddingRight: 20 }}>
+        <HotelReviews hotelId={hotelId} />
+      </div>
 
       <button
         className="mv-action"

@@ -113,3 +113,25 @@ export async function getPaymentStatus(
   const res = await authFetch(`/api/payments/${reference}/status`);
   return parseOrError(res, "Could not check payment status.");
 }
+
+export interface StudentPayment {
+  id: string;
+  type: "budget_topup" | "plan_boost" | "order_payment" | "refund";
+  amount: string;
+  status: "pending" | "processing" | "success" | "failed" | "cancelled" | "expired" | "refunded";
+  provider: PaymentProviderName | "daraja";
+  provider_reference: string | null;
+  provider_channel: "stk_push" | "hosted_checkout" | null;
+  number_of_days: number | null;
+  result_description: string | null;
+  created_at: string;
+  updated_at: string;
+  hotel_name: string | null;
+}
+
+/** The student's own payment ledger — every plan payment and boost attempt, with the outcome the server recorded. */
+export async function listMyPayments(authFetch: AuthFetch): Promise<StudentPayment[]> {
+  const res = await authFetch("/api/student/payments");
+  const data = await parseOrError<{ payments: StudentPayment[] }>(res, "Could not load your payments.");
+  return data.payments;
+}

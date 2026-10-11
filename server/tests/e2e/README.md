@@ -53,6 +53,11 @@ Optional knobs: `E2E_API_PORT` (default 4100), `E2E_MOCK_PORT` (default
 
 ## Known expectations
 
+- The script refuses to start if anything already answers on the API or
+  mock port, and kills both servers' whole process groups on exit. If a
+  run was interrupted hard, find the leftover with
+  `pgrep -f "tsx src/index.ts"` and stop it, or pick other ports.
+
 - Migration `039_student_avatars.sql` inserts into Supabase's
   `storage.buckets`, which plain Postgres lacks. `run-e2e.sh` detects that
   single failure, applies the portable part (`students.avatar_url`) by hand,

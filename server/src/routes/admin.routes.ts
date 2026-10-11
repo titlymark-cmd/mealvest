@@ -17,6 +17,8 @@ import {
   getHotelDetail,
   deleteHotel,
   getRevenueAnalytics,
+  listTransactions,
+  updateWithdrawalStatus,
 } from "../controllers/admin.controller";
 import { updateCustomerCarePhone } from "../controllers/settings.controller";
 import {
@@ -54,6 +56,8 @@ adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
 adminRouter.get("/orders", listAllOrders);
 adminRouter.get("/withdrawals", listWithdrawals);
+adminRouter.patch("/withdrawals/:withdrawalId", financialActionRateLimiter, updateWithdrawalStatus);
+adminRouter.get("/transactions", listTransactions);
 adminRouter.patch("/settings/customer-care", updateCustomerCarePhone);
 adminRouter.get("/announcements", listAnnouncements);
 adminRouter.post("/announcements", createAnnouncement);

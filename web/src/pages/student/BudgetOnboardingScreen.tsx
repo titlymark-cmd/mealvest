@@ -15,7 +15,7 @@ const DISCLAIMER_TEXT =
   "Before you continue, please understand:\n\n" +
   "• Money committed to your Mealvest plan is intended for meals during the selected plan period.\n" +
   "• Committed funds are not immediately withdrawable or refundable before the plan period ends, except where a supported cancellation policy applies.\n" +
-  "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over to the next day. (A Savings option is coming soon.)\n" +
+  "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over to the next day. Whatever is still unspent when your plan ends becomes savings you can withdraw to M-Pesa, less a 10% MEALVEST fee.\n" +
   "• Please review your amount, days, and hotel before confirming.";
 
 type Stage = "form" | "awaiting_stk" | "success" | "error";
@@ -274,6 +274,9 @@ export default function BudgetOnboardingScreen() {
       <Card style={styles.disclaimerCard}>
         <span style={styles.disclaimerTitle}>IMPORTANT MEALVEST TERMS</span>
         <p style={styles.disclaimerBody}>{DISCLAIMER_TEXT}</p>
+        <a href="/terms?section=payments" target="_blank" rel="noreferrer" style={styles.disclaimerLink}>
+          Read the full terms, payments &amp; savings policy
+        </a>
       </Card>
 
       <button style={styles.checkboxRow} onClick={() => setTermsAccepted((v) => !v)}>
@@ -381,6 +384,7 @@ const styles: Record<string, React.CSSProperties> = {
   error: { color: COLORS.danger, fontSize: 13, marginTop: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, textAlign: "center" },
   disclaimerCard: { marginTop: 22, backgroundColor: COLORS.accentSoft, borderColor: "#F4C79E", display: "flex", flexDirection: "column" },
   disclaimerTitle: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#8A4416", letterSpacing: 0.5, marginBottom: 8 },
+  disclaimerLink: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#8A4416", marginTop: 8, textDecoration: "underline" },
   disclaimerBody: { fontFamily: FONTS.body, fontSize: 12, color: "#6B4A08", lineHeight: "18px", margin: 0, whiteSpace: "pre-line" },
   checkboxRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 14, textAlign: "left" },
   checkbox: {

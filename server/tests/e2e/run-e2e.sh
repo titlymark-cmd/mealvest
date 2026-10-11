@@ -80,14 +80,35 @@ if ! DATABASE_URL="$DB" npm run --silent migrate > "$LOG_DIR/migrate.log" 2>&1; 
 fi
 grep -E '^(apply|Applied)' "$LOG_DIR/migrate.log" | tail -3
 
+# Each child runs in its own process group (setsid) so cleanup can kill
+# the whole tree — `npx tsx` spawns a grandchild node process that would
+# otherwise outlive the script, keep the port, and poison the next run
+# with its rate-limit counters and stale DB state.
 cleanup() {
-  [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
-  [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null || true
+  for pid in "${SERVER_PID:-}" "${MOCK_PID:-}"; do
+    [[ -n "$pid" ]] || continue
+    # children first (tsx's node grandchild), then the group, then the pid itself
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill -- "-$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  done
+  # Belt and braces: node processes still running our exact server/mock
+  # command lines (anchored to ^node so a shell whose command line merely
+  # mentions these paths is never matched).
+  pkill -f "^node .*node_modules/\.bin/tsx src/index\.ts" 2>/dev/null || true
+  pkill -f "^node .*tests/e2e/mock-cyzora\.js" 2>/dev/null || true
 }
 trap cleanup EXIT
 
+for port in "$API_PORT" "$MOCK_PORT"; do
+  if curl -sf "http://127.0.0.1:$port/" >/dev/null 2>&1 || curl -s -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+    echo "Refusing: something is already listening on 127.0.0.1:$port (a previous run still alive?). Stop it or set E2E_API_PORT/E2E_MOCK_PORT." >&2
+    exit 2
+  fi
+done
+
 echo "==> Starting mock Cyzora on :$MOCK_PORT"
-MOCK_PORT="$MOCK_PORT" MOCK_API_KEY="sk_test_e2e_key" node "$HERE/mock-cyzora.js" > "$LOG_DIR/mock.log" 2>&1 &
+MOCK_PORT="$MOCK_PORT" MOCK_API_KEY="sk_test_e2e_key" setsid node "$HERE/mock-cyzora.js" > "$LOG_DIR/mock.log" 2>&1 &
 MOCK_PID=$!
 
 echo "==> Starting API server on :$API_PORT (test key, mock Cyzora, local DB)"
@@ -99,7 +120,7 @@ CYZORA_SECRET_KEY=sk_test_e2e_key CYZORA_WEBHOOK_SECRET=whsec_e2e_secret \
 CYZORA_BASE_URL="http://127.0.0.1:$MOCK_PORT" \
 APP_BASE_URL=http://localhost:3000 ALLOWED_ORIGINS=http://localhost:3000 \
 NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
-  npx tsx src/index.ts > "$LOG_DIR/server.log" 2>&1 &
+  setsid node_modules/.bin/tsx src/index.ts > "$LOG_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 120); do

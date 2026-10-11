@@ -13,6 +13,7 @@ import { AnnouncementPopup } from "../components/AnnouncementPopup";
 import InstallScreen from "../pages/InstallScreen";
 import DemoScreen from "../pages/demo/DemoScreen";
 import { PinGateScreen } from "../pages/PinGateScreen";
+import TermsScreen from "../pages/TermsScreen";
 
 /**
  * /install is matched here, before anything else in the app — no
@@ -27,6 +28,9 @@ export function RootGate() {
     <Routes>
       <Route path="/install" element={<InstallScreen />} />
       <Route path="/demo" element={<DemoScreen />} />
+      {/* Public, same as /install: readable before registering, from the
+          plan disclaimer, and from the withdrawal screen while signed in. */}
+      <Route path="/terms" element={<TermsScreen />} />
       <Route path="*" element={<AuthGatedApp />} />
     </Routes>
   );
