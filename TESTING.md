@@ -404,13 +404,15 @@ the provider stored on the row.
 > **Documentation caveat.** The integration was written from the
 > Cyzora facts summarised in the project brief (endpoints, auth
 > header, cents, statuses, webhook events, signature scheme, test
-> numbers). The live docs site could not be fetched from the build
-> environment, so a few *response/payload field names* are tolerant
-> assumptions that the first test run should confirm — they're listed
-> under "Confirm against the docs" below. Nothing is marked paid unless
-> Cyzora's own verify endpoint reports `succeeded` **and** the amount
-> matches, so a wrong field name fails closed (payment stays
-> pending/flagged), never open.
+> numbers). The live docs site (https://docs.cyzora.co.ke) could not
+> be fetched from the build environment, so a few *response/payload
+> field names* are tolerant assumptions that the first test run should
+> confirm — they're listed under "Confirm against the docs" below.
+> Nothing is marked paid unless Cyzora's own verify endpoint reports
+> `succeeded` **and** the amount matches, so a wrong field name fails
+> closed (payment stays pending/flagged), never open. Before the first
+> real request, read the docs' "Charges", "Transactions/Checkout",
+> "Webhooks" and "Payouts" pages against that list.
 
 Automated (no live network, no database):
 
@@ -420,13 +422,27 @@ npm install
 npm test
 ```
 
-Runs `tests/cyzora.test.ts` alongside `tests/payments.test.ts`:
-webhook signature accept/reject on raw bytes (missing header, wrong
-secret, tampered body, wrong length, upper-case hex), event-envelope
-parsing, charge/payout status mapping, KES↔cents conversion, redirect
-URL rules, error mapping, and settlement-method → payout-destination
-mapping. `tests/setup.ts` supplies throwaway env values so no `.env`
-is needed.
+Runs `tests/cyzora.test.ts` alongside `tests/payments.test.ts` and
+`tests/errorHandler.test.ts`: webhook signature accept/reject on raw
+bytes (missing header, wrong secret, tampered body, wrong length,
+upper-case hex), event-envelope parsing, charge/payout status mapping,
+KES↔cents conversion, redirect URL rules, error mapping,
+settlement-method → payout-destination mapping, and the body-parser
+error regression (malformed JSON → 400). `tests/setup.ts` supplies
+throwaway env values so no `.env` is needed.
+
+End-to-end against a **mock** Cyzora (real server, disposable local
+Postgres, 70+ HTTP scenarios, no real API, no money):
+
+```bash
+cd server
+E2E_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/mealvest_e2e npm run test:e2e
+```
+
+See `tests/e2e/README.md` for the one-line Docker Postgres setup, the
+safety rails (refuses non-local or Supabase databases, always uses a
+fake `sk_test_` key against the mock) and what the suite does and does
+not prove.
 
 ### 1. Keys and secrets (Cyzora dashboard)
 
@@ -441,18 +457,27 @@ is needed.
    checkout `callback_url`/`cancel_url` must be https — plain http is
    only accepted for localhost.
 
-Into `server/.env`:
+Environment variables (all read in `server/src/config/env.ts`; all are
+**server-side only** — nothing Cyzora-related is ever read by the
+`web/` bundle, which only sees `REACT_APP_*`):
 
-```
-PAYMENT_PROVIDER_DEFAULT=cyzora
-CYZORA_SECRET_KEY=sk_test_xxxxxxxxxxxx
-CYZORA_WEBHOOK_SECRET=whsec_xxxxxxxxxxxx
-CYZORA_BASE_URL=https://api.cyzora.co.ke/api/v1
-APP_BASE_URL=http://localhost:3000      # where the CRA frontend runs locally
-```
+| Variable | Secret? | Local dev (`server/.env`) | Vercel (Environment Variables) | Notes |
+|---|---|---|---|---|
+| `PAYMENT_PROVIDER_DEFAULT` | no | `cyzora` | `cyzora` | Routes NEW payments/payouts to Cyzora; existing Paystack rows keep verifying against Paystack. Unset/`paystack` = previous behaviour. |
+| `CYZORA_SECRET_KEY` | **yes** | `sk_test_…` | `sk_test_…` now, `sk_live_…` only with `NODE_ENV=production` | Sent as `X-API-Key`. Test mode is selected by the key prefix — there is no separate test base URL in the Cyzora facts this was built from. |
+| `CYZORA_WEBHOOK_SECRET` | **yes** | `whsec_…` for the ngrok endpoint | `whsec_…` for the Vercel endpoint | One signing secret per registered webhook endpoint, so local and deployed endpoints have different values. Whether Cyzora also separates test-mode and live-mode secrets for the SAME endpoint is not in the facts — check the Webhooks page; the code handles either way, because `livemode` is checked on every event. |
+| `CYZORA_BASE_URL` | no | leave unset (default `https://api.cyzora.co.ke/api/v1`) | leave unset | Only the e2e harness overrides it (to the mock). |
+| `APP_BASE_URL` | no | `http://localhost:3000` | `https://<your-project>.vercel.app` | Builds hosted-checkout `callback_url`/`cancel_url`. Must be https except localhost. If unset, derived from the request's Origin (when in `ALLOWED_ORIGINS`) or protocol/host. |
+| `ALLOWED_ORIGINS` | no | `http://localhost:3000` | your Vercel origin | Existing variable — also what the Origin-derived callback URL is checked against. |
+
+Nothing else is needed: Cyzora's `pk_…` public key is not used (the
+server creates checkout sessions itself), and the live DB already has
+migration 040 applied (verified against Supabase on 2026-10-11, with
+`schema_migrations` brought in sync for 036–040).
 
 Never paste an `sk_live_…` key while `NODE_ENV` isn't `production` —
-`env.ts` refuses to boot, same guard as Paystack.
+`env.ts` refuses to boot, same guard as Paystack. Never put any of the
+secret values in chat, a commit, `web/`, or `.env.example`.
 
 ### 2. Migrate and run
 
@@ -473,6 +498,32 @@ Webhooks page (step 1.2) and put that endpoint's `whsec_` into
 server log should show `Cyzora webhook.test received` and the dashboard
 a `200`. A wrong secret gets a `401` — that's the signature check
 working, not a transport problem.
+
+### 3b. Deployment checks (no payment, no API key needed)
+
+Before any charge, prove the deployed webhook route end to end with
+the probe script — it only sends `webhook.test` events:
+
+```bash
+cd server
+CYZORA_WEBHOOK_SECRET=whsec_… tests/e2e/send-test-webhook.sh https://<your-project>.vercel.app/api/webhooks/cyzora
+```
+
+| Request | Expected | Proves |
+|---|---|---|
+| no `X-Cyzora-Signature` | `401` | Vercel's `/api/(.*)` rewrite reaches the Express handler, and `express.json()` did not swallow the raw route |
+| wrong signature | `401` | HMAC check is live |
+| correctly signed `webhook.test` | `200 {"received":true}` | the deployed runtime passed the handler the exact raw bytes — a real Cyzora delivery will verify |
+
+A `500 WEBHOOK_BODY_NOT_RAW` on the third request would mean the
+deployed runtime pre-parsed the body before Express saw it. That is
+the one deployment-specific risk the code can't rule out from a local
+run (the Paystack webhook shares it). Fix if it ever happens: keep the
+body raw at the Vercel layer (e.g. disable body parsing for the
+function) — do not weaken the signature check.
+
+Then press **Send test** on the Cyzora Webhooks page: the dashboard
+should show `200` and the server log `Cyzora webhook.test received`.
 
 ### 4. Test phone numbers (test mode, no real money)
 

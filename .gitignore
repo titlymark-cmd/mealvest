@@ -45,3 +45,6 @@ Thumbs.db
 
 # Test/coverage output
 coverage/
+
+# End-to-end harness logs (server/tests/e2e/run-e2e.sh)
+server/tests/e2e/.logs/
