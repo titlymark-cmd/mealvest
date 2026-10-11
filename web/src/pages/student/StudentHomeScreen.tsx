@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Lock, UtensilsCrossed, Wallet, ChevronRight } from "lucide-react";
+import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Lock, UtensilsCrossed, Wallet, ChevronRight, Phone } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { getActiveBudget, transferToNextDay, getWithdrawalStatus, Budget, WithdrawalStatus } from "../../services/budgetApi";
+import { fetchCustomerCarePhone } from "../../services/settingsApi";
 import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
 import { NotificationPermissionBanner } from "../../components/notifications/NotificationPermissionBanner";
@@ -24,6 +25,15 @@ export default function StudentHomeScreen() {
   // Savings = the unspent balance (incl. rollover) that becomes
   // withdrawable when the plan ends; the server decides locked/unlocked.
   const [withdrawal, setWithdrawal] = useState<WithdrawalStatus | null>(null);
+  // Customer care is a single tap-to-call icon: the number itself is
+  // never shown, the tel: link opens the phone app with it pre-filled.
+  const [carePhone, setCarePhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCustomerCarePhone()
+      .then(setCarePhone)
+      .catch(() => setCarePhone(null));
+  }, []);
 
   useEffect(() => {
     getWithdrawalStatus(authFetch)
@@ -135,6 +145,11 @@ export default function StudentHomeScreen() {
           <button style={styles.logoutIcon} onClick={() => navigate("/student/payments")} aria-label="Payments and savings">
             <Wallet size={16} color={COLORS.primary} />
           </button>
+          {carePhone && (
+            <a href={`tel:${carePhone.replace(/\s+/g, "")}`} style={styles.logoutIcon} aria-label="Call customer care" title="Call customer care">
+              <Phone size={16} color={COLORS.primary} />
+            </a>
+          )}
           <button style={styles.logoutIcon} onClick={() => logout()}>
             <LogOut size={18} color={COLORS.danger} />
           </button>
