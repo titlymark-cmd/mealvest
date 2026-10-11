@@ -8,7 +8,7 @@ export interface HotelPayoutRow {
   provider: string;
   transfer_reference: string;
   recipient_code: string | null;
-  transfer_code: string | null;
+  transfer_code: string | null; // Paystack transfer code, or Cyzora's payout id (what payout.* webhooks are matched on)
   failure_reason: string | null;
   initiated_by_admin_id: string | null;
   created_at: string;
@@ -65,7 +65,8 @@ export async function saveRecipientCode(hotelId: string, recipientCode: string):
 export async function claimPendingOrdersForPayout(
   hotelId: string,
   transferReference: string,
-  initiatedByAdminId: string
+  initiatedByAdminId: string,
+  provider: "paystack" | "cyzora" = "paystack"
 ): Promise<HotelPayoutRow | null> {
   const client = await pool.connect();
   try {
@@ -84,9 +85,9 @@ export async function claimPendingOrdersForPayout(
     const orderIds = ordersResult.rows.map((row) => row.id);
 
     const payoutResult = await client.query<HotelPayoutRow>(
-      `INSERT INTO hotel_payouts (hotel_id, amount, transfer_reference, initiated_by_admin_id)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [hotelId, total, transferReference, initiatedByAdminId]
+      `INSERT INTO hotel_payouts (hotel_id, amount, transfer_reference, initiated_by_admin_id, provider)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [hotelId, total, transferReference, initiatedByAdminId, provider]
     );
     const payout = payoutResult.rows[0];
 
@@ -124,6 +125,15 @@ export async function getPayoutByReference(transferReference: string): Promise<H
   const result = await pool.query<HotelPayoutRow>("SELECT * FROM hotel_payouts WHERE transfer_reference = $1", [
     transferReference,
   ]);
+  return result.rows[0] ?? null;
+}
+
+/** Reverse lookup by the PROVIDER's own payout id (transfer_code) — how a Cyzora payout.* webhook finds its row (index from migration 040). */
+export async function getPayoutByProviderId(provider: string, providerPayoutId: string): Promise<HotelPayoutRow | null> {
+  const result = await pool.query<HotelPayoutRow>(
+    "SELECT * FROM hotel_payouts WHERE provider = $1 AND transfer_code = $2",
+    [provider, providerPayoutId]
+  );
   return result.rows[0] ?? null;
 }
 

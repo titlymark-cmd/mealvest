@@ -13,6 +13,8 @@ export interface HotelPendingBalance {
   payment_details: Record<string, unknown> | null;
   pending_amount: string;
   pending_order_count: string;
+  /** Decided server-side for the ACTIVE payout provider (Paystack vs Cyzora automate different settlement methods). */
+  payout_supported?: boolean;
 }
 
 export interface HotelPayout {

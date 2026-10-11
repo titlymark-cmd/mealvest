@@ -10,7 +10,7 @@
     "migrate": "node scripts/migrate.js",
     "seed:admin": "node scripts/seedAdmin.js",
     "seed:demo": "node scripts/seedDemoData.js",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "test": "node --import tsx --import ./tests/setup.ts --test tests/**/*.test.ts"
   },
   "dependencies": {
     "axios": "^1.7.7",

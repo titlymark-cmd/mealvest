@@ -65,7 +65,34 @@ export const env = {
   paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || "",
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
+  // Which provider the generic /api/payments/initialize, /boost/initialize
+  // and admin payout endpoints use for NEW payments/payouts: "paystack"
+  // (default, unchanged behaviour) or "cyzora". Verification of an
+  // existing payment always follows the provider recorded on its own
+  // transactions row, so flipping this never strands an in-flight payment.
   paymentProviderDefault: process.env.PAYMENT_PROVIDER_DEFAULT || "paystack",
+
+  // -----------------------------------------------------------------
+  // Cyzora — Kenyan M-Pesa payments API (STK push, hosted checkout,
+  // payouts). Same "not in REQUIRED_VARS" reasoning as Paystack: the
+  // Cyzora routes check for these themselves and return a clear error
+  // if unset. The SECRET key (sk_test_/sk_live_) is sent as X-API-Key
+  // from server code only — never to the browser. The webhook secret
+  // (whsec_...) is a different value, from the dashboard's Webhooks
+  // page, used only to HMAC-verify incoming webhook bodies. Cyzora's
+  // public key (pk_...) only identifies the business to its hosted
+  // checkout page and isn't needed server-side, so it isn't read here.
+  // -----------------------------------------------------------------
+  cyzoraSecretKey: process.env.CYZORA_SECRET_KEY || "",
+  cyzoraWebhookSecret: process.env.CYZORA_WEBHOOK_SECRET || "",
+  cyzoraBaseUrl: process.env.CYZORA_BASE_URL || "https://api.cyzora.co.ke/api/v1",
+
+  // Public origin of the deployed app (e.g. https://mealvest.vercel.app),
+  // used to build hosted-checkout callback_url/cancel_url. Optional:
+  // when unset the controller derives it from the incoming request's
+  // own protocol/host (see app.set("trust proxy") in app.ts). Cyzora
+  // requires https here (plain http only for localhost).
+  appBaseUrl: (process.env.APP_BASE_URL || "").replace(/\/+$/, ""),
 
   // -----------------------------------------------------------------
   // Supabase Storage — used ONLY for hotel/meal image uploads (see
@@ -149,6 +176,14 @@ export const env = {
 // production environment is almost always a mistake (someone pasted
 // the wrong key into local .env) and it's cheap to catch here before
 // it ever gets a chance to move real money.
+if (env.cyzoraSecretKey.startsWith("sk_live_") && !env.isProduction) {
+  throw new Error(
+    "CYZORA_SECRET_KEY looks like a LIVE secret key (sk_live_...) but NODE_ENV is not " +
+      "'production'. Refusing to start — use a TEST key (sk_test_...) for local/staging, " +
+      "or set NODE_ENV=production if this is genuinely production."
+  );
+}
+
 if (env.paystackSecretKey.startsWith("sk_live_") && !env.isProduction) {
   throw new Error(
     "PAYSTACK_SECRET_KEY looks like a LIVE secret key (sk_live_...) but NODE_ENV is not " +

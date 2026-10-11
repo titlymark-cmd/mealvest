@@ -391,6 +391,235 @@ against `PAYSTACK_SECRET_KEY` before trusting anything in the body.
 
 ---
 
+## Cyzora integration test checklist
+
+Cyzora (https://docs.cyzora.co.ke) sits next to Paystack behind the
+same ledger (`transactions`), the same activation step
+(`paymentService.activatePaymentIfNeeded`) and the same hotel payout
+batching (`hotelPayoutService`). Which provider NEW payments and
+payouts use is one switch: `PAYMENT_PROVIDER_DEFAULT=cyzora`. Existing
+Paystack rows keep verifying against Paystack — verify always follows
+the provider stored on the row.
+
+> **Documentation caveat.** The integration was written from the
+> Cyzora facts summarised in the project brief (endpoints, auth
+> header, cents, statuses, webhook events, signature scheme, test
+> numbers). The live docs site could not be fetched from the build
+> environment, so a few *response/payload field names* are tolerant
+> assumptions that the first test run should confirm — they're listed
+> under "Confirm against the docs" below. Nothing is marked paid unless
+> Cyzora's own verify endpoint reports `succeeded` **and** the amount
+> matches, so a wrong field name fails closed (payment stays
+> pending/flagged), never open.
+
+Automated (no live network, no database):
+
+```bash
+cd server
+npm install
+npm test
+```
+
+Runs `tests/cyzora.test.ts` alongside `tests/payments.test.ts`:
+webhook signature accept/reject on raw bytes (missing header, wrong
+secret, tampered body, wrong length, upper-case hex), event-envelope
+parsing, charge/payout status mapping, KES↔cents conversion, redirect
+URL rules, error mapping, and settlement-method → payout-destination
+mapping. `tests/setup.ts` supplies throwaway env values so no `.env`
+is needed.
+
+### 1. Keys and secrets (Cyzora dashboard)
+
+1. **API Keys** → copy the **test secret key** (`sk_test_…`). Public
+   keys (`pk_…`) only identify the business to the hosted checkout
+   page and aren't used server-side.
+2. **Webhooks** → add an endpoint for
+   `https://<your-domain>/api/webhooks/cyzora` (ngrok URL for local
+   dev, see step 3) and copy its **signing secret** (`whsec_…`).
+3. **Redirect domains** (if your account restricts them) → add the
+   frontend's domain (and the ngrok/localhost one for dev). Hosted
+   checkout `callback_url`/`cancel_url` must be https — plain http is
+   only accepted for localhost.
+
+Into `server/.env`:
+
+```
+PAYMENT_PROVIDER_DEFAULT=cyzora
+CYZORA_SECRET_KEY=sk_test_xxxxxxxxxxxx
+CYZORA_WEBHOOK_SECRET=whsec_xxxxxxxxxxxx
+CYZORA_BASE_URL=https://api.cyzora.co.ke/api/v1
+APP_BASE_URL=http://localhost:3000      # where the CRA frontend runs locally
+```
+
+Never paste an `sk_live_…` key while `NODE_ENV` isn't `production` —
+`env.ts` refuses to boot, same guard as Paystack.
+
+### 2. Migrate and run
+
+```bash
+npm run migrate   # applies 040_cyzora_provider.sql (provider 'cyzora', provider_channel)
+npm run dev
+```
+
+### 3. Expose the webhook over HTTPS
+
+```bash
+ngrok http 4000
+```
+
+Register `https://xxxx.ngrok-free.app/api/webhooks/cyzora` on the
+Webhooks page (step 1.2) and put that endpoint's `whsec_` into
+`CYZORA_WEBHOOK_SECRET`. Click **Send test** on the Webhooks page: the
+server log should show `Cyzora webhook.test received` and the dashboard
+a `200`. A wrong secret gets a `401` — that's the signature check
+working, not a transport problem.
+
+### 4. Test phone numbers (test mode, no real money)
+
+| Phone          | Outcome                          |
+|----------------|----------------------------------|
+| 254700000001   | succeeds                         |
+| 254700000002   | fails — balance too low          |
+| 254700000003   | fails — customer cancelled       |
+| 254700000004   | times out                        |
+
+### 5. STK push — new plan (your own payment screen)
+
+1. Sign in as a student (app or `POST /api/auth/login`), take the
+   access token.
+2. `POST /api/payments/initialize` (or the explicit
+   `/api/payments/cyzora/initialize`) with
+   `{ "amount": 5000, "numberOfDays": 30, "phone": "254700000001", "email": "test@example.com", "termsAccepted": true }`
+   and `Authorization: Bearer <token>`. Expect `201` with
+   `{ reference: "MV-…", displayText, provider: "cyzora" }`.
+   In the DB: one `transactions` row, `status='pending'`,
+   `provider='cyzora'`, `provider_channel='stk_push'`,
+   `provider_transaction_id` = Cyzora's charge id, `amount=5000`.
+   (Cyzora was sent `amount: 500000` — cents.)
+3. Watch the log: ngrok receives `POST /api/webhooks/cyzora`
+   (`charge.succeeded`, `livemode: false`). The handler verifies the
+   signature, finds the row by `account_ref` (our MV- reference), calls
+   `GET /charges/{id}` itself, and only then runs
+   `activatePaymentIfNeeded` → row `status='success'`, a `budgets` row
+   appears for the student.
+4. `GET /api/payments/verify/MV-…` → `{ status: "success",
+   alreadyProcessed: true, provider: "cyzora" }`. The frontend's
+   `usePaymentStatusPoll` hits this same endpoint.
+5. Repeat with `254700000002` and `254700000003`: webhook
+   `charge.failed`, row → `failed`, **no** budget row, one "Payment
+   failed" notification. With `254700000004`: stays `pending` until
+   Cyzora reports `timeout` → `failed`.
+6. **Duplicate delivery:** re-send the `charge.succeeded` event from
+   the dashboard (or replay it from ngrok's inspector at
+   http://127.0.0.1:4040). Expect `200`, `alreadyProcessed`, and
+   exactly one budget — the row lock + `status='success'` guard in
+   `activatePaymentIfNeeded` make the second run a no-op.
+7. **Bad signature:** replay the same body with any other
+   `X-Cyzora-Signature` → `401`, nothing changes.
+8. **Amount mismatch (fails closed):** can't be produced with a real
+   Cyzora charge, but `tests/cyzora.test.ts` covers the conversion and
+   `activatePaymentIfNeeded` flags any verify-amount ≠ row-amount as
+   `failed` + "Amount mismatch — flagged for review".
+
+### 6. Meal Boost via STK
+
+Same as step 5 against `POST /api/payments/boost/initialize` with
+`{ "amount": 500, "phone": "254700000001", "email": "…" }` for a
+student who already has an active plan — the existing budget's
+`remaining_amount` rises once, and only once, after the webhook.
+
+### 7. Hosted checkout (redirect)
+
+1. On the plan set-up screen tick the terms and press **"Pay on
+   Cyzora's secure checkout page instead"** (shown only when the server
+   reports `hostedCheckoutAvailable` from `GET /api/payments/config`),
+   or call `POST /api/payments/cyzora/checkout/initialize` with the
+   same body as step 5.2. Expect `201` with `checkoutUrl`, `reference`
+   and `expiresIn: 1800`. Row: `provider_channel='hosted_checkout'`,
+   `provider_transaction_id` = Cyzora's session reference. The server
+   sent `callback_url = <APP_BASE_URL>/payment/callback?reference=MV-…`
+   and `cancel_url = <APP_BASE_URL>/student/budget-onboarding`.
+2. Pay on the Cyzora page with `254700000001`. Cyzora redirects to
+   `/payment/callback?reference=MV-…&status=success`. **That
+   `status=success` is ignored.** The screen polls
+   `GET /api/payments/verify/MV-…`, which calls
+   `GET /transactions/verify/{cyzora reference}` and only reports what
+   Cyzora's API says.
+3. Pay with a failing number: Cyzora sends `charge.failed` with
+   `retryable: true` while the session is still open — the handler
+   deliberately leaves the row `pending` (the student can retry on the
+   same page) and no "payment failed" notification goes out. A
+   `charge.expired` after `expires_in` → `failed`.
+4. Edit the callback URL in the browser to `…&status=success` on an
+   unpaid reference → the screen keeps polling and ends in "We haven't
+   received confirmation yet". Nothing is credited.
+
+### 8. Hotel payouts (test mode)
+
+1. Set the hotel's settlement method to `send_money` with phone
+   `254700000001` (or `mpesa_till` / `paybill` with any test short
+   code; `pochi_la_biashara` maps to a mobile destination). `bank` is
+   reported as "needs manual payout" — see below.
+2. Have at least KSh 30 of redeemed, unpaid orders for that hotel
+   (Cyzora's minimum is 3000 cents). Admin → Hotel Payouts →
+   **Pay out**, or `POST /api/admin/payouts/trigger { "hotelId" }`.
+3. Expect a `hotel_payouts` row `provider='cyzora'`,
+   `status='processing'`, `transfer_code` = Cyzora's payout id, with
+   every claimed order's `payout_id` set. Cyzora received
+   `POST /payouts` with `Idempotency-Key = PO-…` and `amount` in cents.
+4. Webhook `payout.paid` → row `successful`, hotel staff notified once.
+   `payout.failed` → row `failed`, the orders' `payout_id` cleared so
+   the next payout can include them. Re-send the event → `200`, no
+   change (`finalizePayoutStatus` only moves a `processing` row).
+5. **Duplicate payout:** click **Pay out** twice quickly — the second
+   call finds no unclaimed orders (`NOTHING_TO_PAY_OUT`) before Cyzora
+   is ever contacted. A network retry of the same request reuses the
+   same `Idempotency-Key`, so Cyzora wouldn't pay twice either.
+6. `GET /api/admin/payouts/fee-preview?amount=1000` returns Cyzora's
+   fee for a KSh 1,000 payout (`GET /payouts/fee-preview`). The fee is
+   Cyzora's processing charge — it is **not** netted into the hotel's
+   `hotel_amount`/MEALVEST's `commission_amount`, which stay exactly as
+   `orderService.redeemOrderByQr` froze them.
+
+### Confirm against the docs on the first run
+
+Field names the code reads tolerantly (top level or under a `data`
+envelope) because they weren't in the brief's fact list — check each
+once in the server log / dashboard and tighten if needed:
+
+- `POST /charges` response: the charge **id** (`id`).
+- `GET /charges/{id}` and `GET /transactions/verify/{reference}`
+  responses: `status` and `amount` (cents). A missing `amount` fails
+  the amount check → row flagged `failed`, never credited.
+- Webhook body: the charge/payout object (read from `data`, else
+  `charge`/`payout`, else top level) and its `id` / `account_ref` /
+  `reference`; `retryable` on `charge.failed` (read from the event or
+  the object).
+- `POST /payouts` response: `id`, `status`; fee field (`fee` or
+  `fee_amount`) if reported.
+- There was no documented per-payout read endpoint in the brief, so
+  payouts finalize **only** via the signed `payout.paid`/`payout.failed`
+  webhooks; "Refresh status" is a no-op for Cyzora rows. If the docs
+  provide one, wire it into `hotelPayoutService.verifyPayout`.
+- `bank` settlement needs a `bank_code` from `GET /payout-banks`
+  matched to the hotel's free-text `bankName` — not automated until
+  that list's shape is confirmed (`cyzoraPayoutService.listPayoutBanks`
+  is there to inspect it).
+
+### What changes for LIVE
+
+- `sk_live_` key + `NODE_ENV=production`; a live `whsec_` for the
+  production webhook endpoint (test and live endpoints are separate
+  on the dashboard); `APP_BASE_URL=https://<your-domain>`.
+- Live **payouts** require a verified Cyzora business — until then
+  `POST /payouts` will be rejected and the payout row records the
+  error with its orders released.
+- A `livemode: false` event reaching a live-keyed server (or vice
+  versa) is logged and ignored with `200` — it can never credit a
+  live ledger.
+
+---
+
 ## Full first-MVP walkthrough (student → payment → order → QR → hotel → withdrawal)
 
 Run these in order against a running server (`npm run dev`, migrations

@@ -6,7 +6,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { initializePayment } from "../../services/paymentsApi";
+import { initializePayment, initializeCheckoutPayment, getPaymentConfig } from "../../services/paymentsApi";
 import { usePaymentStatusPoll } from "../../hooks/usePaymentStatusPoll";
 
 const PRESETS = [2000, 3000, 5000, 12000, 15000];
@@ -49,6 +49,25 @@ export default function BudgetOnboardingScreen() {
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
   const [displayText, setDisplayText] = useState<string | null>(null);
+  // Hosted checkout is a Cyzora-only alternative to the STK push; the
+  // server says whether it exists for the active provider so this
+  // screen never shows a dead button on a Paystack deployment.
+  const [hostedCheckoutAvailable, setHostedCheckoutAvailable] = useState(false);
+  const [openingCheckout, setOpeningCheckout] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPaymentConfig(authFetch)
+      .then((cfg) => {
+        if (!cancelled) setHostedCheckoutAvailable(Boolean(cfg.hostedCheckoutAvailable));
+      })
+      .catch(() => {
+        /* optional capability — stay on the STK-only form */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authFetch]);
 
   useEffect(() => {
     if (poll.status === "success") {
@@ -79,16 +98,65 @@ export default function BudgetOnboardingScreen() {
     return Math.round((a / d) * 100) / 100;
   })();
 
-  const startPayment = async () => {
+  const validateForm = (): { totalAmount: number; numberOfDays: number; email: string } | null => {
     setError(null);
     const totalAmount = Number(amount);
     const numberOfDays = Number(days);
 
-    if (!totalAmount || totalAmount <= 0) return setError("Enter an amount greater than zero.");
-    if (!numberOfDays || numberOfDays <= 0) return setError("Enter at least 1 day.");
-    if (phone.replace(/\D/g, "").length < 9) return setError("Enter a valid phone number for M-Pesa.");
-    if (!termsAccepted) return setError("Please accept the Mealvest payment terms to continue.");
-    if (!user?.email) return setError("Your account has no email on file — please contact support.");
+    if (!totalAmount || totalAmount <= 0) {
+      setError("Enter an amount greater than zero.");
+      return null;
+    }
+    if (!numberOfDays || numberOfDays <= 0) {
+      setError("Enter at least 1 day.");
+      return null;
+    }
+    if (phone.replace(/\D/g, "").length < 9) {
+      setError("Enter a valid phone number for M-Pesa.");
+      return null;
+    }
+    if (!termsAccepted) {
+      setError("Please accept the Mealvest payment terms to continue.");
+      return null;
+    }
+    if (!user?.email) {
+      setError("Your account has no email on file — please contact support.");
+      return null;
+    }
+    return { totalAmount, numberOfDays, email: user.email };
+  };
+
+  /**
+   * Cyzora hosted checkout: the server creates the session, the
+   * browser navigates to Cyzora's page, and Cyzora sends the student
+   * back to /payment/callback?reference=…, which polls the server's
+   * verify endpoint exactly like the STK flow does. Nothing about the
+   * redirect itself is treated as proof of payment.
+   */
+  const startHostedCheckout = async () => {
+    const form = validateForm();
+    if (!form) return;
+    setOpeningCheckout(true);
+    try {
+      const { checkoutUrl } = await initializeCheckoutPayment(authFetch, {
+        amount: form.totalAmount,
+        numberOfDays: form.numberOfDays,
+        phone: phone.trim(),
+        email: form.email,
+        hotelId: hotelId ?? null,
+        termsAccepted: true,
+      });
+      window.location.assign(checkoutUrl);
+    } catch (err) {
+      setOpeningCheckout(false);
+      setError(err instanceof Error ? err.message : "Could not open the checkout page. Please try again.");
+    }
+  };
+
+  const startPayment = async () => {
+    const form = validateForm();
+    if (!form) return;
+    const { totalAmount, numberOfDays } = form;
 
     setStage("awaiting_stk");
     try {
@@ -96,7 +164,7 @@ export default function BudgetOnboardingScreen() {
         amount: totalAmount,
         numberOfDays,
         phone: phone.trim(),
-        email: user.email,
+        email: form.email,
         hotelId: hotelId ?? null,
         termsAccepted: true,
       });
@@ -215,9 +283,21 @@ export default function BudgetOnboardingScreen() {
         <span style={styles.checkboxLabel}>I have read and understand the Mealvest payment and contract terms.</span>
       </button>
 
-      <PrimaryButton onPress={startPayment} disabled={!termsAccepted} style={{ marginTop: 14 }}>
+      <PrimaryButton onPress={startPayment} disabled={!termsAccepted || openingCheckout} style={{ marginTop: 14 }}>
         Pay with M-Pesa
       </PrimaryButton>
+
+      {hostedCheckoutAvailable && (
+        <button
+          onClick={startHostedCheckout}
+          disabled={!termsAccepted || openingCheckout}
+          style={{ ...styles.secondaryLinkBtn, alignSelf: "center", opacity: termsAccepted ? 1 : 0.5 }}
+        >
+          <span style={styles.secondaryLinkText}>
+            {openingCheckout ? "Opening secure checkout…" : "Pay on Cyzora's secure checkout page instead"}
+          </span>
+        </button>
+      )}
     </div>
   );
 }

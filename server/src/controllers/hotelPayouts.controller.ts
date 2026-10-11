@@ -4,6 +4,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import * as model from "../models/hotelPayoutModel";
 import * as payoutService from "../services/hotelPayoutService";
+import * as cyzoraPayouts from "../services/cyzoraPayoutService";
 
 /**
  * Admin-only — mounted under adminRouter (admin.routes.ts), which
@@ -15,8 +16,30 @@ import * as payoutService from "../services/hotelPayoutService";
 
 export async function listPendingPayouts(_req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const hotels = await model.listHotelsWithPendingBalance();
-    res.json({ hotels });
+    const provider = payoutService.activePayoutProvider();
+    // `payout_supported` is decided server-side per the ACTIVE provider
+    // (Paystack and Cyzora can automate different settlement methods)
+    // so the admin screen never has to hardcode either provider's list.
+    const hotels = (await model.listHotelsWithPendingBalance()).map((h) => ({
+      ...h,
+      payout_supported: Boolean(h.payment_method && payoutService.isPayoutSupported(h.payment_method)),
+    }));
+    res.json({ hotels, provider, configured: payoutService.isPayoutConfigured() });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /api/admin/payouts/fee-preview?amount=<KSh> — Cyzora's processing fee for a payout of this size (recorded separately from MEALVEST commission, never netted into it). */
+export async function previewPayoutFee(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    if (payoutService.activePayoutProvider() !== "cyzora") {
+      throw new ApiError(400, "FEE_PREVIEW_UNAVAILABLE", "Fee preview is only available when Cyzora is the active payout provider.");
+    }
+    const amount = Number(req.query.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, "VALIDATION_ERROR", "amount (whole KSh) is required.");
+    const preview = await cyzoraPayouts.previewPayoutFee(amount);
+    res.json({ amount, feeKes: preview.feeKes, raw: preview.raw });
   } catch (err) {
     next(err);
   }
