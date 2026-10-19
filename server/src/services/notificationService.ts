@@ -129,7 +129,7 @@ async function dispatchPush(
   for (const device of devices) {
     try {
       const result = await sendPushToDevice({ token: device.push_token, title, body, deepLink });
-      if (result.ok) {
+      if (result.ok == true) {
         await model.logDelivery({
           notificationId,
           channel: "push",

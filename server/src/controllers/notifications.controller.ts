@@ -2,6 +2,7 @@ import { Response, NextFunction } from "express";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import { pool } from "../config/db";
+import { z } from "zod";
 import * as model from "../models/notificationModel";
 import { notify, sendTestNotification } from "../services/notificationService";
 import {
@@ -166,7 +167,9 @@ export async function testNotification(req: AuthedRequest, res: Response, next: 
 // ---------------------------------------------------------------------------
 
 /** Resolves an audience selector to a concrete list of user IDs, using only existing tables/columns. */
-async function resolveAudience(audience: { type: string; institution?: string; hotelId?: string; userIds?: string[] }): Promise<string[]> {
+async function resolveAudience(
+  audience: z.infer<typeof adminBroadcastSchema>["audience"]
+): Promise<string[]> {
   switch (audience.type) {
     case "all_students": {
       const result = await pool.query("SELECT id FROM users WHERE role = 'student'");

@@ -18,11 +18,14 @@ export async function createOrder(req: AuthedRequest, res: Response, next: NextF
       throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid order.");
     }
     const order = await orderService.createOrder({
-      userId: req.user!.id,
-      hotelId: parsed.data.hotelId,
-      lines: parsed.data.items,
-      idempotencyKey: parsed.data.idempotencyKey,
-    });
+  userId: req.user!.id,
+  hotelId: parsed.data.hotelId,
+  lines: parsed.data.items.map((item) => ({
+    itemId: item.itemId!,
+    quantity: item.quantity!,
+  })),
+  idempotencyKey: parsed.data.idempotencyKey,
+});
     res.status(201).json({ order });
   } catch (err) {
     next(err);

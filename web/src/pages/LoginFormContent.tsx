@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { PlayCircle } from "lucide-react";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { Field } from "../components/ui/Field";
 import { PasswordField } from "../components/ui/PasswordField";
