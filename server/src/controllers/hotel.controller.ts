@@ -87,9 +87,18 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
 
     const [hotelResult, statsResult, menuCountResult] = await Promise.all([
       pool.query(
+        // The owner-editable profile fields (PATCH /api/hotel/location accepts
+        // latitude/longitude/address/helpline/opening_hours/services/description/
+        // image_url) MUST be readable here too, otherwise the profile form can't
+        // load what it's editing. The remaining added columns are read-only
+        // registration facts the owner already supplied. Deliberately still
+        // excluded: kra_pin, business_registration_number, contact_id_number,
+        // commission, paystack_recipient_code, application/review internals.
         `SELECT id, name, status, location, address, settlement_schedule, contract_start_date, contract_end_date,
                 ${isAdminView ? "commission_percent," : ""} registration_fee, payment_method, payment_details,
-                image_url, description
+                payment_verification_status,
+                image_url, description, latitude, longitude, helpline, opening_hours, closing_hours, days_open, services,
+                business_type, county, town, landmark, contact_phone, contact_email, whatsapp_number
          FROM hotels WHERE id = $1`,
         [hotelId]
       ),

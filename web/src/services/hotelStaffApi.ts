@@ -26,6 +26,26 @@ export interface HotelDashboard {
     payment_method: string | null;
     image_url: string | null;
     description: string | null;
+    // --- Owner-editable via PATCH /api/hotel/location (see HotelProfileUpdate) ---
+    latitude?: number | null;
+    longitude?: number | null;
+    helpline?: string | null;
+    opening_hours?: string | null;
+    services?: string[] | null;
+    // --- Read-only registration / agreement facts (no owner write path) ---
+    contract_start_date?: string | null;
+    contract_end_date?: string | null;
+    payment_details?: Record<string, unknown> | null;
+    payment_verification_status?: string | null;
+    closing_hours?: string | null;
+    days_open?: string[] | null;
+    business_type?: string | null;
+    county?: string | null;
+    town?: string | null;
+    landmark?: string | null;
+    contact_phone?: string | null;
+    contact_email?: string | null;
+    whatsapp_number?: string | null;
   };
   stats: {
     today_orders: string;
@@ -45,20 +65,42 @@ export async function fetchHotelDashboard(authFetch: AuthFetch): Promise<HotelDa
 export interface HotelLocationUpdate {
   id: string;
   name: string;
-  image_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  address: string | null;
+  helpline: string | null;
+  opening_hours: string | null;
+  services: string[];
   description: string | null;
+  image_url: string | null;
+}
+
+/**
+ * Exactly the fields PATCH /api/hotel/location accepts (updateHotelLocationSchema).
+ * Only send what changed: the backend uses COALESCE, so an omitted field is
+ * left untouched, and an empty body is rejected.
+ */
+export interface HotelProfileUpdate {
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+  helpline?: string;
+  openingHours?: string;
+  services?: string[];
+  description?: string;
+  imageUrl?: string;
 }
 
 export async function updateHotelProfile(
   authFetch: AuthFetch,
-  input: { imageUrl?: string; description?: string }
+  input: HotelProfileUpdate
 ): Promise<HotelLocationUpdate> {
   const res = await authFetch("/api/hotel/location", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  const data = await parseOrError<{ hotel: HotelLocationUpdate }>(res, "Could not update your hotel banner.");
+  const data = await parseOrError<{ hotel: HotelLocationUpdate }>(res, "Could not save your changes.");
   return data.hotel;
 }
 

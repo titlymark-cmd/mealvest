@@ -14,6 +14,7 @@ export function ImageUploadField({
   label = "Upload a photo",
   hidePreview = false,
   compact = false,
+  tone = "cream",
 }: {
   authFetch: AuthFetch;
   value: string;
@@ -24,10 +25,13 @@ export function ImageUploadField({
   hidePreview?: boolean;
   /** Smaller trigger button, for use inside a tight card layout. */
   compact?: boolean;
+  /** "dark" restyles the trigger as a raised espresso control for use on dark panels. Behaviour is identical. */
+  tone?: "cream" | "dark";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dark = tone === "dark";
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
@@ -72,18 +76,27 @@ export function ImageUploadField({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
-        style={compact ? styles.uploadBtnCompact : styles.uploadBtn}
+        style={{
+          ...(compact ? styles.uploadBtnCompact : styles.uploadBtn),
+          ...(dark ? (compact ? styles.darkBtnCompact : styles.darkBtn) : null),
+        }}
       >
-        <UploadCloud size={compact ? 12 : 14} color={COLORS.primary} />
-        <span style={compact ? styles.uploadBtnTextCompact : styles.uploadBtnText}>
+        <UploadCloud size={compact ? (dark ? 16 : 12) : 14} color={dark ? COLORS.primaryLight : COLORS.primary} aria-hidden />
+        <span
+          style={{
+            ...(compact ? styles.uploadBtnTextCompact : styles.uploadBtnText),
+            ...(dark ? styles.darkText : null),
+            ...(dark && compact ? { fontSize: 13 } : null),
+          }}
+        >
           {uploading ? "Uploading…" : value ? "Change photo" : label}
         </span>
       </button>
 
       {error && (
-        <p style={styles.errorText}>
+        <p role="alert" style={{ ...styles.errorText, ...(dark ? { color: "#FF7A5C" } : null) }}>
           {error}{" "}
-          <button type="button" onClick={() => inputRef.current?.click()} style={styles.retryLink}>
+          <button type="button" onClick={() => inputRef.current?.click()} style={{ ...styles.retryLink, ...(dark ? { color: COLORS.primaryLight } : null) }}>
             Try again
           </button>
         </p>
@@ -135,6 +148,9 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "transparent",
     cursor: "pointer",
   },
+  darkBtn: { border: "1px solid var(--mv-hairline)", backgroundColor: "var(--mv-surface-dark-2)", boxShadow: "var(--neu-dark-raised-sm)" },
+  darkBtnCompact: { border: "1px solid var(--mv-hairline)", backgroundColor: "var(--mv-surface-dark-2)", boxShadow: "var(--neu-dark-raised-sm)", minHeight: 44, padding: "0 16px", gap: 8 },
+  darkText: { color: COLORS.textOnDark },
   uploadBtnTextCompact: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.primary },
   errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.danger, marginTop: 8 },
   retryLink: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textDecoration: "underline", background: "none", border: "none", padding: 0, cursor: "pointer" },
