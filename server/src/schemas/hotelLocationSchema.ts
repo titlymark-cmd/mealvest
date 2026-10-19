@@ -1,4 +1,13 @@
 import { z } from "zod";
+import { isAllowedImageUrl } from "../services/storageService";
+
+/** https-only, allow-listed hosts (see storageService.isAllowedImageUrl). */
+export const imageUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .url("Enter a valid image URL.")
+  .refine(isAllowedImageUrl, { message: "Images must be uploaded through MEALVEST (or come from an approved image host)." });
 
 // Admin-facing update — every field optional so a hotel owner can
 // set coordinates first and fill in the rest later. Coordinates are
@@ -12,7 +21,7 @@ export const updateHotelLocationSchema = z.object({
   openingHours: z.string().trim().max(200).optional(),
   services: z.array(z.string().trim().max(60)).max(20).optional(),
   description: z.string().trim().max(500).optional(),
-  imageUrl: z.string().trim().url("Enter a valid image URL.").max(2000).optional(),
+  imageUrl: imageUrlSchema.optional(),
 });
 
 export type UpdateHotelLocationInput = z.infer<typeof updateHotelLocationSchema>;

@@ -1,21 +1,33 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { LogOut, TrendingUp, Sparkles, Receipt, PiggyBank, Zap, Lock, UtensilsCrossed, Wallet, ChevronRight, Phone } from "lucide-react";
+import { PiggyBank, Zap, Lock, UtensilsCrossed, ChevronRight, Phone, ArrowRightLeft, CalendarDays, Info, RefreshCw, Store } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
-import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
+import { PrimaryButton } from "../../components/PrimaryButton";
+import { Modal } from "../../components/ui/Modal";
+import { COLORS, FONTS, NEU, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
+import { useWindowSize } from "../../hooks/useWindowSize";
 import { getActiveBudget, transferToNextDay, getWithdrawalStatus, Budget, WithdrawalStatus } from "../../services/budgetApi";
 import { fetchCustomerCarePhone } from "../../services/settingsApi";
 import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
 import { NotificationPermissionBanner } from "../../components/notifications/NotificationPermissionBanner";
 
+type Dialog = null | "rollover" | "transfer-confirm" | "hotel-switch" | { error: string };
+
+/** Greeting follows the device clock only — it never implies data we don't have. */
+function greetingForNow() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
+
 export default function StudentHomeScreen() {
-  const { user, logout, authFetch } = useAuth();
+  const { user, authFetch } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { width: viewportWidth } = useWindowSize();
+  const ringSize = viewportWidth < 360 ? 80 : 96;
   const passedBudget: Budget | undefined = (location.state as any)?.budget;
   const hotelName: string | undefined = (location.state as any)?.hotelName;
 
@@ -28,6 +40,8 @@ export default function StudentHomeScreen() {
   // Customer care is a single tap-to-call icon: the number itself is
   // never shown, the tel: link opens the phone app with it pre-filled.
   const [carePhone, setCarePhone] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [transferring, setTransferring] = useState(false);
 
   useEffect(() => {
     fetchCustomerCarePhone()
@@ -42,6 +56,7 @@ export default function StudentHomeScreen() {
   }, [authFetch]);
 
   const loadBudget = useCallback(async () => {
+    setError(null);
     try {
       const b = await getActiveBudget(authFetch);
       setBudget(b);
@@ -64,363 +79,396 @@ export default function StudentHomeScreen() {
   }, []);
 
   const dailyCredit = budget ? Number(budget.daily_allowance) : 0;
-  // `remaining`/`spent` below are computed but unused in the original
-  // screen too — kept byte-identical rather than pruned.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const remaining = budget ? Number(budget.remaining_amount) : 0;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const spent = budget ? Number(budget.amount_spent) : 0;
   const bankedAmount = budget ? Number(budget.banked_amount) : 0;
   const spentToday = budget ? Number(budget.spent_today) : 0;
   const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday);
-  const pct = dailyCredit + bankedAmount > 0 ? spentToday / (dailyCredit + bankedAmount) : 0;
-  const dailyCreditStatus = getDailyCreditStatus(spentToday, dailyCredit + bankedAmount);
+  const todayTotal = dailyCredit + bankedAmount;
+  const pct = todayTotal > 0 ? spentToday / todayTotal : 0;
+  const dailyCreditStatus = getDailyCreditStatus(spentToday, todayTotal);
   const dailyCreditColor =
     dailyCreditStatus === "unused" ? COLORS.success : dailyCreditStatus === "low" ? COLORS.danger : COLORS.warning;
+  // Status is always spelled out in words too — colour is only a supporting signal.
+  const statusLabel = dailyCreditStatus === "unused" ? "Nothing spent yet" : dailyCreditStatus === "low" ? "Running low" : "Spending as planned";
 
-  const showRolloverInfo = () => {
-    window.alert(
-      "Carried over from previous days\n\n" +
-        `KSh ${bankedAmount.toLocaleString()} of unused daily allowance has automatically been added to today's balance. ` +
-        `You now have KSh ${spendableToday.toLocaleString()} available today.`
-    );
-  };
-
-  // Frozen MVP2 feature — no navigation, no API call, matches the
-  // backend's own defense-in-depth rejection at POST /student/hotel-transfer.
-  const showTransferLockedNotice = () => {
-    window.alert(
-      "Hotel Transfer — Coming in MVP 2\n\n" +
-        "Soon you'll be able to switch your active plan to another MealVest hotel for a KSh 50 fee. This isn't available yet."
-    );
-  };
-
-  const [transferring, setTransferring] = useState(false);
-
-  const confirmTransferToNextDay = () => {
-    if (spendableToday <= 0) return;
-    const confirmed = window.confirm(
-      "Move to tomorrow?\n\n" +
-        `KSh ${spendableToday.toLocaleString()} is available today. Are you sure you want to transfer it to tomorrow instead of using it today? ` +
-        `It won't be spendable again until tomorrow.`
-    );
-    if (confirmed) doTransferToNextDay();
-  };
+  const daysTotal = budget?.number_of_days ?? 0;
+  const daysLeft = budget ? budget.remainingDays ?? budget.number_of_days : 0;
+  const planProgress = daysTotal > 0 ? Math.min(1, Math.max(0, (daysTotal - daysLeft) / daysTotal)) : 0;
 
   const doTransferToNextDay = async () => {
+    setDialog(null);
     setTransferring(true);
     try {
       const updated = await transferToNextDay(authFetch);
       setBudget(updated);
     } catch (err) {
-      window.alert("Couldn't transfer\n\n" + (err instanceof Error ? err.message : "Something went wrong."));
+      setDialog({ error: err instanceof Error ? err.message : "Something went wrong." });
     } finally {
       setTransferring(false);
     }
   };
 
+  const firstName = (user?.fullName || "").trim().split(/\s+/)[0] || "there";
+  const savingsAmount = Number(withdrawal?.availableSavings ?? budget?.remaining_amount ?? 0);
+  const savingsOpen = Boolean(withdrawal && !withdrawal.locked);
+
   return (
-    <div style={styles.container}>
+    <div className="mv-container" style={styles.page}>
       <NotificationPermissionBanner />
 
-      {budget && Number(budget.pending_rollover_amount) > 0 && (
-        <RolloverPrompt budget={budget} onResolved={setBudget} />
-      )}
+      {budget && Number(budget.pending_rollover_amount) > 0 && <RolloverPrompt budget={budget} onResolved={setBudget} />}
 
       <div style={styles.headerRow}>
-        <div>
-          <span style={styles.greeting}>Good day 👋</span>
-          <h1 style={styles.title}>Your MEALVEST Plan</h1>
+        <div style={{ minWidth: 0 }}>
+          <span style={styles.greeting}>{greetingForNow()}</span>
+          <h1 style={styles.title}>{firstName}</h1>
         </div>
-        <div style={{ display: "flex", flexDirection: "row", gap: 8 }}>
-          {bankedAmount > 0 && (
-            <button style={styles.logoutIcon} onClick={showRolloverInfo}>
-              <PiggyBank size={16} color={COLORS.primary} />
-              <div style={styles.notifDot} />
-            </button>
-          )}
-          <button style={styles.logoutIcon} onClick={() => navigate("/student/orders")} aria-label="My orders">
-            <Receipt size={16} color={COLORS.primary} />
-          </button>
-          <button style={styles.logoutIcon} onClick={() => navigate("/student/payments")} aria-label="Payments and savings">
-            <Wallet size={16} color={COLORS.primary} />
-          </button>
-          {carePhone && (
-            <a href={`tel:${carePhone.replace(/\s+/g, "")}`} style={styles.logoutIcon} aria-label="Call customer care" title="Call customer care">
-              <Phone size={16} color={COLORS.primary} />
-            </a>
-          )}
-          <button style={styles.logoutIcon} onClick={() => logout()}>
-            <LogOut size={18} color={COLORS.danger} />
-          </button>
-        </div>
+        {carePhone && (
+          <a href={`tel:${carePhone.replace(/\s+/g, "")}`} className="mv-iconbtn" aria-label="Call customer care" title="Call customer care">
+            <Phone size={18} aria-hidden />
+          </a>
+        )}
       </div>
 
-      {user && <span style={styles.welcome}>Signed in as {user.fullName || user.email}</span>}
-
       {loading && (
-        <div style={styles.center}>
-          <Spinner color={COLORS.primary} />
+        <div className="mv-grid-home" aria-busy="true" aria-label="Loading your plan">
+          <div className="mv-skel" style={{ height: 300 }} />
+          <div className="mv-skel" style={{ height: 220 }} />
         </div>
       )}
 
       {!loading && error && (
-        <Card style={{ marginTop: 20 }}>
-          <p style={styles.errorText}>{error}</p>
+        <Card variant="dark" style={{ textAlign: "center" }}>
+          <p role="alert" style={styles.errorText}>
+            {error}
+          </p>
+          <PrimaryButton variant="secondary" showArrow={false} icon={<RefreshCw size={16} aria-hidden />} onPress={() => { setLoading(true); loadBudget(); }} type="button">
+            Try again
+          </PrimaryButton>
         </Card>
       )}
 
       {!loading && !error && budget && (
-        <>
-          <button className="mv-action" style={styles.orderCard} onClick={() => navigate("/student/menu")}>
-            <UtensilsCrossed size={18} color="#fff" />
-            <span style={styles.orderCardText}>Order today's meal</span>
-          </button>
-
-          <Card style={styles.ringCard}>
-            <PlateRing pct={pct} color={dailyCreditColor}>
-              <span style={styles.ringLabel}>DAILY CREDIT</span>
-              <span style={styles.ringValue}>KSh {dailyCredit.toLocaleString()}</span>
-            </PlateRing>
-            <div style={styles.ringFooterRow}>
-              <div style={styles.ringFooterItem}>
-                <span style={styles.ringFooterLabel}>Spent today</span>
-                <span style={styles.ringFooterValue}>KSh {spentToday.toLocaleString()}</span>
-              </div>
-              <div style={styles.ringDivider} />
-              <button style={styles.ringFooterItem} onClick={confirmTransferToNextDay} disabled={spendableToday <= 0 || transferring}>
-                <span style={styles.ringFooterLabel}>Available today{spendableToday > 0 ? " · tap" : ""}</span>
-                <span
-                  style={{
-                    ...styles.ringFooterValue,
-                    color: COLORS.primary,
-                    textDecoration: spendableToday > 0 ? "underline" : "none",
-                  }}
-                >
-                  {transferring ? "…" : `KSh ${spendableToday.toLocaleString()}`}
-                </span>
-              </button>
-            </div>
-            {bankedAmount > 0 && (
-              <button onClick={showRolloverInfo} style={styles.rolloverBanner}>
-                <PiggyBank size={13} color={COLORS.primary} />
-                <span style={styles.rolloverBannerText}>KSh {bankedAmount.toLocaleString()} carried over from previous days</span>
-              </button>
-            )}
-          </Card>
-
-          <div style={styles.statsRow}>
-            <Card style={styles.statCard}>
-              <TrendingUp size={16} color={COLORS.primary} />
-              <span style={styles.statLabel}>Total budget</span>
-              <span style={styles.statValue}>KSh {Number(budget.total_amount).toLocaleString()}</span>
-            </Card>
-            <Card style={styles.statCard}>
-              <span style={styles.statEmoji}>📅</span>
-              <span style={styles.statLabel}>Plan length</span>
-              <span style={styles.statValue}>
-                {budget.remainingDays ?? budget.number_of_days} / {budget.number_of_days} days left
-              </span>
-            </Card>
-          </div>
-
-          <button className="mv-action" style={styles.boostCard} onClick={() => navigate("/student/withdraw")}>
-            <div style={{ ...styles.boostIconCircle, background: `linear-gradient(135deg, ${COLORS.accent}, ${COLORS.primaryLight})` }}>
-              {withdrawal && !withdrawal.locked ? <PiggyBank size={16} color="#fff" /> : <Lock size={16} color="#fff" />}
-            </div>
-            <div style={{ flex: 1, textAlign: "left" }}>
-              <span style={styles.boostTitle}>
-                Savings · KSh {Number(withdrawal?.availableSavings ?? budget.remaining_amount).toLocaleString()}
-              </span>
-              <span style={styles.boostSubtitle}>
-                {withdrawal && !withdrawal.locked
-                  ? `Your plan has ended — withdraw to M-Pesa (MEALVEST fee ${withdrawal.feePercent}%).`
-                  : withdrawal?.reason === "ALREADY_WITHDRAWN"
-                    ? "This plan's savings have been requested."
-                    : `Unspent balance incl. rollover. Withdrawable when your plan ends${
-                        withdrawal?.contractEndDate ? ` on ${new Date(withdrawal.contractEndDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""
-                      }.`}
-              </span>
-            </div>
-            <ChevronRight size={16} color={COLORS.textFaint} />
-          </button>
-
-          <button className="mv-action" style={styles.boostCard} onClick={() => navigate("/student/meal-boost")}>
-            <div style={styles.boostIconCircle}>
-              <Zap size={16} color="#fff" />
-            </div>
-            <div style={{ flex: 1, textAlign: "left" }}>
-              <span style={styles.boostTitle}>Meal Boost</span>
-              <span style={styles.boostSubtitle}>Feeling short? Add a bit more to raise your daily amount.</span>
-            </div>
-          </button>
-
-          {hotelName && (
-            <Card style={styles.hotelCard}>
-              <span style={styles.hotelLabel}>Your hotel</span>
-              <span style={styles.hotelValue}>{hotelName}</span>
-              <button style={styles.transferRow} onClick={showTransferLockedNotice}>
-                <div style={styles.transferLeft}>
-                  <Lock size={12} color={COLORS.textFaint} />
-                  <span style={styles.transferText}>Switch hotel · KSh 50</span>
+        <div className="mv-grid-home">
+          {/* LEFT: what can I spend today? */}
+          <div className="mv-stack">
+            <Card style={styles.hero}>
+              <div style={styles.heroTop}>
+                <div style={{ flex: "1 1 110px", minWidth: 0 }}>
+                  <span style={styles.heroLabel}>Available today</span>
+                  <div style={styles.heroValueRow}>
+                    <span style={styles.heroCurrency}>KSh</span>
+                    <span style={styles.heroValue}>{spendableToday.toLocaleString()}</span>
+                  </div>
+                  <span style={{ ...styles.statusPill, color: dailyCreditStatus === "low" ? COLORS.primaryDark : COLORS.successDark }}>
+                    <span style={{ ...styles.statusDot, backgroundColor: dailyCreditColor }} aria-hidden />
+                    {statusLabel}
+                  </span>
                 </div>
-                <span style={styles.mvp2Badge}>MVP 2</span>
-              </button>
-            </Card>
-          )}
+                <div style={{ flex: "0 0 auto" }} role="img" aria-label={`${Math.round(pct * 100)} percent of today's credit spent`}>
+                  <PlateRing pct={pct} size={ringSize} stroke={ringSize < 90 ? 10 : 11} color={dailyCreditColor} trackColor="#E8D9C5">
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <span style={styles.ringPct}>{Math.round(pct * 100)}%</span>
+                      <span style={styles.ringSub}>spent</span>
+                    </div>
+                  </PlateRing>
+                </div>
+              </div>
 
-          <div style={styles.aiCard}>
-            <div style={styles.aiHeader}>
-              <Sparkles size={15} color="#fff" />
-              <span style={styles.aiHeaderText}>MEALVEST AI</span>
-            </div>
-            <p style={styles.aiText}>You're all set for today — KSh {dailyCredit.toLocaleString()} is ready whenever you're hungry.</p>
+              <Card variant="well" style={styles.wellRow}>
+                <div style={styles.wellCell}>
+                  <span style={styles.cellLabel}>Daily credit</span>
+                  <span style={styles.cellValue}>KSh {dailyCredit.toLocaleString()}</span>
+                </div>
+                <span style={styles.wellDivider} aria-hidden />
+                <div style={styles.wellCell}>
+                  <span style={styles.cellLabel}>Spent today</span>
+                  <span style={styles.cellValue}>KSh {spentToday.toLocaleString()}</span>
+                </div>
+              </Card>
+
+              {bankedAmount > 0 && (
+                <button type="button" onClick={() => setDialog("rollover")} style={styles.rollover}>
+                  <PiggyBank size={16} color={COLORS.primary} aria-hidden />
+                  <span style={{ flex: 1, textAlign: "left" }}>KSh {bankedAmount.toLocaleString()} carried over from earlier days</span>
+                  <Info size={14} color={COLORS.textMuted} aria-hidden />
+                </button>
+              )}
+
+              <div style={styles.heroActions}>
+                <PrimaryButton type="button" onPress={() => navigate("/student/menu")} showArrow={false} icon={<UtensilsCrossed size={18} color="#fff" aria-hidden />}>
+                  Order today's meal
+                </PrimaryButton>
+                <button
+                  type="button"
+                  style={{ ...styles.softBtn, ...(spendableToday <= 0 || transferring ? styles.softBtnOff : null) }}
+                  disabled={spendableToday <= 0 || transferring}
+                  onClick={() => setDialog("transfer-confirm")}
+                >
+                  <ArrowRightLeft size={16} aria-hidden />
+                  {transferring ? "Moving…" : "Move today's balance to tomorrow"}
+                </button>
+              </div>
+            </Card>
           </div>
-        </>
+
+          {/* RIGHT: plan + secondary actions */}
+          <div className="mv-stack">
+            <Card variant="peach">
+              <div style={styles.planHead}>
+                <CalendarDays size={18} color={COLORS.primary} aria-hidden />
+                <span style={styles.planTitle}>Your plan</span>
+              </div>
+              <div style={styles.planStats}>
+                <div>
+                  <span style={styles.cellLabel}>Total budget</span>
+                  <span style={styles.planValue}>KSh {Number(budget.total_amount).toLocaleString()}</span>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span style={styles.cellLabel}>Days left</span>
+                  <span style={styles.planValue}>
+                    {daysLeft} <span style={styles.planValueSub}>of {daysTotal}</span>
+                  </span>
+                </div>
+              </div>
+              <div
+                role="progressbar"
+                aria-label="Plan days used"
+                aria-valuemin={0}
+                aria-valuemax={daysTotal}
+                aria-valuenow={Math.max(0, daysTotal - daysLeft)}
+                style={styles.track}
+              >
+                <div style={{ ...styles.trackFill, width: `${Math.max(planProgress * 100, planProgress > 0 ? 4 : 0)}%` }} />
+              </div>
+              {hotelName && (
+                <>
+                  <div style={styles.hotelRow}>
+                    <Store size={15} color={COLORS.textMuted} aria-hidden />
+                    <span style={styles.hotelName}>{hotelName}</span>
+                  </div>
+                  <button type="button" style={styles.transferRow} onClick={() => setDialog("hotel-switch")}>
+                    <span style={styles.transferLeft}>
+                      <Lock size={13} aria-hidden /> Switch hotel · KSh 50
+                    </span>
+                    <span style={styles.mvp2Badge}>Coming soon</span>
+                  </button>
+                </>
+              )}
+            </Card>
+
+            <button type="button" className="mv-action" style={styles.tile} onClick={() => navigate("/student/withdraw")}>
+              <span style={{ ...styles.tileIcon, background: `linear-gradient(160deg, ${COLORS.accent}, ${COLORS.primaryLight})` }}>
+                {savingsOpen ? <PiggyBank size={18} color="#fff" aria-hidden /> : <Lock size={18} color="#fff" aria-hidden />}
+              </span>
+              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+                <span style={styles.tileTitle}>Savings · KSh {savingsAmount.toLocaleString()}</span>
+                <span style={styles.tileSub}>
+                  {savingsOpen
+                    ? `Your plan has ended — withdraw to M-Pesa (MEALVEST fee ${withdrawal!.feePercent}%).`
+                    : withdrawal?.reason === "ALREADY_WITHDRAWN"
+                      ? "This plan's savings have been requested."
+                      : `Unspent balance incl. rollover. Withdrawable when your plan ends${
+                          withdrawal?.contractEndDate
+                            ? ` on ${new Date(withdrawal.contractEndDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`
+                            : ""
+                        }.`}
+                </span>
+              </span>
+              <ChevronRight size={18} color={COLORS.textOnDarkMuted} aria-hidden />
+            </button>
+
+            <button type="button" className="mv-action" style={styles.tile} onClick={() => navigate("/student/meal-boost")}>
+              <span style={{ ...styles.tileIcon, background: `linear-gradient(160deg, ${COLORS.primaryLight}, ${COLORS.primary})` }}>
+                <Zap size={18} color="#fff" aria-hidden />
+              </span>
+              <span style={{ flex: 1, textAlign: "left", minWidth: 0 }}>
+                <span style={styles.tileTitle}>Meal Boost</span>
+                <span style={styles.tileSub}>Feeling short? Add a bit more to raise your daily amount.</span>
+              </span>
+              <ChevronRight size={18} color={COLORS.textOnDarkMuted} aria-hidden />
+            </button>
+          </div>
+        </div>
       )}
 
       {!loading && !error && !budget && (
-        <Card style={{ marginTop: 20 }}>
-          <p style={styles.note}>You don't have an active meal plan yet. Ordering will bring you back through hotel selection to set one up.</p>
+        <Card style={{ textAlign: "center", padding: 24 }}>
+          <span style={styles.emptyIcon}>
+            <UtensilsCrossed size={26} color={COLORS.primary} aria-hidden />
+          </span>
+          <h2 style={styles.emptyTitle}>No meal plan yet</h2>
+          <p style={styles.note}>Pick a hotel to set up your plan. Ordering will bring you back through hotel selection.</p>
           {withdrawal?.latestWithdrawal && (
             <p style={{ ...styles.note, marginTop: 10 }}>
               Your last savings withdrawal of KSh {Number(withdrawal.latestWithdrawal.student_amount).toLocaleString()} is{" "}
               <strong>{withdrawal.latestWithdrawal.status}</strong>.
             </p>
           )}
-          <button onClick={() => navigate("/student/payments")} style={{ marginTop: 12, alignSelf: "center" }}>
-            <span style={{ fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary }}>Payments &amp; savings history</span>
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 18 }}>
+            <PrimaryButton type="button" onPress={() => navigate("/student")}>
+              Choose a hotel
+            </PrimaryButton>
+            <button type="button" onClick={() => navigate("/student/payments")} style={styles.textLink}>
+              Payments &amp; savings history
+            </button>
+          </div>
         </Card>
       )}
+
+      {/* ---- Dialogs (replace the browser's native alert/confirm) ---- */}
+      <Modal
+        open={dialog === "rollover"}
+        title="Carried over from previous days"
+        icon={<PiggyBank size={22} color={COLORS.primary} aria-hidden />}
+        onClose={() => setDialog(null)}
+        actions={
+          <PrimaryButton type="button" showArrow={false} onPress={() => setDialog(null)}>
+            Got it
+          </PrimaryButton>
+        }
+      >
+        KSh {bankedAmount.toLocaleString()} of unused daily allowance has automatically been added to today's balance. You now have KSh{" "}
+        {spendableToday.toLocaleString()} available today.
+      </Modal>
+
+      <Modal
+        open={dialog === "transfer-confirm"}
+        title="Move to tomorrow?"
+        icon={<ArrowRightLeft size={22} color={COLORS.primary} aria-hidden />}
+        onClose={() => setDialog(null)}
+        actions={
+          <>
+            <PrimaryButton type="button" showArrow={false} onPress={doTransferToNextDay}>
+              Yes, move it
+            </PrimaryButton>
+            <button type="button" style={styles.cancelBtn} onClick={() => setDialog(null)}>
+              Keep it for today
+            </button>
+          </>
+        }
+      >
+        KSh {spendableToday.toLocaleString()} is available today. Are you sure you want to transfer it to tomorrow instead of using it today? It won't be spendable again until tomorrow.
+      </Modal>
+
+      <Modal
+        open={dialog === "hotel-switch"}
+        title="Hotel transfer is coming soon"
+        icon={<Lock size={22} color={COLORS.primary} aria-hidden />}
+        onClose={() => setDialog(null)}
+        actions={
+          <PrimaryButton type="button" showArrow={false} onPress={() => setDialog(null)}>
+            OK
+          </PrimaryButton>
+        }
+      >
+        Soon you'll be able to switch your active plan to another MealVest hotel for a KSh 50 fee. This isn't available yet.
+      </Modal>
+
+      <Modal
+        open={typeof dialog === "object" && dialog !== null}
+        title="Couldn't move your balance"
+        onClose={() => setDialog(null)}
+        actions={
+          <PrimaryButton type="button" showArrow={false} onPress={() => setDialog(null)}>
+            Close
+          </PrimaryButton>
+        }
+      >
+        {typeof dialog === "object" && dialog !== null ? dialog.error : ""}
+      </Modal>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, paddingBottom: 40, maxWidth: 560, display: "flex", flexDirection: "column" },
-  headerRow: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  page: { paddingTop: 8, display: "flex", flexDirection: "column", gap: 18 },
+  headerRow: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   greeting: { display: "block", fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted },
-  title: { fontSize: 21, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0, marginTop: 2 },
-  logoutIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.pill,
-    border: `1px solid ${COLORS.border}`,
-    backgroundColor: "rgba(252,244,234,0.06)",
+  title: { fontSize: 28, lineHeight: "34px", fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0, overflowWrap: "anywhere" },
+  errorText: { fontSize: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: "#FF9A82", margin: "0 0 14px" },
+  note: { fontSize: 14, lineHeight: "21px", fontFamily: FONTS.body, color: COLORS.textMuted, margin: 0 },
+
+  hero: { borderRadius: RADIUS.xl, padding: 22, display: "flex", flexDirection: "column", gap: 16 },
+  heroTop: { display: "flex", flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 14 },
+  heroLabel: { display: "block", fontSize: 13, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textMuted },
+  heroValueRow: { display: "flex", alignItems: "baseline", gap: 6, marginTop: 4, flexWrap: "wrap" },
+  heroCurrency: { fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textMuted },
+  heroValue: { fontSize: "clamp(32px, 10vw, 42px)", lineHeight: 1.1, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text, fontVariantNumeric: "tabular-nums", letterSpacing: -0.5 },
+  statusPill: { display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
+  statusDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  ringPct: { display: "block", fontSize: 20, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text, textAlign: "center", lineHeight: 1 },
+  ringSub: { display: "block", fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textMuted, textAlign: "center", marginTop: 2 },
+  wellRow: { display: "flex", flexDirection: "row", alignItems: "stretch" },
+  wellCell: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 },
+  wellDivider: { width: 1, margin: "0 14px", backgroundColor: "rgba(150,105,65,0.25)" },
+  cellLabel: { display: "block", fontSize: 12, fontFamily: FONTS.body, color: COLORS.textMuted },
+  cellValue: { display: "block", fontSize: 16, fontFamily: FONTS.displayBold, fontWeight: 700, color: COLORS.text, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" },
+  rollover: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    flexShrink: 0,
-  },
-  notifDot: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.danger,
-    border: `1.5px solid ${COLORS.bg}`,
-  },
-  rolloverBanner: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 12,
-    backgroundColor: COLORS.accentSoft,
+    gap: 8,
+    minHeight: 44,
+    padding: "8px 14px",
     borderRadius: RADIUS.sm,
-    paddingTop: 8,
-    paddingBottom: 8,
-    paddingLeft: 12,
-    paddingRight: 12,
+    backgroundColor: COLORS.accentSoft,
+    boxShadow: NEU.creamRaisedSm,
+    fontSize: 12,
+    fontFamily: FONTS.bodySemibold,
+    fontWeight: 600,
+    color: COLORS.primaryDark,
     width: "100%",
   },
-  rolloverBannerText: { fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.primary },
-  orderCard: {
+  heroActions: { display: "flex", flexDirection: "column", gap: 12, marginTop: 2 },
+  softBtn: {
+    minHeight: 48,
+    width: "100%",
     display: "flex",
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    marginTop: 16,
-    borderRadius: RADIUS.sm,
-    paddingTop: 15,
-    paddingBottom: 15,
-    width: "100%",
-    background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
-  },
-  orderCardText: { color: "#fff", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 15 },
-  welcome: { display: "block", fontSize: 12, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.accent, marginTop: 6, marginBottom: 16 },
-  center: { display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 40, paddingBottom: 40 },
-  note: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textMuted, textAlign: "center", margin: 0 },
-  errorText: { fontSize: 13, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.danger, textAlign: "center", margin: 0 },
-  ringCard: { display: "flex", flexDirection: "column", alignItems: "center", marginTop: 8 },
-  ringLabel: { display: "block", fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.primary, textAlign: "center" },
-  ringValue: { display: "block", fontSize: 20, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text, textAlign: "center", marginTop: 2 },
-  ringFooterRow: { display: "flex", flexDirection: "row", width: "100%", marginTop: 16 },
-  ringFooterItem: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center" },
-  ringFooterLabel: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted },
-  ringFooterValue: { fontSize: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text, marginTop: 2 },
-  ringDivider: { width: 1, backgroundColor: COLORS.borderSoft },
-  statsRow: { display: "flex", flexDirection: "row", gap: 10, marginTop: 12 },
-  statCard: { flex: 1, display: "flex", flexDirection: "column" },
-  statEmoji: { fontSize: 16 },
-  statLabel: { display: "block", fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 8 },
-  statValue: { display: "block", fontSize: 14, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text, marginTop: 2 },
-  boostCard: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginTop: 12,
+    padding: "10px 16px",
+    borderRadius: RADIUS.md,
     backgroundColor: COLORS.card,
-    borderRadius: RADIUS.sm,
-    border: `1px solid ${COLORS.borderSoft}`,
-    padding: 14,
-    width: "100%",
-  },
-  boostIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: RADIUS.pill,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
-    flexShrink: 0,
-  },
-  boostTitle: { display: "block", fontSize: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text },
-  boostSubtitle: { display: "block", fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 2 },
-  hotelCard: { marginTop: 12, display: "flex", flexDirection: "column" },
-  hotelLabel: { display: "block", fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, textTransform: "uppercase" },
-  hotelValue: { display: "block", fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text, marginTop: 2 },
-  transferRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 10,
-    paddingTop: 10,
-    borderTop: `1px solid ${COLORS.borderSoft}`,
-    opacity: 0.65,
-  },
-  transferLeft: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6 },
-  transferText: { fontSize: 12, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.textMuted },
-  mvp2Badge: {
-    fontSize: 9,
+    boxShadow: NEU.creamRaisedSm,
+    color: COLORS.primaryDark,
     fontFamily: FONTS.bodySemibold,
-    fontWeight: 700,
-    color: COLORS.textFaint,
-    backgroundColor: "rgba(0,0,0,0.06)",
-    borderRadius: RADIUS.pill,
-    padding: "3px 8px",
-    letterSpacing: 0.4,
+    fontWeight: 600,
+    fontSize: 13,
+    textAlign: "center",
   },
-  aiCard: { marginTop: 12, borderRadius: RADIUS.sm, padding: 16, background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})` },
-  aiHeader: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
-  aiHeaderText: { color: "#fff", fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, letterSpacing: 0.5 },
-  aiText: { color: "#fff", fontSize: 13, fontFamily: FONTS.body, lineHeight: "19px", margin: 0 },
+  softBtnOff: { opacity: 0.5, boxShadow: "none", cursor: "not-allowed" },
+
+  planHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14 },
+  planTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.text },
+  planStats: { display: "flex", justifyContent: "space-between", gap: 12 },
+  planValue: { display: "block", marginTop: 2, fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.text, fontVariantNumeric: "tabular-nums" },
+  planValueSub: { fontSize: 13, fontWeight: 600, color: COLORS.textMuted },
+  track: { height: 10, borderRadius: 5, marginTop: 14, backgroundColor: "#F2D2B3", boxShadow: NEU.creamInset, overflow: "hidden" },
+  trackFill: { height: "100%", borderRadius: 5, background: `linear-gradient(90deg, ${COLORS.primaryLight}, ${COLORS.primary})`, transition: "width 600ms var(--mv-ease)" },
+  hotelRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 16, paddingTop: 14, borderTop: "1px solid rgba(150,105,65,0.2)" },
+  hotelName: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 14, color: COLORS.text, overflowWrap: "anywhere" },
+  transferRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 44, marginTop: 4, width: "100%", opacity: 0.75 },
+  transferLeft: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontFamily: FONTS.bodyMedium, fontWeight: 500, color: COLORS.textMuted },
+  mvp2Badge: { fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 700, color: COLORS.textMuted, backgroundColor: "rgba(150,105,65,0.14)", borderRadius: RADIUS.pill, padding: "4px 10px" },
+
+  tile: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    width: "100%",
+    padding: 16,
+    borderRadius: RADIUS.lg,
+    backgroundColor: NEU.surfaceDark,
+    boxShadow: NEU.darkRaised,
+    border: "1px solid var(--mv-hairline)",
+    color: COLORS.textOnDark,
+  },
+  tileIcon: { width: 44, height: 44, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.3), inset -2px -2px 4px rgba(0,0,0,0.2)" },
+  tileTitle: { display: "block", fontSize: 15, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textOnDark },
+  tileSub: { display: "block", fontSize: 12, lineHeight: "17px", fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 3 },
+
+  emptyIcon: { width: 56, height: 56, margin: "0 auto 14px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.accentSoft, boxShadow: NEU.creamInset },
+  emptyTitle: { margin: "0 0 6px", fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.text },
+  textLink: { minHeight: 44, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primaryDark },
+  cancelBtn: { minHeight: 48, borderRadius: RADIUS.md, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 14, color: COLORS.textMuted },
 };

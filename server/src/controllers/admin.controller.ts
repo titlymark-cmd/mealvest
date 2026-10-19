@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { pool } from "../config/db";
 import * as notificationEvents from "../services/notificationEvents";
+import * as budgetService from "../services/budgetService";
 import { ApiError } from "../middleware/errorHandler";
 import { hashPassword } from "../lib/password";
 import { normalizeKenyanPhone } from "../lib/phone";
@@ -938,6 +939,17 @@ export async function updateWithdrawalStatus(req: AuthedRequest, res: Response, 
       throw new ApiError(400, "VALIDATION_ERROR", "Enter the M-Pesa/bank reference of the payout to mark it completed.");
     }
 
+    if (status === "rejected") {
+      const w = (await budgetService.rejectWithdrawalAndRestore({
+        withdrawalId: req.params.withdrawalId,
+        adminUserId: req.user!.id,
+        note: note ?? null,
+      })) as { user_id: string; student_amount: string };
+      notificationEvents.savingsWithdrawalStatusChanged(w.user_id, "rejected", Number(w.student_amount));
+      res.json({ withdrawal: w });
+      return;
+    }
+
     const result = await pool.query(
       `UPDATE savings_withdrawals
        SET status = $2,
@@ -955,7 +967,7 @@ export async function updateWithdrawalStatus(req: AuthedRequest, res: Response, 
       throw new ApiError(409, "WITHDRAWAL_FINAL", `This withdrawal is already ${exists.rows[0].status} and can't be changed.`);
     }
     const w = result.rows[0];
-    if (status === "completed" || status === "rejected") {
+    if (status === "completed") {
       notificationEvents.savingsWithdrawalStatusChanged(w.user_id, status, Number(w.student_amount));
     }
     res.json({ withdrawal: w });

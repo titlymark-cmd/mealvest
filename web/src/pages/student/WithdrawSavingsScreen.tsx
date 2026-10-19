@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, PiggyBank, Lock, Check, Smartphone } from "lucide-react";
+import { ArrowLeft, PiggyBank, Lock, Check, Smartphone, KeyRound } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
@@ -8,6 +8,7 @@ import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { getWithdrawalStatus, requestWithdrawal, WithdrawalStatus, WithdrawalResult } from "../../services/budgetApi";
 import { fetchStudentProfile } from "../../services/studentProfileApi";
+import { GoogleSignInButton } from "../../components/GoogleSignInButton";
 
 const ksh = (v: number | string) => `KSh ${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -37,12 +38,17 @@ export default function WithdrawSavingsScreen() {
   const [acceptFee, setAcceptFee] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<WithdrawalResult | null>(null);
+  // Step-up proof (security fix M1): the server re-verifies this.
+  const [pin, setPin] = useState("");
+  const [needsGoogle, setNeedsGoogle] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const [st, profile] = await Promise.all([getWithdrawalStatus(authFetch), fetchStudentProfile(authFetch).catch(() => null)]);
       setStatus(st);
       if (profile?.phone_number) setPhone((p) => p || profile.phone_number);
+      // Accounts without a PIN (Google sign-in only) confirm with Google instead.
+      if (profile && profile.has_pin === false && profile.has_google) setNeedsGoogle(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load your savings.");
     } finally {
@@ -54,27 +60,55 @@ export default function WithdrawSavingsScreen() {
     load();
   }, [load]);
 
-  const submit = async () => {
+  const validateAndConfirm = (): boolean => {
     setError(null);
-    if (phone.replace(/\D/g, "").length < 9) return setError("Enter the M-Pesa number to send your savings to.");
-    if (!acceptFee) return setError("Please confirm you understand the MEALVEST fee.");
+    if (phone.replace(/\D/g, "").length < 9) {
+      setError("Enter the M-Pesa number to send your savings to.");
+      return false;
+    }
+    if (!acceptFee) {
+      setError("Please confirm you understand the MEALVEST fee.");
+      return false;
+    }
     const net = status?.netAmount ?? 0;
-    const confirmed = window.confirm(
+    return window.confirm(
       `Withdraw ${ksh(status?.availableSavings ?? 0)}?\n\n` +
         `MEALVEST fee (${status?.feePercent}%): ${ksh(status?.feeAmount ?? 0)}\n` +
         `You receive: ${ksh(net)} to ${phone.trim()}\n\n` +
         "This closes your current plan. Continue?"
     );
-    if (!confirmed) return;
+  };
+
+  const send = async (proof: { pin?: string; googleIdToken?: string }) => {
     setSubmitting(true);
     try {
-      const r = await requestWithdrawal(authFetch, { payoutMethod: "mpesa", payoutDestination: phone.trim(), acceptFee: true });
+      const r = await requestWithdrawal(authFetch, {
+        payoutMethod: "mpesa",
+        payoutDestination: phone.trim(),
+        acceptFee: true,
+        ...proof,
+      });
       setResult(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not request your withdrawal.");
+      setPin("");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const submit = async () => {
+    if (!/^\d{4}$/.test(pin)) {
+      setError("Enter your 4-digit PIN to confirm this withdrawal.");
+      return;
+    }
+    if (!validateAndConfirm()) return;
+    await send({ pin });
+  };
+
+  const submitWithGoogle = async (googleIdToken: string) => {
+    if (!validateAndConfirm()) return;
+    await send({ googleIdToken });
   };
 
   if (loading) {
@@ -198,9 +232,42 @@ export default function WithdrawSavingsScreen() {
                 </span>
               </button>
 
-              <PrimaryButton onPress={submit} disabled={!acceptFee || submitting || gross <= 0} loading={submitting} style={{ marginTop: 16 }}>
-                Withdraw {ksh(status.netAmount ?? 0)}
-              </PrimaryButton>
+              {needsGoogle ? (
+                <>
+                  <span style={styles.label}>Confirm it's you</span>
+                  <p style={styles.lockText}>
+                    Your account signs in with Google, so confirm this withdrawal with Google to send {ksh(status.netAmount ?? 0)}.
+                  </p>
+                  {acceptFee && gross > 0 && <GoogleSignInButton onIdToken={submitWithGoogle} loading={submitting} />}
+                </>
+              ) : (
+                <>
+                  <span style={styles.label}>Your 4-digit PIN</span>
+                  <div style={styles.inputRow}>
+                    <KeyRound size={16} color={COLORS.textOnDarkMuted} />
+                    <input
+                      style={styles.input}
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={4}
+                      placeholder="••••"
+                      aria-label="PIN"
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                    />
+                  </div>
+
+                  <PrimaryButton
+                    onPress={submit}
+                    disabled={!acceptFee || submitting || gross <= 0 || pin.length !== 4}
+                    loading={submitting}
+                    style={{ marginTop: 16 }}
+                  >
+                    Withdraw {ksh(status.netAmount ?? 0)}
+                  </PrimaryButton>
+                </>
+              )}
             </>
           )}
 

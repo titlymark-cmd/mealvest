@@ -8,12 +8,12 @@ import { useAuth } from "../../context/AuthContext";
 import { listMyOrders, Order } from "../../services/ordersApi";
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  pending_payment: { label: "Pending payment", color: COLORS.warning },
-  paid: { label: "Paid", color: COLORS.primary },
-  ready: { label: "Ready", color: COLORS.primary },
-  redeemed: { label: "Redeemed", color: COLORS.success },
-  cancelled: { label: "Cancelled", color: COLORS.textFaint },
-  refunded: { label: "Refunded", color: COLORS.textFaint },
+  pending_payment: { label: "Pending payment", color: COLORS.warningText },
+  paid: { label: "Paid", color: COLORS.dangerText },
+  ready: { label: "Ready", color: COLORS.dangerText },
+  redeemed: { label: "Redeemed", color: COLORS.successText },
+  cancelled: { label: "Cancelled", color: COLORS.textMuted },
+  refunded: { label: "Refunded", color: COLORS.textMuted },
 };
 
 export default function OrderHistoryScreen() {

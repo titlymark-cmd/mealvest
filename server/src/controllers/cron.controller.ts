@@ -1,8 +1,11 @@
+import crypto from "crypto";
 import { Request, Response, NextFunction } from "express";
 import { env } from "../config/env";
 import { ApiError } from "../middleware/errorHandler";
 import * as model from "../models/notificationModel";
 import * as notificationEvents from "../services/notificationEvents";
+import { runReconciliation } from "../services/reconciliationService";
+import { businessDate } from "../lib/businessTime";
 
 /**
  * Guards every cron endpoint below. Vercel automatically sends
@@ -17,14 +20,13 @@ function requireCronSecret(req: Request): void {
   if (!env.cronSecret) {
     throw new ApiError(503, "CRON_NOT_CONFIGURED", "CRON_SECRET is not configured.");
   }
-  if (req.headers.authorization !== `Bearer ${env.cronSecret}`) {
+  // Constant-time comparison (L3) over SHA-256 digests, so neither the
+  // content nor the length of the secret leaks through timing.
+  const provided = crypto.createHash("sha256").update(String(req.headers.authorization ?? "")).digest();
+  const expected = crypto.createHash("sha256").update(`Bearer ${env.cronSecret}`).digest();
+  if (!crypto.timingSafeEqual(provided, expected)) {
     throw new ApiError(401, "UNAUTHORIZED", "Invalid cron credentials.");
   }
-}
-
-/** Nairobi (UTC+3, no DST) wall-clock "now" — same convention as mpesa/daraja.ts's own timestamp helper. */
-function nairobiNow(): Date {
-  return new Date(Date.now() + 3 * 60 * 60 * 1000);
 }
 
 /**
@@ -39,7 +41,7 @@ export async function runMealReminders(req: Request, res: Response, next: NextFu
   try {
     requireCronSecret(req);
 
-    const nairobiDateStr = nairobiNow().toISOString().slice(0, 10);
+    const nairobiDateStr = businessDate();
 
     const userIds = await model.listUsersDueForMealReminder();
     for (const userId of userIds) {
@@ -47,6 +49,22 @@ export async function runMealReminders(req: Request, res: Response, next: NextFu
     }
 
     res.json({ queued: userIds.length, nairobiDateStr });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/cron/reconcile — repairs payments that were confirmed by the
+ * provider but never credited, and resolves payouts whose outcome is
+ * unknown, always under their original reference (see
+ * reconciliationService.ts). Idempotent and safe to run concurrently.
+ */
+export async function runReconcile(req: Request, res: Response, next: NextFunction) {
+  try {
+    requireCronSecret(req);
+    const summary = await runReconciliation();
+    res.json(summary);
   } catch (err) {
     next(err);
   }

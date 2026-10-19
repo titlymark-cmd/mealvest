@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import "./styles/fonts.css";
 import "./styles/reset.css";
 import "./styles/effects.css";
+import "./styles/neu.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";

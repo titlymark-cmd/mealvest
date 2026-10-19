@@ -19,6 +19,48 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * APP_BASE_URL is the ONLY source for links the server puts in emails
+ * and redirect URLs (M5/L4). Must be an absolute http(s) origin; https
+ * is required in production (http only for localhost). Required in
+ * production: a missing value would otherwise push code paths toward
+ * request-derived (attacker-controlled) hosts.
+ */
+function validatedAppBaseUrl(): string {
+  const raw = (process.env.APP_BASE_URL || "").trim().replace(/\/+$/, "");
+  const production = process.env.NODE_ENV === "production";
+  if (!raw) {
+    if (production) {
+      throw new Error("Missing required environment variable in production: APP_BASE_URL (e.g. https://mealvest.vercel.app).");
+    }
+    return "";
+  }
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(`APP_BASE_URL is not a valid absolute URL.`);
+  }
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) {
+    throw new Error("APP_BASE_URL must use https (http is allowed only for localhost).");
+  }
+  if (u.pathname !== "/" || u.search || u.hash || u.username || u.password) {
+    throw new Error("APP_BASE_URL must be a bare origin like https://example.com (no path, query or credentials).");
+  }
+  return u.origin;
+}
+
+function positiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`Environment variable ${name} must be a positive number (got "${raw}").`);
+  }
+  return n;
+}
+
 for (const name of REQUIRED_VARS) {
   requireEnv(name);
 }
@@ -92,7 +134,7 @@ export const env = {
   // when unset the controller derives it from the incoming request's
   // own protocol/host (see app.set("trust proxy") in app.ts). Cyzora
   // requires https here (plain http only for localhost).
-  appBaseUrl: (process.env.APP_BASE_URL || "").replace(/\/+$/, ""),
+  appBaseUrl: validatedAppBaseUrl(),
 
   // -----------------------------------------------------------------
   // Supabase Storage — used ONLY for hotel/meal image uploads (see
@@ -170,6 +212,16 @@ export const env = {
   // fine without scheduled reminders configured yet.
   // -----------------------------------------------------------------
   cronSecret: process.env.CRON_SECRET || "",
+
+  // -----------------------------------------------------------------
+  // Hotel payout limits (finding H3). A payout above the per-payout
+  // limit, or one that would push the day's payouts above the daily
+  // limit, is created in 'review' and is never sent until an admin
+  // approves it. Whole KSh. Defaults are deliberately conservative for
+  // a campus pilot — raise them explicitly in production config.
+  // -----------------------------------------------------------------
+  payoutMaxAmountKes: positiveNumberEnv("PAYOUT_MAX_AMOUNT_KES", 50_000),
+  payoutDailyLimitKes: positiveNumberEnv("PAYOUT_DAILY_LIMIT_KES", 200_000),
 };
 
 // Loud, boot-blocking guard: a live-looking secret key outside a

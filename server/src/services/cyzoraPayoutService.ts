@@ -1,4 +1,5 @@
 import { ApiError } from "../middleware/errorHandler";
+import { classifyProviderSendError, PayoutSendError } from "./payoutOutcome";
 import { normalizeKenyanPhone } from "../lib/phone";
 import { isCyzoraConfigured, cyzoraGet, cyzoraPost, kesToCents, centsToKes, mapCyzoraError } from "./cyzoraClient";
 
@@ -141,7 +142,7 @@ export async function createPayout(params: {
     const payout = unwrap(raw);
     if (!payout?.id) {
       console.error("[cyzoraPayoutService.createPayout] Payout response had no id:", raw);
-      throw new ApiError(502, "CYZORA_PAYOUT_FAILED", "Cyzora did not return a payout id.");
+      throw new PayoutSendError(false, "CYZORA_PAYOUT_FAILED", "Cyzora did not return a payout id.");
     }
     const fee = centsToKes(payout.fee ?? payout.fee_amount);
     return {
@@ -151,7 +152,10 @@ export async function createPayout(params: {
       raw,
     };
   } catch (err) {
-    throw mapCyzoraError(err, "createPayout", "Could not initiate this payout with Cyzora.");
+    // Logged via mapCyzoraError for the same diagnostics as before, but
+    // the THROWN error is classified: only a clear refusal is a failure.
+    if (!(err instanceof PayoutSendError)) mapCyzoraError(err, "createPayout", "Could not initiate this payout with Cyzora.");
+    throw classifyProviderSendError(err, "CYZORA_PAYOUT_FAILED", "Could not initiate this payout with Cyzora.");
   }
 }
 

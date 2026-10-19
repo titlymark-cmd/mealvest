@@ -72,6 +72,12 @@ export const COLORS = {
   danger: "#E5482E",
   disabled: "#9A928C",
 
+  // Status colours safe for TEXT on cream (>= 4.5:1). The brighter
+  // success/warning/danger above are for fills, icons and dark surfaces.
+  successText: "#3F7D2C",
+  warningText: "#8F5600",
+  dangerText: "#B83420",
+
   // Text on a CREAM/WHITE card
   text: "#2C1610",
   textMuted: "#6B625C",
@@ -129,9 +135,54 @@ export const WEIGHTS = {
 };
 
 export const RADIUS = {
-  sm: 10,
-  md: 16,
-  lg: 20,
-  xl: 28,
+  sm: 14,
+  md: 18,
+  lg: 22,
+  xl: 30,
   pill: 999,
 };
+
+/**
+ * Soft-UI (neumorphism) tokens. The real values live in styles/neu.css
+ * as CSS custom properties; these are the same tokens as `var()`
+ * strings so inline styles and stylesheet classes share ONE source.
+ *
+ * Dark and cream surfaces deliberately use DIFFERENT shadow recipes:
+ * a light highlight shadow vanishes on cream and a black one turns
+ * muddy on espresso, so each surface family owns its own set.
+ */
+export const NEU = {
+  // Espresso / coffee surfaces
+  surfaceDark: "var(--mv-surface-dark)",
+  surfaceDark2: "var(--mv-surface-dark-2)",
+  darkRaised: "var(--neu-dark-raised)",
+  darkRaisedSm: "var(--neu-dark-raised-sm)",
+  darkInset: "var(--neu-dark-inset)",
+  darkPressed: "var(--neu-dark-pressed)",
+  // Cream / peach surfaces
+  creamRaised: "var(--neu-cream-raised)",
+  creamRaisedSm: "var(--neu-cream-raised-sm)",
+  creamInset: "var(--neu-cream-inset)",
+  // Primary action (tomato)
+  action: "var(--neu-action)",
+  actionPressed: "var(--neu-action-pressed)",
+};
+
+export const MOTION = {
+  fast: "var(--mv-dur-fast)",
+  base: "var(--mv-dur-base)",
+  slow: "var(--mv-dur-slow)",
+  ease: "var(--mv-ease)",
+};
+
+export const Z = { nav: 50, topbar: 55, popover: 100, modal: 200, toast: 300 };
+
+/** Shared layout metrics (px) — nav, content width, spacing scale. */
+export const LAYOUT = {
+  topbarHeight: 68,
+  bottomNavHeight: 68,
+  contentMax: 1080,
+  readableMax: 560,
+  pageX: 20,
+};
+export const SPACE = { xs: 6, sm: 10, md: 16, lg: 24, xl: 36 };

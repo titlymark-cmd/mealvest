@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut, BarChart3, Megaphone, Wallet } from "lucide-react";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
+import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { SIDEBAR_WIDTH, SIDEBAR_MOBILE_BREAKPOINT } from "../layout/sidebarConfig";
@@ -96,7 +96,8 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100vh",
     zIndex: 40,
     backgroundColor: COLORS.bgDeep,
-    borderRight: `1px solid ${COLORS.border}`,
+    borderRight: "1px solid var(--mv-hairline)",
+    boxShadow: "8px 0 24px rgba(0,0,0,0.35)",
     display: "flex",
     flexDirection: "column",
     padding: 20,
@@ -116,7 +117,8 @@ const styles: Record<string, React.CSSProperties> = {
     textDecoration: "none",
   },
   navItemActive: {
-    background: `linear-gradient(90deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
+    backgroundColor: "var(--mv-espresso)",
+    boxShadow: "var(--neu-dark-pressed)",
   },
   navLabel: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.textOnDark },
   logoutRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, padding: "10px 12px", marginTop: "auto" },
@@ -130,17 +132,17 @@ const mobileStyles: Record<string, React.CSSProperties> = {
     position: "fixed",
     left: 14,
     right: 14,
-    bottom: 14,
+    bottom: "calc(14px + var(--safe-bottom))",
     zIndex: 50,
-    backgroundColor: COLORS.bgDeep,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: 16,
+    backgroundColor: "var(--mv-surface-dark)",
+    border: "1px solid var(--mv-hairline)",
+    borderRadius: 999,
     display: "flex",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
     padding: "8px 6px",
-    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+    boxShadow: "var(--neu-dark-raised)",
     overflowX: "auto",
   },
   item: {
@@ -154,7 +156,8 @@ const mobileStyles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   itemActive: {
-    background: `linear-gradient(90deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
+    backgroundColor: "var(--mv-espresso)",
+    boxShadow: "var(--neu-dark-pressed)",
   },
   label: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 10, color: COLORS.textOnDark },
 };

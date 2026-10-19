@@ -76,3 +76,23 @@ export async function refreshPayoutStatus(req: AuthedRequest, res: Response, nex
     next(err);
   }
 }
+
+/** POST /api/admin/payouts/:payoutId/approve — review -> approved -> sent (same reference). */
+export async function approvePayout(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const payout = await payoutService.approveAndSubmitPayout(req.params.payoutId, req.user!.id);
+    res.json({ payout });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** POST /api/admin/payouts/:payoutId/cancel — only for a payout that was never sent; releases its orders. */
+export async function cancelPayout(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const payout = await payoutService.cancelPayout(req.params.payoutId, req.user!.id);
+    res.json({ payout });
+  } catch (err) {
+    next(err);
+  }
+}

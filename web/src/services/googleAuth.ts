@@ -36,7 +36,12 @@ function loadGoogleIdentityServices(): Promise<void> {
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google Identity Services"));
+    script.onerror = () => {
+      // Forget the failed attempt (and its tag) so a later mount can retry.
+      gsiLoadPromise = null;
+      script.remove();
+      reject(new Error("Failed to load Google Identity Services"));
+    };
     document.head.appendChild(script);
   });
   return gsiLoadPromise;
@@ -63,6 +68,8 @@ export function isGoogleAuthConfigured(): boolean {
  */
 export function useGoogleAuth(onIdToken: (idToken: string) => void) {
   const [ready, setReady] = useState(false);
+  // True when Google's script couldn't load (offline, ad blocker, firewall).
+  const [failed, setFailed] = useState(false);
   const buttonRef = useRef<HTMLDivElement | null>(null);
   const onIdTokenRef = useRef(onIdToken);
   onIdTokenRef.current = onIdToken;
@@ -93,6 +100,10 @@ export function useGoogleAuth(onIdToken: (idToken: string) => void) {
         });
       }
       setReady(true);
+    }).catch(() => {
+      // Google sign-in is optional: swallow the failure so it doesn't surface
+      // as an uncaught runtime error. Email/password login is unaffected.
+      if (!cancelled) setFailed(true);
     });
 
     return () => {
@@ -100,5 +111,5 @@ export function useGoogleAuth(onIdToken: (idToken: string) => void) {
     };
   }, []);
 
-  return { ready, buttonRef };
+  return { ready, failed, buttonRef };
 }

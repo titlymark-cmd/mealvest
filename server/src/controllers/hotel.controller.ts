@@ -6,6 +6,10 @@ import { ApiError } from "../middleware/errorHandler";
 import { updateHotelLocationSchema } from "../schemas/hotelLocationSchema";
 import * as orderService from "../services/orderService";
 import { uploadHotelImage } from "../services/storageService";
+import { imageUrlSchema } from "../schemas/hotelLocationSchema";
+
+/** Upper bound for a single menu item (M9) — far above any real meal, well inside NUMERIC(10,2). */
+const MAX_MENU_PRICE = 10_000;
 
 /**
  * Resolves the hotel_id for the currently authenticated hotel_owner/
@@ -347,9 +351,9 @@ export async function uploadImage(req: AuthedRequest, res: Response, next: NextF
 const menuItemSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(300).optional(),
-  price: z.number().positive(),
+  price: z.number().positive().max(MAX_MENU_PRICE, `Price can't exceed KSh ${MAX_MENU_PRICE}.`).finite(),
   category: z.enum(["breakfast", "lunch", "dinner", "snacks", "drinks", "other"]).default("other"),
-  imageUrl: z.string().trim().url("Enter a valid image URL.").max(2000).optional(),
+  imageUrl: imageUrlSchema.optional(),
 });
 
 export async function listOwnMenu(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -390,10 +394,10 @@ export async function addMenuItem(req: AuthedRequest, res: Response, next: NextF
 const updateMenuItemSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(300).optional(),
-  price: z.number().positive().optional(),
+  price: z.number().positive().max(MAX_MENU_PRICE, `Price can't exceed KSh ${MAX_MENU_PRICE}.`).finite().optional(),
   category: z.enum(["breakfast", "lunch", "dinner", "snacks", "drinks", "other"]).optional(),
   available: z.boolean().optional(),
-  imageUrl: z.string().trim().url("Enter a valid image URL.").max(2000).optional(),
+  imageUrl: imageUrlSchema.optional(),
 });
 
 export async function updateMenuItem(req: AuthedRequest, res: Response, next: NextFunction) {

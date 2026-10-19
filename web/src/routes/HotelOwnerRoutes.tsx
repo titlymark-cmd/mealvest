@@ -9,6 +9,7 @@ import HotelOwnerOrdersScreen from "../pages/hotelOwner/HotelOwnerOrdersScreen";
 import HotelMenuManageScreen from "../pages/hotelOwner/HotelMenuManageScreen";
 import HotelStudentsScreen from "../pages/hotelOwner/HotelStudentsScreen";
 import HotelProfileScreen from "../pages/hotelOwner/HotelProfileScreen";
+import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
 
 /** Same shell pattern as AdminRoutes.tsx's AdminShell — see that file for the rationale. */
 function HotelOwnerShell({ children }: { children: React.ReactNode }) {
@@ -44,6 +45,7 @@ export function HotelOwnerRoutes() {
       <Route path="/hotel-owner/menu" element={<HotelOwnerShell><HotelMenuManageScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/students" element={<HotelOwnerShell><HotelStudentsScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/profile" element={<HotelOwnerShell><HotelProfileScreen /></HotelOwnerShell>} />
+      <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="*" element={<Navigate to="/hotel-owner/home" replace />} />
     </Routes>
   );

@@ -5,6 +5,7 @@ import * as model from "../models/hotelPayoutModel";
 import * as transferService from "./paystackTransferService";
 import * as cyzoraPayouts from "./cyzoraPayoutService";
 import * as notificationEvents from "./notificationEvents";
+import { classifyProviderSendError } from "./payoutOutcome";
 
 export type PayoutProviderName = "paystack" | "cyzora";
 
@@ -34,19 +35,29 @@ export function generatePayoutReference(): string {
   return `PO-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+/** How long after a send attempt an 'unknown' payout may be re-sent (same reference) if the provider has no record of it. */
+export const UNKNOWN_RESEND_GRACE_MS = 5 * 60 * 1000;
+
+function limits(): model.PayoutLimits {
+  return { perPayoutMaxKes: env.payoutMaxAmountKes, dailyMaxKes: env.payoutDailyLimitKes };
+}
+
+function notifyFinal(row: model.HotelPayoutRow | null): void {
+  if (row && (row.status === "successful" || row.status === "failed")) {
+    notificationEvents.hotelPayoutStatusChanged(row.hotel_id, row.status, Number(row.amount));
+  }
+}
+
 /**
- * The one function that actually moves money toward a hotel. Claims
- * every currently-redeemed-but-unpaid order for this hotel atomically
- * (see model.claimPendingOrdersForPayout — this is what makes a
- * second concurrent "Pay out" click a safe no-op rather than a double
- * payment), creates or reuses a Paystack transfer recipient, then
- * initiates one real transfer for the batch total.
+ * The one function that starts moving money toward a hotel (H3).
  *
- * Never trusts the initiate-transfer response's status as final — a
- * transfer can still be "pending"/"otp" at this point even on
- * success; the true outcome is only ever decided later, by
- * verifyPayout() against Paystack's own record, exactly the same
- * principle as paymentService.activatePaymentIfNeeded.
+ *  1. Validates settlement details BEFORE claiming anything.
+ *  2. Atomically claims every redeemed-but-unpaid order into ONE payout
+ *     row with ONE stable reference (model.claimPendingOrdersForPayout).
+ *     Over-limit payouts are created in 'review' and stop here.
+ *  3. Sends it (submitPayout), where a timeout/5xx leaves the payout in
+ *     'unknown' with its orders still claimed — never 'failed' — so it
+ *     can only ever be reconciled under the SAME reference.
  */
 export async function triggerPayout(hotelId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
   const provider = activePayoutProvider();
@@ -65,125 +76,133 @@ export async function triggerPayout(hotelId: string, adminUserId: string): Promi
       `Automated payout isn't available yet for this hotel's "${hotel.payment_method}" settlement method — pay it out manually for now.`
     );
   }
-
-  // Cyzora validates the destination and the KES 30 floor BEFORE any
-  // orders are claimed — a rejection here leaves nothing to release.
-  const cyzoraDestination = provider === "cyzora" ? cyzoraPayouts.buildCyzoraDestination(hotel.payment_details as any) : null;
+  // Cyzora validates the destination BEFORE any orders are claimed.
+  if (provider === "cyzora") cyzoraPayouts.buildCyzoraDestination(hotel.payment_details as any);
 
   const reference = generatePayoutReference();
-  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider);
+  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider, limits());
   if (!claimed) {
     throw new ApiError(404, "NOTHING_TO_PAY_OUT", "This hotel has no redeemed orders awaiting payout right now.");
   }
+  if (claimed.status === "review") {
+    return claimed; // held for an admin decision — nothing is sent
+  }
+  return submitPayout(claimed.id);
+}
 
-  if (provider === "cyzora") {
-    return triggerCyzoraPayout(claimed, cyzoraDestination!);
+/**
+ * Sends a 'pending' or 'approved' payout to its provider. Safe against
+ * concurrent calls: model.markSubmitting lets exactly one caller move
+ * the row to 'unknown' and send; the others just get the current row.
+ */
+export async function submitPayout(payoutId: string): Promise<model.HotelPayoutRow> {
+  const payout = await model.getPayoutById(payoutId);
+  if (!payout) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
+  if (payout.status !== "pending" && payout.status !== "approved") return payout;
+
+  const hotel = await model.getHotelPaymentDetails(payout.hotel_id);
+  if (!hotel || !hotel.payment_method) {
+    return (await model.transitionToFinal(payout.id, "failed", ["pending", "approved"], {
+      failureReason: "No settlement details found for this hotel.",
+    })) ?? payout;
   }
 
+  // Pre-send steps move no money, so ANY failure here is a confirmed
+  // failure: the payout is closed and its orders released.
+  let recipientCode: string | null = null;
+  let destination: cyzoraPayouts.CyzoraDestination | null = null;
   try {
-    // Reuse a cached recipient code if this hotel already has one —
-    // avoids re-registering the same phone number with Paystack on
-    // every payout. A changed settlement method clears the cache (see
-    // migration 038's own comment) so a stale recipient is never reused.
-    let recipientCode = hotel.paystack_recipient_code;
-    if (!recipientCode) {
-      const created = await transferService.createRecipient(hotel.payment_details as any);
-      recipientCode = created.recipientCode;
-      await model.saveRecipientCode(hotelId, recipientCode);
+    if (payout.provider === "cyzora") {
+      destination = cyzoraPayouts.buildCyzoraDestination(hotel.payment_details as any);
+    } else {
+      recipientCode = hotel.paystack_recipient_code;
+      if (!recipientCode) {
+        const created = await transferService.createRecipient(hotel.payment_details as any);
+        recipientCode = created.recipientCode;
+        await model.saveRecipientCode(payout.hotel_id, recipientCode);
+      }
+    }
+  } catch (err) {
+    return (await model.transitionToFinal(payout.id, "failed", ["pending", "approved"], {
+      failureReason: err instanceof Error ? err.message : "Could not prepare the payout.",
+    })) ?? payout;
+  }
+
+  const sending = await model.markSubmitting(payout.id);
+  if (!sending) {
+    return (await model.getPayoutById(payout.id)) ?? payout; // someone else is sending it
+  }
+  return sendOnce(sending, { recipientCode, destination });
+}
+
+/**
+ * One provider call for a payout that is already in 'unknown' (we own
+ * the send). Always uses the payout's OWN transfer_reference as the
+ * provider reference / Idempotency-Key.
+ */
+async function sendOnce(
+  payout: model.HotelPayoutRow,
+  ctx: { recipientCode: string | null; destination: cyzoraPayouts.CyzoraDestination | null }
+): Promise<model.HotelPayoutRow> {
+  const amount = Number(payout.amount);
+  try {
+    if (payout.provider === "cyzora") {
+      const initiated = await cyzoraPayouts.createPayout({
+        amount,
+        reference: payout.transfer_reference,
+        destination: ctx.destination!,
+        description: `MEALVEST payout — ${payout.amount} KES`,
+      });
+      return await applySendResult(payout, cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status), initiated.payoutId, null);
     }
 
     const initiated = await transferService.initiateTransfer({
-      recipientCode,
-      amount: Number(claimed.amount),
-      reference,
-      reason: `MEALVEST payout — ${claimed.amount} KES`,
+      recipientCode: ctx.recipientCode!,
+      amount,
+      reference: payout.transfer_reference,
+      reason: `MEALVEST payout — ${payout.amount} KES`,
     });
-
-    const status = initiated.status === "success" ? "successful" : initiated.status === "failed" ? "failed" : "processing";
-    const updated = await model.updatePayoutAfterInitiate(claimed.id, {
-      status,
-      recipientCode,
-      transferCode: initiated.transferCode,
-    });
-
-    if (status === "failed") {
-      // Initiated and immediately failed (rare, but real) — release
-      // the claimed orders so they're eligible for the next payout
-      // attempt instead of being stuck "claimed" by a payout that
-      // never actually paid them.
-      await model.releaseClaimedOrders(claimed.id);
-    }
-
-    return updated;
+    const mapped = initiated.status === "success" ? "successful" : initiated.status === "failed" ? "failed" : "processing";
+    return await applySendResult(payout, mapped, initiated.transferCode, ctx.recipientCode);
   } catch (err) {
-    // The claim already happened — a failed recipient/transfer call
-    // must release those orders back to the unpaid pool, or they'd be
-    // silently stuck forever under a payout that never moved money.
-    await model.releaseClaimedOrders(claimed.id).catch(() => {});
-    const failed = await model.updatePayoutAfterInitiate(claimed.id, {
-      status: "failed",
-      failureReason: err instanceof Error ? err.message : "Unknown error",
+    const classified = classifyProviderSendError(err, "PAYOUT_SEND_FAILED", "Could not send this payout.");
+    if (classified.definite) {
+      const row = await model.transitionToFinal(payout.id, "failed", ["unknown"], { failureReason: classified.message });
+      notifyFinal(row);
+      return row ?? (await model.getPayoutById(payout.id)) ?? payout;
+    }
+    console.warn("[hotelPayoutService] payout outcome UNKNOWN — will reconcile under the same reference", {
+      payoutId: payout.id,
+      reference: payout.transfer_reference,
+      reason: classified.message,
     });
-    return failed;
+    return (await model.recordUnknownOutcome(payout.id, `Outcome unknown: ${classified.message}`)) ?? payout;
   }
 }
 
-/**
- * Cyzora half of triggerPayout: one POST /payouts for the batch total,
- * Idempotency-Key = our PO- reference. The response's status is never
- * treated as final (a payout can sit at requested/processing for a
- * while) — payout.paid / payout.failed webhooks finalize it via
- * applyCyzoraPayoutWebhook. Cyzora's payout id goes into
- * transfer_code, the column the webhook lookup matches on.
- */
-async function triggerCyzoraPayout(
-  claimed: model.HotelPayoutRow,
-  destination: cyzoraPayouts.CyzoraDestination
+async function applySendResult(
+  payout: model.HotelPayoutRow,
+  status: "processing" | "successful" | "failed",
+  transferCode: string | null,
+  recipientCode: string | null
 ): Promise<model.HotelPayoutRow> {
-  try {
-    const initiated = await cyzoraPayouts.createPayout({
-      amount: Number(claimed.amount),
-      reference: claimed.transfer_reference,
-      destination,
-      description: `MEALVEST payout — ${claimed.amount} KES`,
+  if (status === "failed") {
+    const row = await model.transitionToFinal(payout.id, "failed", ["unknown"], {
+      failureReason: "Provider reported the payout as failed",
+      transferCode,
     });
-
-    const status = cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status);
-    const updated = await model.updatePayoutAfterInitiate(claimed.id, {
-      status,
-      transferCode: initiated.payoutId,
-    });
-    if (status === "failed") {
-      await model.releaseClaimedOrders(claimed.id);
-    } else if (status === "successful") {
-      notificationEvents.hotelPayoutStatusChanged(claimed.hotel_id, "successful", Number(claimed.amount));
-    }
-    return updated;
-  } catch (err) {
-    // Same contract as the Paystack branch: a claim already happened,
-    // so a rejected payout call must hand those orders back to the
-    // unpaid pool rather than leaving them stuck under a payout that
-    // never moved money. Cyzora's Idempotency-Key means an eventual
-    // retry with a NEW reference can't double-pay the old one either.
-    await model.releaseClaimedOrders(claimed.id).catch(() => {});
-    return model.updatePayoutAfterInitiate(claimed.id, {
-      status: "failed",
-      failureReason: err instanceof Error ? err.message : "Unknown error",
-    });
+    notifyFinal(row);
+    return row ?? payout;
   }
+  const accepted = await model.recordSendAccepted(payout.id, { status, transferCode, recipientCode });
+  if (status === "successful") notifyFinal(accepted);
+  return accepted ?? (await model.getPayoutById(payout.id)) ?? payout;
 }
 
 /**
- * Applies a signature-verified Cyzora payout.paid / payout.failed
- * event. The controller has already checked X-Cyzora-Signature on
- * the raw bytes — that HMAC with the webhook secret is Cyzora's
- * documented proof of authenticity, and the only payout-status source
- * this integration has (a per-payout read endpoint isn't among the
- * documented calls this was built from, so there's nothing to
- * re-query; see TESTING.md). Idempotent: finalizePayoutStatus only
- * moves a row that's still 'processing', so a redelivered event is a
- * no-op, and a duplicate can never release orders twice or notify
- * twice.
+ * Applies a signature-verified Cyzora payout.paid / payout.failed event.
+ * Idempotent: only a payout still awaiting its outcome ('processing' or
+ * 'unknown') is moved, and orders are released at most once.
  */
 export async function applyCyzoraPayoutWebhook(
   eventName: string,
@@ -191,57 +210,133 @@ export async function applyCyzoraPayoutWebhook(
 ): Promise<model.HotelPayoutRow | null> {
   const payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
   if (!payout) {
-    // Either a payout this app never created, or the webhook beat
-    // triggerCyzoraPayout's own transfer_code write (Cyzora can report
-    // a test payout within milliseconds). Returning null makes the
-    // controller answer 404, and Cyzora's 10s retry lands after the
-    // row is written.
+    // A payout this app never created, or the webhook beat our own
+    // transfer_code write — null makes the controller answer 404 and
+    // Cyzora's retry lands after the row is written.
     console.warn("[hotelPayoutService.applyCyzoraPayoutWebhook] No hotel_payouts row for Cyzora payout id:", cyzoraPayoutId);
     return null;
   }
-  if (payout.status === "pending") return null; // initiate response still being recorded — let Cyzora retry
-  if (payout.status !== "processing") return payout; // already final — duplicate delivery
+  if (payout.status !== "processing" && payout.status !== "unknown") return payout; // final already, or never sent
 
   const finalStatus = eventName === "payout.paid" ? "successful" : eventName === "payout.failed" ? "failed" : null;
   if (!finalStatus) return payout;
 
-  const result = await model.finalizePayoutStatus(payout.id, finalStatus, finalStatus === "failed" ? "Cyzora reported payout.failed" : null);
-  if (!result) return payout; // lost the race with a concurrent delivery — it already did the work
-  if (finalStatus === "failed") {
-    await model.releaseClaimedOrders(payout.id);
-  }
-  notificationEvents.hotelPayoutStatusChanged(payout.hotel_id, finalStatus, Number(payout.amount));
+  const result = await model.transitionToFinal(payout.id, finalStatus, ["processing", "unknown"], {
+    failureReason: finalStatus === "failed" ? "Cyzora reported payout.failed" : null,
+  });
+  if (!result) return (await model.getPayoutById(payout.id)) ?? payout; // lost a race with a duplicate delivery
+  notifyFinal(result);
   return result;
 }
 
 /**
- * Re-checks a still-"processing" payout against Paystack's own
- * record. Safe to call repeatedly (idempotent via
- * model.finalizePayoutStatus's own WHERE status='processing' guard) —
- * called by an admin "Refresh status" action and, once wired, the
- * Paystack transfer.success/transfer.failed webhook.
+ * Re-checks an unresolved payout against the provider, under its OWN
+ * reference. Used by the admin "Refresh status" action, the Paystack
+ * transfer.* webhook and the reconciliation cron. Never creates a new
+ * reference; never re-sends unless the provider has no record of the
+ * reference AND the grace period has passed (and then only with the
+ * same reference/idempotency key, which the provider deduplicates).
  */
 export async function verifyPayout(payoutId: string): Promise<model.HotelPayoutRow | null> {
   const payout = await model.getPayoutById(payoutId);
   if (!payout) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
-  if (payout.status !== "processing" || !payout.transfer_code) return payout;
+  if (payout.status !== "processing" && payout.status !== "unknown") return payout;
 
-  // Cyzora payouts finalize through signed payout.paid/payout.failed
-  // webhooks (applyCyzoraPayoutWebhook) — there's no documented
-  // per-payout read to poll here, so "Refresh" just returns the
-  // current row for them.
-  if (payout.provider === "cyzora") return payout;
+  if (payout.provider === "cyzora") {
+    // Cyzora has no documented per-payout read: 'processing' payouts are
+    // finalized by signed webhooks. An 'unknown' one is reconciled by
+    // re-POSTing with the SAME Idempotency-Key, which returns the
+    // original payout if it was created (or creates it exactly once).
+    if (payout.status === "processing") {
+      await model.touchReconciled(payout.id);
+      return payout;
+    }
+    if (!graceElapsed(payout)) return payout;
+    const hotel = await model.getHotelPaymentDetails(payout.hotel_id);
+    let destination: cyzoraPayouts.CyzoraDestination;
+    try {
+      destination = cyzoraPayouts.buildCyzoraDestination((hotel?.payment_details ?? {}) as any);
+    } catch (err) {
+      return (await model.recordUnknownOutcome(payout.id, `Cannot reconcile: ${(err as Error).message}`)) ?? payout;
+    }
+    await model.recordResendAttempt(payout.id);
+    return sendOnce(payout, { recipientCode: null, destination });
+  }
 
-  const verified = await transferService.verifyTransfer(payout.transfer_code);
-  if (verified.status === "pending") return payout;
+  // Paystack
+  let verified: transferService.VerifyTransferResult | null;
+  try {
+    verified = payout.transfer_code
+      ? await transferService.verifyTransfer(payout.transfer_code)
+      : await transferService.verifyTransferByReference(payout.transfer_reference);
+  } catch (err) {
+    await model.touchReconciled(payout.id);
+    throw err;
+  }
+
+  if (!verified) {
+    // Paystack has no transfer with our reference.
+    if (payout.status !== "unknown" || !graceElapsed(payout)) return payout;
+    const recipientCode = payout.recipient_code ?? (await model.getHotelPaymentDetails(payout.hotel_id))?.paystack_recipient_code ?? null;
+    if (!recipientCode) {
+      return (await model.recordUnknownOutcome(payout.id, "Cannot re-send: no Paystack recipient on file")) ?? payout;
+    }
+    await model.recordResendAttempt(payout.id);
+    return sendOnce(payout, { recipientCode, destination: null });
+  }
+
+  if (verified.status === "pending") {
+    if (payout.status === "unknown") {
+      return (await model.recordSendAccepted(payout.id, { status: "processing", transferCode: verified.transferCode })) ?? payout;
+    }
+    await model.touchReconciled(payout.id);
+    return payout;
+  }
 
   const finalStatus = verified.status === "success" ? "successful" : "failed";
-  const result = await model.finalizePayoutStatus(payoutId, finalStatus, verified.failureReason);
-  if (finalStatus === "failed") {
-    await model.releaseClaimedOrders(payoutId);
+  const result = await model.transitionToFinal(payout.id, finalStatus, ["processing", "unknown"], {
+    failureReason: verified.failureReason,
+    transferCode: verified.transferCode,
+  });
+  notifyFinal(result);
+  return result ?? (await model.getPayoutById(payout.id));
+}
+
+function graceElapsed(payout: model.HotelPayoutRow): boolean {
+  const sentAt = payout.submitted_at ? new Date(payout.submitted_at).getTime() : new Date(payout.updated_at).getTime();
+  return Date.now() - sentAt >= UNKNOWN_RESEND_GRACE_MS;
+}
+
+/**
+ * review -> approved -> sent. Approval policy (M8): a payout held for
+ * review (over PAYOUT_MAX_AMOUNT_KES, or pushing the day over
+ * PAYOUT_DAILY_LIMIT_KES) must be approved by a DIFFERENT administrator
+ * than the one who initiated it. Payouts within the limits are sent
+ * directly by the initiating admin, as before.
+ */
+export async function approveAndSubmitPayout(payoutId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
+  const approved = await model.approvePayout(payoutId, adminUserId);
+  if (!approved) {
+    const current = await model.getPayoutById(payoutId);
+    if (!current) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
+    if (current.status === "review" && current.initiated_by_admin_id === adminUserId) {
+      throw new ApiError(403, "DUAL_APPROVAL_REQUIRED", "Another administrator must approve a payout you initiated.");
+    }
+    throw new ApiError(409, "INVALID_TRANSITION", `This payout is ${current.status} and cannot be approved.`);
   }
-  if (result) {
-    notificationEvents.hotelPayoutStatusChanged(payout.hotel_id, finalStatus, Number(payout.amount));
+  return submitPayout(approved.id);
+}
+
+/** Cancels a payout that was never sent (review/approved) and releases its orders. */
+export async function cancelPayout(payoutId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
+  const row = await model.transitionToFinal(payoutId, "cancelled", ["review", "approved"], {
+    adminId: adminUserId,
+    failureReason: "Cancelled by an administrator before sending",
+  });
+  if (!row) {
+    const current = await model.getPayoutById(payoutId);
+    if (!current) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
+    throw new ApiError(409, "INVALID_TRANSITION", `This payout is ${current.status} and cannot be cancelled.`);
   }
-  return result ?? payout;
+  return row;
 }

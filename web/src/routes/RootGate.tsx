@@ -12,6 +12,7 @@ import { AnnouncementPopup } from "../components/AnnouncementPopup";
 import InstallScreen from "../pages/InstallScreen";
 import DemoScreen from "../pages/demo/DemoScreen";
 import { PinGateScreen } from "../pages/PinGateScreen";
+import { PinUnlockScreen } from "../pages/PinUnlockScreen";
 import TermsScreen from "../pages/TermsScreen";
 
 /**
@@ -46,7 +47,7 @@ export function RootGate() {
  * display time) was removed; nothing waits on it any more.
  */
 function AuthGatedApp() {
-  const { user, isLoading, pendingLogin } = useAuth();
+  const { user, isLoading, pendingLogin, isLocked } = useAuth();
 
   // No splash screen: the app goes straight to the silent-refresh
   // check and then to the right route table. A password login just
@@ -75,6 +76,15 @@ function AuthGatedApp() {
         <Spinner size="large" color={COLORS.primary} />
       </div>
     );
+  }
+
+  // A valid session exists but the app is locked (reopened PWA / long
+  // background). This is NOT logged-out: it must be checked before the
+  // `!user` branch below, otherwise a locked user would be shown the public
+  // site and look signed out. The PIN screen is the only thing rendered, so
+  // no protected route can mount until the server has verified the PIN.
+  if (isLocked) {
+    return <PinUnlockScreen />;
   }
 
   if (!user) {

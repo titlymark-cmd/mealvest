@@ -136,6 +136,22 @@ export async function refreshTokens(refreshToken: string): Promise<AuthResult> {
   return res.json();
 }
 
+/**
+ * App-lock unlock: trades the stored refresh token + the account PIN for a
+ * rotated session via POST /api/auth/pin/verify. The server enforces the
+ * per-account attempt lockout and rate limiting; a wrong PIN never consumes
+ * the session. The PIN is only ever sent in this request body.
+ */
+export async function unlockWithPin(refreshToken: string, pin: string): Promise<AuthResult> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/pin/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken, pin }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
 export async function loginWithGoogle(idToken: string): Promise<AuthResult> {
   const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
     method: "POST",
@@ -175,4 +191,44 @@ export async function logoutRequest(refreshToken: string): Promise<void> {
     // Best-effort — even if this fails (e.g. offline), the local
     // session is cleared by the caller regardless.
   });
+}
+
+/** Redeems a one-time email-verification link token (public; the token is the proof). */
+export async function confirmEmailVerification(token: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/auth/verify-email/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+}
+
+/** Sends a verification link to the signed-in user's own email. */
+export async function requestEmailVerification(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<{ sent: boolean; alreadyVerified: boolean }> {
+  const res = await authFetch("/api/auth/verify-email/request", { method: "POST" });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
+/** Sends a 6-digit code by SMS to the signed-in user's own phone. */
+export async function requestPhoneVerification(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<{ sent: boolean; alreadyVerified: boolean }> {
+  const res = await authFetch("/api/auth/verify-phone/request", { method: "POST" });
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
+export async function confirmPhoneVerification(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>,
+  code: string
+): Promise<void> {
+  const res = await authFetch("/api/auth/verify-phone/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
 }

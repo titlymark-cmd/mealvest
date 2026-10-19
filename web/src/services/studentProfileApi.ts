@@ -10,6 +10,11 @@ export interface StudentProfile {
   institution: string | null;
   admission_number: string | null;
   avatar_url: string | null;
+  /** Which step-up proof sensitive actions (withdrawal) need: the PIN if set, otherwise a Google re-confirmation. */
+  has_pin?: boolean;
+  has_google?: boolean;
+  email_verified?: boolean;
+  phone_verified?: boolean;
 }
 
 export interface UpdateStudentProfileInput {

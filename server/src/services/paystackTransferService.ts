@@ -1,6 +1,7 @@
 import axios from "axios";
 import { env } from "../config/env";
 import { ApiError } from "../middleware/errorHandler";
+import { classifyProviderSendError } from "./payoutOutcome";
 
 function client() {
   if (!env.paystackSecretKey) {
@@ -9,6 +10,7 @@ function client() {
   return axios.create({
     baseURL: env.paystackBaseUrl,
     headers: { Authorization: `Bearer ${env.paystackSecretKey}`, "Content-Type": "application/json" },
+    timeout: 30_000,
   });
 }
 
@@ -125,17 +127,14 @@ export async function initiateTransfer(params: {
     return { transferCode: data.transfer_code, status: data.status };
   } catch (err) {
     if (axios.isAxiosError(err)) {
-      console.error("[paystackTransferService.initiateTransfer] Paystack rejected the transfer:", {
+      console.error("[paystackTransferService.initiateTransfer] Paystack transfer call failed:", {
         status: err.response?.status,
         body: err.response?.data,
+        message: err.message,
       });
-      throw new ApiError(
-        502,
-        "PAYSTACK_TRANSFER_FAILED",
-        err.response?.data?.message || "Could not initiate this payout with Paystack."
-      );
     }
-    throw err;
+    // Classified: a timeout / 5xx is NOT a failure — see payoutOutcome.ts.
+    throw classifyProviderSendError(err, "PAYSTACK_TRANSFER_FAILED", "Could not initiate this payout with Paystack.");
   }
 }
 
@@ -165,6 +164,31 @@ export async function verifyTransfer(transferCodeOrId: string): Promise<VerifyTr
     if (axios.isAxiosError(err) && err.response?.status === 404) {
       throw new ApiError(404, "TRANSFER_NOT_FOUND", "No matching Paystack transfer found.");
     }
+    throw new ApiError(502, "PAYSTACK_TRANSFER_VERIFY_FAILED", "Could not verify this payout with Paystack.");
+  }
+}
+
+/**
+ * Looks a transfer up by OUR reference — how an 'unknown' payout (the
+ * initiate call timed out, so we never learned Paystack's transfer
+ * code) is reconciled. Returns null only when Paystack says no transfer
+ * with this reference exists.
+ */
+export async function verifyTransferByReference(reference: string): Promise<VerifyTransferResult | null> {
+  try {
+    const res = await client().get(`/transfer/verify/${encodeURIComponent(reference)}`);
+    const data = res.data.data;
+    if (!data || String(data.reference) !== reference) {
+      throw new ApiError(502, "PAYSTACK_REFERENCE_MISMATCH", "Paystack returned a transfer for a different reference.");
+    }
+    return {
+      status: mapTransferStatus(data.status),
+      transferCode: data.transfer_code,
+      failureReason: data.status !== "success" ? data.status : null,
+    };
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    if (axios.isAxiosError(err) && err.response?.status === 404) return null;
     throw new ApiError(502, "PAYSTACK_TRANSFER_VERIFY_FAILED", "Could not verify this payout with Paystack.");
   }
 }

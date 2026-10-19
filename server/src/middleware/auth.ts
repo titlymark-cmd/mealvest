@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { ApiError } from "./errorHandler";
 import { Role } from "../types/roles";
 import { decodeAccessToken } from "../services/authService";
+import { pool } from "../config/db";
 
 export interface AuthedRequest extends Request {
   user?: {
@@ -11,12 +12,43 @@ export interface AuthedRequest extends Request {
 }
 
 /**
- * Real JWT verification (Day 2). Expects `Authorization: Bearer
- * <accessToken>`. Any problem — missing header, malformed token,
- * expired token, bad signature — becomes a clean 401 via ApiError,
- * never a raw exception/stack trace reaching the client.
+ * Session check on every protected request (finding M6).
+ *
+ * The access token's signature/expiry/issuer/audience are verified
+ * (lib/jwt.ts), AND the account is looked up so a suspended or deleted
+ * account — or one whose role changed — is refused immediately rather
+ * than for up to 15 minutes until the token expires. Lookups are cached
+ * per instance for at most STATUS_CACHE_MS, which bounds the revocation
+ * delay; suspension also revokes refresh tokens, so no new access
+ * tokens can be obtained.
  */
-export function requireAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
+const STATUS_CACHE_MS = 15_000;
+const statusCache = new Map<string, { status: string; role: string; at: number }>();
+
+export function invalidateUserStatusCache(userId?: string): void {
+  if (userId) statusCache.delete(userId);
+  else statusCache.clear();
+}
+
+async function lookupAccount(userId: string): Promise<{ status: string; role: string } | null> {
+  const cached = statusCache.get(userId);
+  if (cached && Date.now() - cached.at < STATUS_CACHE_MS) return cached;
+  const result = await pool.query<{ account_status: string; role: string }>(
+    "SELECT account_status, role FROM users WHERE id = $1",
+    [userId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    statusCache.delete(userId);
+    return null;
+  }
+  const entry = { status: row.account_status, role: row.role, at: Date.now() };
+  if (statusCache.size > 10_000) statusCache.clear();
+  statusCache.set(userId, entry);
+  return entry;
+}
+
+export async function requireAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
     next(new ApiError(401, "UNAUTHENTICATED", "You must be signed in."));
@@ -24,17 +56,31 @@ export function requireAuth(req: AuthedRequest, _res: Response, next: NextFuncti
   }
 
   const token = header.slice("Bearer ".length).trim();
+  let payload: { userId: string; role: Role };
   try {
-    const payload = decodeAccessToken(token);
-    req.user = { id: payload.userId, role: payload.role };
-    next();
+    payload = decodeAccessToken(token);
   } catch {
-    // Covers expired tokens and tampered/invalid signatures alike —
-    // the client-side response is the same either way: refresh, or
-    // if refresh also fails, log out. We don't need to distinguish
-    // "expired" from "invalid" for the client to know what to do.
     next(new ApiError(401, "INVALID_TOKEN", "Your session has expired. Please log in again."));
+    return;
   }
+
+  try {
+    const account = await lookupAccount(payload.userId);
+    if (!account || account.role !== payload.role) {
+      next(new ApiError(401, "INVALID_TOKEN", "Your session has expired. Please log in again."));
+      return;
+    }
+    if (account.status === "suspended") {
+      next(new ApiError(403, "ACCOUNT_SUSPENDED", "This account has been suspended."));
+      return;
+    }
+  } catch (err) {
+    next(err);
+    return;
+  }
+
+  req.user = { id: payload.userId, role: payload.role };
+  next();
 }
 
 /**

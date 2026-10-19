@@ -69,6 +69,12 @@ function unwrap(body: any): any {
 
 function toVerifyResult(reference: string, resource: any, raw: unknown): VerifyPaymentResult {
   const charge = resource?.charge && typeof resource.charge === "object" ? resource.charge : resource;
+  // When Cyzora echoes our account_ref, it must be OUR reference — a
+  // record for another payment must never credit this one.
+  const accountRef = charge?.account_ref ?? resource?.account_ref;
+  if (typeof accountRef === "string" && accountRef && accountRef !== reference) {
+    throw new ApiError(502, "CYZORA_REFERENCE_MISMATCH", "Cyzora returned a record for a different reference.");
+  }
   const amountKes = centsToKes(charge?.amount);
   return {
     reference,

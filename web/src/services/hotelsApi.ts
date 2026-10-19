@@ -37,7 +37,13 @@ export async function fetchHotels(): Promise<Hotel[]> {
 
 export async function fetchHotelMenu(hotelId: string): Promise<{ hotel: Hotel; menu: MenuItem[] }> {
   const res = await fetch(`${API_BASE_URL}/api/hotels/${hotelId}/menu`);
-  if (!res.ok) throw new Error("Could not load this hotel's menu.");
+  if (!res.ok) {
+    // Keep the HTTP status so callers can tell "this hotel isn't available"
+    // (404 — not found, or no longer active) from a transient failure.
+    const err = new Error(res.status === 404 ? "This hotel isn't available." : "Could not load this hotel's menu.") as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 

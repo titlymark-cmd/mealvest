@@ -1,0 +1,668 @@
+/* ============================================================
+   MEALVEST — soft-UI design system (dark neumorphism, warm fintech)
+   ------------------------------------------------------------
+   Single source of truth for surfaces, shadows, motion and the
+   shared interactive classes. styles/theme.ts re-exports these as
+   `var()` strings (NEU / MOTION) so inline styles and classes agree.
+
+   Palette (brand, mandatory):
+     espresso #1D1511 · coffee #2C1610 · cream #FCF4EA · peach #FFE1C7
+     tomato #E5482E · orange #FF8A3D · amber #F5A623
+   Added neutrals (documented): two espresso-family raised surfaces
+   (#261A14 / #32221A) so dark shadows have something to lift off.
+
+   Shadow families are intentionally separate:
+     --neu-dark-*   black drop + faint peach highlight, for espresso
+     --neu-cream-*  deep ambient drop + paper-edge inner highlights
+     --neu-action-* tomato button, pressed = compressed inset
+   ============================================================ */
+
+:root {
+  --mv-espresso: #1d1511;
+  --mv-coffee: #2c1610;
+  --mv-surface-dark: #261a14;
+  --mv-surface-dark-2: #32221a;
+  --mv-cream: #fcf4ea;
+  --mv-peach: #ffe1c7;
+  --mv-tomato: #e5482e;
+  --mv-orange: #ff8a3d;
+  --mv-amber: #f5a623;
+  --mv-hairline: rgba(255, 225, 199, 0.08);
+
+  /* Dark surfaces */
+  --neu-dark-raised: 8px 8px 18px rgba(0, 0, 0, 0.5), -5px -5px 14px rgba(255, 225, 199, 0.045);
+  --neu-dark-raised-sm: 4px 4px 10px rgba(0, 0, 0, 0.48), -3px -3px 8px rgba(255, 225, 199, 0.04);
+  --neu-dark-inset: inset 4px 4px 9px rgba(0, 0, 0, 0.55), inset -3px -3px 8px rgba(255, 225, 199, 0.04);
+  --neu-dark-pressed: inset 3px 3px 7px rgba(0, 0, 0, 0.6), inset -2px -2px 6px rgba(255, 225, 199, 0.035);
+  --neu-input-inset: inset 2px 2px 6px rgba(0, 0, 0, 0.3), inset -1px -1px 4px rgba(255, 225, 199, 0.04);
+
+  /* Cream / peach surfaces */
+  --neu-cream-raised: 0 22px 36px -14px rgba(0, 0, 0, 0.6), -4px -4px 12px rgba(255, 225, 199, 0.05),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.8), inset -1px -2px 0 rgba(176, 136, 98, 0.2);
+  --neu-cream-raised-sm: 0 10px 20px -10px rgba(0, 0, 0, 0.55), inset 1px 1px 0 rgba(255, 255, 255, 0.75),
+    inset -1px -1px 0 rgba(176, 136, 98, 0.18);
+  --neu-cream-inset: inset 3px 3px 7px rgba(150, 105, 65, 0.22), inset -3px -3px 7px rgba(255, 255, 255, 0.85);
+
+  /* Primary action */
+  --neu-action: 0 12px 22px -8px rgba(229, 72, 46, 0.6), inset 1px 1px 0 rgba(255, 255, 255, 0.3),
+    inset -2px -3px 5px rgba(120, 25, 10, 0.28);
+  --neu-action-pressed: inset 3px 3px 9px rgba(100, 20, 8, 0.55), inset -2px -2px 6px rgba(255, 150, 110, 0.25);
+
+  /* Focus ring: visible on every surface, never colour-only */
+  --mv-focus: 0 0 0 2px var(--mv-espresso), 0 0 0 4px var(--mv-amber);
+
+  /* Motion */
+  --mv-ease: cubic-bezier(0.22, 0.9, 0.32, 1);
+  --mv-dur-fast: 140ms;
+  --mv-dur-base: 220ms;
+  --mv-dur-slow: 380ms;
+
+  /* Safe areas */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --bottom-nav-h: 68px;
+}
+
+/* Global typeface. Screens still set FONTS inline, but anything that does
+   not (links, nav labels, native controls) must never fall back to serif. */
+body,
+button,
+input,
+textarea,
+select {
+  font-family: "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* ---------- Focus (keyboard) ---------- */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--mv-focus);
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--mv-orange) !important;
+}
+
+/* ---------- Form controls: inset wells ---------- */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+textarea,
+select {
+  box-shadow: var(--neu-input-inset);
+}
+/* 16px stops iOS Safari zooming the page when a field is focused. Inline
+   sizes would otherwise win, so this is the one place !important is used. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: var(--neu-input-inset), 0 0 0 3px rgba(245, 166, 35, 0.35);
+}
+input.mv-input-plain,
+input.mv-input-plain:focus-visible {
+  box-shadow: none;
+}
+
+/* ---------- Buttons: every button presses in ---------- */
+button {
+  transition: transform var(--mv-dur-fast) var(--mv-ease), background-color var(--mv-dur-base) ease,
+    border-color var(--mv-dur-base) ease, box-shadow var(--mv-dur-base) var(--mv-ease), opacity var(--mv-dur-base) ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button:not(:disabled):active {
+  transform: scale(0.975);
+}
+@media (hover: hover) {
+  button:not(:disabled):hover {
+    filter: brightness(1.05);
+  }
+}
+
+/* .mv-action: tactile card/button that lifts on hover, compresses on press.
+   (Replaces the old rotating neon ring — glowing edges are not part of
+   the soft-UI language.) */
+.mv-action {
+  position: relative;
+  transition: transform var(--mv-dur-base) var(--mv-ease), box-shadow var(--mv-dur-base) var(--mv-ease);
+}
+@media (hover: hover) {
+  .mv-action:hover {
+    transform: translateY(-2px);
+  }
+}
+.mv-action:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+/* ---------- Surface utilities ---------- */
+.neu-dark {
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised);
+  border-radius: 22px;
+}
+.neu-dark-sm {
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+}
+.neu-well {
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+}
+.neu-cream {
+  background: var(--mv-cream);
+  box-shadow: var(--neu-cream-raised);
+}
+.neu-peach {
+  background: var(--mv-peach);
+  box-shadow: var(--neu-cream-raised-sm);
+}
+.neu-cream-well {
+  background: #f4e8d8;
+  box-shadow: var(--neu-cream-inset);
+}
+
+/* ---------- Page transition ---------- */
+@keyframes mv-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mv-page {
+  animation: mv-page-in var(--mv-dur-slow) var(--mv-ease) both;
+}
+@keyframes mv-step-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mv-step-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mv-step-fwd {
+  animation: mv-step-in var(--mv-dur-slow) var(--mv-ease) both;
+}
+.mv-step-back {
+  animation: mv-step-in-back var(--mv-dur-slow) var(--mv-ease) both;
+}
+
+/* ---------- Student navigation ---------------------------------- */
+.mv-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: calc(10px + var(--safe-top)) 20px 10px;
+  background: linear-gradient(180deg, var(--mv-espresso) 70%, rgba(29, 21, 17, 0));
+}
+.mv-topbar-inner {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.mv-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--mv-cream);
+  flex-shrink: 0;
+}
+.mv-topnav {
+  display: none;
+  margin: 0 auto;
+  padding: 5px;
+  gap: 2px;
+  border-radius: 999px;
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+}
+.mv-topnav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(252, 244, 234, 0.62);
+  transition: color var(--mv-dur-base) ease, background-color var(--mv-dur-base) ease,
+    box-shadow var(--mv-dur-base) var(--mv-ease);
+}
+.mv-topnav a:hover {
+  color: var(--mv-cream);
+}
+.mv-topnav a[aria-current="page"] {
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark-2);
+  box-shadow: var(--neu-dark-raised-sm);
+}
+.mv-topnav a[aria-current="page"] svg {
+  color: var(--mv-amber);
+}
+.mv-topnav .mv-nav-label {
+  display: none;
+}
+.mv-topnav a[aria-current="page"] .mv-nav-label {
+  display: inline;
+}
+@media (min-width: 768px) {
+  .mv-topnav {
+    display: inline-flex;
+  }
+}
+@media (min-width: 1040px) {
+  .mv-topnav .mv-nav-label {
+    display: inline;
+  }
+}
+.mv-topbar-spacer {
+  flex: 1;
+}
+@media (min-width: 768px) {
+  .mv-topbar-spacer {
+    display: none;
+  }
+}
+.mv-brand-text {
+  display: none;
+}
+@media (min-width: 420px) {
+  .mv-brand-text {
+    display: inline;
+  }
+}
+
+.mv-iconbtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  color: var(--mv-cream);
+  flex-shrink: 0;
+  position: relative;
+}
+.mv-iconbtn:not(:disabled):active {
+  box-shadow: var(--neu-dark-pressed);
+}
+
+/* Floating pill (mobile). Fixed, inset from every edge, safe-area aware. */
+.mv-bottomnav {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(14px + var(--safe-bottom));
+  z-index: 50;
+  width: min(calc(100% - 28px), 440px);
+  height: var(--bottom-nav-h);
+  padding: 6px;
+  border-radius: 999px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised), 0 0 0 1px var(--mv-hairline);
+}
+@media (min-width: 768px) {
+  .mv-bottomnav {
+    display: none;
+  }
+}
+/* Sliding thumb: translated by exactly one slot per index. */
+.mv-bottomnav-thumb {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: calc((100% - 12px) / var(--mv-nav-count));
+  border-radius: 999px;
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-pressed);
+  transform: translateX(calc(var(--mv-nav-index) * 100%));
+  transition: transform 320ms var(--mv-ease);
+  pointer-events: none;
+}
+.mv-bottomnav-thumb[data-hidden="true"] {
+  opacity: 0;
+}
+.mv-bottomnav a {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 44px;
+  border-radius: 999px;
+  color: rgba(252, 244, 234, 0.6);
+  font-size: 10px;
+  font-weight: 600;
+  transition: color var(--mv-dur-base) ease;
+}
+.mv-bottomnav a svg {
+  transition: transform 320ms var(--mv-ease), color var(--mv-dur-base) ease;
+}
+.mv-bottomnav a[aria-current="page"] {
+  color: var(--mv-cream);
+}
+.mv-bottomnav a[aria-current="page"] svg {
+  color: var(--mv-amber);
+  transform: translateY(-1px) scale(1.12);
+}
+
+/* Content area clears the floating pill on mobile */
+.mv-has-bottomnav {
+  padding-bottom: calc(var(--bottom-nav-h) + 40px + var(--safe-bottom));
+}
+@media (min-width: 768px) {
+  .mv-has-bottomnav {
+    padding-bottom: 32px;
+  }
+}
+
+/* ---------- Account menu ---------- */
+.mv-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  min-width: 220px;
+  padding: 8px;
+  border-radius: 20px;
+  background: var(--mv-surface-dark-2);
+  box-shadow: var(--neu-dark-raised), 0 0 0 1px var(--mv-hairline);
+  z-index: 100;
+  animation: mv-page-in var(--mv-dur-base) var(--mv-ease) both;
+}
+.mv-menu button,
+.mv-menu a {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mv-cream);
+  text-align: left;
+}
+.mv-menu button:hover,
+.mv-menu a:hover {
+  background: rgba(255, 225, 199, 0.06);
+}
+
+/* ---------- Layout helpers ---------- */
+.mv-container {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+@media (min-width: 1024px) {
+  .mv-container {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+}
+.mv-grid-home {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 900px) {
+  .mv-grid-home {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.mv-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ---------- Skeletons / status pulse ---------- */
+@keyframes mv-shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: 200px 0;
+  }
+}
+
+/* ---------- Reduced motion: no transforms, instant state changes ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .mv-page,
+  .mv-step-fwd,
+  .mv-step-back,
+  .mv-menu {
+    animation: none;
+  }
+  .mv-bottomnav-thumb,
+  .mv-bottomnav a svg,
+  .mv-action,
+  button {
+    transition: none;
+  }
+  button:not(:disabled):active,
+  .mv-action:active,
+  .mv-action:hover {
+    transform: none;
+  }
+}
+
+/* ---------- Buttons (PrimaryButton) ---------- */
+.mv-btn-primary:not(:disabled):active {
+  box-shadow: var(--neu-action-pressed) !important;
+}
+.mv-btn-secondary:not(:disabled):active {
+  box-shadow: var(--neu-dark-pressed) !important;
+}
+.mv-btn:disabled {
+  pointer-events: none;
+}
+
+/* Floating "coming soon" badge sits above the pill nav on phones */
+.mv-floating-badge {
+  bottom: calc(var(--bottom-nav-h) + 34px + var(--safe-bottom));
+}
+@media (min-width: 768px) {
+  .mv-floating-badge {
+    bottom: 24px;
+  }
+}
+
+/* Legacy student screens set their own maxWidth but sit left; centre them
+   under the centred top bar (a no-op for screens that fill the width). */
+.mv-shell-main > div {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---------- Dialog: sheet on phones, centred card from 640px ---------- */
+@keyframes mv-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mv-modal-panel {
+  animation: mv-sheet-in var(--mv-dur-slow) var(--mv-ease) both;
+}
+@media (min-width: 640px) {
+  .mv-modal-backdrop {
+    align-items: center !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-modal-panel {
+    animation: none;
+  }
+}
+
+/* ---------- Skeleton placeholder (loading) ---------- */
+.mv-skel {
+  background: linear-gradient(90deg, rgba(255, 225, 199, 0.05) 25%, rgba(255, 225, 199, 0.1) 50%, rgba(255, 225, 199, 0.05) 75%);
+  background-size: 400px 100%;
+  animation: mv-shimmer 1.4s linear infinite;
+  border-radius: 22px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-skel {
+    animation: none;
+  }
+}
+
+/* ---------- Auth layout ---------- */
+.mv-auth-root {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--mv-espresso);
+}
+.mv-auth-brand {
+  display: none;
+  flex-direction: column;
+  width: 44%;
+  max-width: 560px;
+  padding: 48px;
+  background: var(--mv-coffee);
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 1;
+}
+.mv-auth-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  padding: calc(20px + var(--safe-top)) 20px 8px;
+}
+.mv-auth-mobilelogo {
+  width: 100%;
+  max-width: 520px;
+  margin-bottom: 20px;
+}
+@media (min-width: 900px) {
+  .mv-auth-brand {
+    display: flex;
+  }
+  .mv-auth-mobilelogo {
+    display: none;
+  }
+  .mv-auth-pane {
+    padding: 48px 48px 0;
+  }
+}
+
+/* Align top bar with page content edge */
+.mv-topbar {
+  padding-left: 0;
+  padding-right: 0;
+}
+.mv-topbar-inner {
+  padding: 0 20px;
+}
+@media (min-width: 1024px) {
+  .mv-topbar-inner {
+    padding: 0 32px;
+  }
+}
+
+/* ---------- Landing ---------- */
+.mv-landing-hero {
+  display: grid;
+  gap: 36px;
+  grid-template-columns: minmax(0, 1fr);
+  padding-top: 28px;
+  align-items: center;
+}
+.mv-landing-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.mv-landing-grid li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mv-landing-grid li svg {
+  flex-shrink: 0;
+}
+.mv-landing-grid li > * {
+  min-width: 0;
+}
+@media (min-width: 900px) {
+  .mv-landing-hero {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 64px;
+    padding-top: 64px;
+  }
+  .mv-landing-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .mv-landing-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.mv-footer a {
+  padding: 10px 12px;
+}
+footer nav a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.mv-brand {
+  min-height: 44px;
+  min-width: 44px;
+}

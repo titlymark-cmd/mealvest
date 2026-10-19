@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import * as authService from "../services/authService";
+import * as verification from "../services/verificationService";
 import {
   registerStudentSchema,
   registerHotelSchema,
@@ -15,6 +16,7 @@ import {
 import { verifyGoogleIdToken } from "../lib/googleAuth";
 import { ApiError } from "../middleware/errorHandler";
 import { AuthedRequest } from "../middleware/auth";
+import { env } from "../config/env";
 
 function badRequestFromZod(err: unknown): ApiError {
   const issues = (err as { errors?: { message: string }[] })?.errors;
@@ -151,8 +153,11 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
  * the reset link's base from the incoming request is reliable without
  * needing a dedicated env var for it.
  */
-function resolveAppBaseUrl(req: Request): string {
-  return `${req.protocol}://${req.get("host")}`;
+function resolveAppBaseUrl(): string | null {
+  // M5: the reset link's origin comes ONLY from server configuration —
+  // never from the request's Host/Origin headers, which an attacker
+  // controls ("password-reset poisoning").
+  return env.appBaseUrl || null;
 }
 
 /**
@@ -165,7 +170,7 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
     const parsed = forgotPasswordSchema.safeParse(req.body);
     if (!parsed.success) throw badRequestFromZod(parsed.error);
 
-    await authService.requestPasswordReset(parsed.data.identifier, resolveAppBaseUrl(req));
+    await authService.requestPasswordReset(parsed.data.identifier, resolveAppBaseUrl());
     res.status(200).json({
       message: "If an account exists for that email or phone number, we've sent a password reset link to its email address.",
     });
@@ -213,6 +218,72 @@ export async function verifyPin(req: Request, res: Response, next: NextFunction)
 
     const result = await authService.verifyPinAndRefresh(parsed.data.refreshToken, parsed.data.pin);
     res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+const linkGoogleSchema = z.object({
+  idToken: z.string().min(1, "Google ID token is required.").max(4096),
+  currentPassword: z.string().min(1, "Enter your current password to confirm.").max(128),
+});
+
+/** POST /api/auth/google/link — requireAuth; links Google to the signed-in student after a password check. */
+export async function linkGoogle(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = linkGoogleSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+    const profile = await verifyGoogleIdToken(parsed.data.idToken);
+    const result = await authService.linkGoogleAccount(req.user!.id, profile, parsed.data.currentPassword);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Email / phone verification (H7 full, M3)
+// ---------------------------------------------------------------------------
+
+/** POST /api/auth/verify-email/request — requireAuth. Sends a one-time link to the account's own email. */
+export async function requestEmailVerification(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    res.json(await verification.requestEmailVerification(req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+}
+
+const confirmEmailSchema = z.object({ token: z.string().min(1).max(128) });
+
+/** POST /api/auth/verify-email/confirm — public (the link may be opened on another device). */
+export async function confirmEmailVerification(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = confirmEmailSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or has expired.");
+    res.json(await verification.confirmEmailVerification(parsed.data.token));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** POST /api/auth/verify-phone/request — requireAuth. Sends a 6-digit code to the account's own phone. */
+export async function requestPhoneVerification(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    res.json(await verification.requestPhoneVerification(req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+}
+
+const confirmPhoneSchema = z.object({ code: z.string().regex(/^\d{6}$/, "Enter the 6-digit code.") });
+
+/** POST /api/auth/verify-phone/confirm — requireAuth. */
+export async function confirmPhoneVerification(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = confirmPhoneSchema.safeParse(req.body);
+    if (!parsed.success) throw badRequestFromZod(parsed.error);
+    res.json(await verification.confirmPhoneVerification(req.user!.id, parsed.data.code));
   } catch (err) {
     next(err);
   }

@@ -9,10 +9,11 @@ export function Switch({ value, onValueChange }: { value: boolean; onValueChange
       role="switch"
       aria-checked={value}
       style={{
-        width: 44,
-        height: 26,
-        borderRadius: 13,
-        backgroundColor: value ? COLORS.primary : COLORS.borderSoft,
+        width: 52,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: value ? COLORS.primary : "#CDBBA6",
+        boxShadow: "var(--neu-cream-inset)",
         position: "relative",
         transition: "background-color 150ms ease",
         flexShrink: 0,
@@ -21,11 +22,11 @@ export function Switch({ value, onValueChange }: { value: boolean; onValueChange
       <span
         style={{
           position: "absolute",
-          top: 2,
-          left: value ? 20 : 2,
-          width: 22,
-          height: 22,
-          borderRadius: 11,
+          top: 3,
+          left: value ? 25 : 3,
+          width: 24,
+          height: 24,
+          borderRadius: 12,
           backgroundColor: "#fff",
           boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
           transition: "left 150ms ease",

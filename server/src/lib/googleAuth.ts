@@ -15,6 +15,8 @@ export interface GoogleProfile {
   emailVerified: boolean;
   name: string;
   picture: string | null;
+  /** Token issue time (seconds since epoch) — used for fresh re-authentication checks. */
+  issuedAt: number;
 }
 
 /**
@@ -54,5 +56,6 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleProfil
     emailVerified: payload.email_verified === true,
     name: payload.name || payload.email.split("@")[0],
     picture: payload.picture || null,
+    issuedAt: typeof payload.iat === "number" ? payload.iat : 0,
   };
 }

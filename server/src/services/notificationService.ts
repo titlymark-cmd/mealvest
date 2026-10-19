@@ -2,6 +2,37 @@ import * as model from "../models/notificationModel";
 import { findUserById } from "../models/userModel";
 import { sendPushToDevice, isPushConfigured } from "./fcmService";
 import { sendSMS, isSmsConfigured } from "./smsService";
+import { pool } from "../config/db";
+
+/**
+ * Paid-channel cost controls (finding M2). SMS costs real money per
+ * message; these caps bound what any single user (or a compromised
+ * admin broadcast) can spend per rolling 24 hours. Counted from the
+ * delivery log, so they hold across instances. Soft caps: a burst of
+ * truly simultaneous sends can exceed them by at most the concurrency.
+ */
+function capEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+export const SMS_DAILY_CAP_PER_USER = () => capEnv("SMS_DAILY_CAP_PER_USER", 5);
+export const SMS_DAILY_CAP_GLOBAL = () => capEnv("SMS_DAILY_CAP_GLOBAL", 500);
+
+export async function smsCapReached(userId: string): Promise<string | null> {
+  const r = await pool.query<{ user_sent: number; all_sent: number }>(
+    `SELECT
+        count(*) FILTER (WHERE n.user_id = $1)::int AS user_sent,
+        count(*)::int AS all_sent
+       FROM notification_deliveries d
+       JOIN notifications n ON n.id = d.notification_id
+      WHERE d.channel = 'sms' AND d.status = 'sent' AND d.created_at > now() - interval '24 hours'`,
+    [userId]
+  );
+  const row = r.rows[0];
+  if (row.user_sent >= SMS_DAILY_CAP_PER_USER()) return "Per-user daily SMS cap reached";
+  if (row.all_sent >= SMS_DAILY_CAP_GLOBAL()) return "Global daily SMS cap reached";
+  return null;
+}
 
 export type NotificationCategory =
   | "payment_updates"
@@ -166,6 +197,13 @@ async function dispatchSms(notificationId: string, userId: string, message: stri
     await model
       .logDelivery({ notificationId, channel: "sms", status: "skipped", error: "No phone number on file" })
       .catch(() => {});
+    return;
+  }
+
+  const capped = await smsCapReached(userId).catch(() => "SMS cap check failed");
+  if (capped) {
+    // Fail closed on cost: no cap information -> no paid send.
+    await model.logDelivery({ notificationId, channel: "sms", status: "skipped", error: capped }).catch(() => {});
     return;
   }
 

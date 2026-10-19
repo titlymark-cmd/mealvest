@@ -3,16 +3,20 @@ import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { pool } from "../config/db";
 import * as budgetService from "../services/budgetService";
-import { createBudgetSchema } from "../schemas/budgetSchemas";
 import { updateStudentProfileSchema } from "../schemas/studentSchemas";
 import { ApiError } from "../middleware/errorHandler";
 import { uploadStudentAvatar } from "../services/storageService";
 import { normalizeKenyanPhone } from "../lib/phone";
+import { pinSchema } from "../schemas/authSchemas";
+import { verifyStepUp } from "../services/authService";
+import { verifyGoogleIdToken } from "../lib/googleAuth";
+import { businessDate } from "../lib/businessTime";
 
 export async function getStudentProfile(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
       `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
+              (u.pin_hash IS NOT NULL) AS has_pin, (u.google_id IS NOT NULL) AS has_google, u.email_verified, u.phone_verified,
               s.full_name, s.institution, s.admission_number, s.avatar_url
        FROM users u JOIN students s ON s.user_id = u.id
        WHERE u.id = $1`,
@@ -41,7 +45,25 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
     if (!parsed.success) {
       throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid profile update.");
     }
-    const { fullName, phoneNumber, alternatePhoneNumber, institution, admissionNumber } = parsed.data;
+    const { fullName, institution, admissionNumber } = parsed.data;
+    // Phone numbers are login identifiers and M-Pesa numbers: store only
+    // the canonical 254XXXXXXXXX form (M3), so one number can't exist in
+    // two spellings on two accounts.
+    let phoneNumber: string | undefined;
+    if (parsed.data.phoneNumber !== undefined) {
+      const n = normalizeKenyanPhone(parsed.data.phoneNumber);
+      if (!n) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan phone number.");
+      phoneNumber = n;
+    }
+    let alternatePhoneNumber: string | undefined;
+    if (parsed.data.alternatePhoneNumber !== undefined) {
+      if (parsed.data.alternatePhoneNumber === "") alternatePhoneNumber = "";
+      else {
+        const n = normalizeKenyanPhone(parsed.data.alternatePhoneNumber);
+        if (!n) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan alternate phone number.");
+        alternatePhoneNumber = n;
+      }
+    }
 
     const client = await pool.connect();
     try {
@@ -61,6 +83,9 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
       if (phoneNumber !== undefined || alternatePhoneNumber !== undefined) {
         await client.query(
           `UPDATE users SET
+             -- changing the number invalidates its verification (M3)
+             phone_verified = CASE WHEN $1::text IS NOT NULL AND $1 IS DISTINCT FROM phone_number THEN false ELSE phone_verified END,
+             phone_verified_at = CASE WHEN $1::text IS NOT NULL AND $1 IS DISTINCT FROM phone_number THEN NULL ELSE phone_verified_at END,
              phone_number = COALESCE($1, phone_number),
              alternate_phone_number = CASE WHEN $2::text IS NULL THEN alternate_phone_number
                                             WHEN $2 = '' THEN NULL
@@ -72,6 +97,7 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
 
       const result = await client.query(
         `SELECT u.id, u.email, u.phone_number, u.alternate_phone_number, u.account_status,
+              (u.pin_hash IS NOT NULL) AS has_pin, (u.google_id IS NOT NULL) AS has_google, u.email_verified, u.phone_verified,
                 s.full_name, s.institution, s.admission_number, s.avatar_url
          FROM users u JOIN students s ON s.user_id = u.id
          WHERE u.id = $1`,
@@ -82,6 +108,9 @@ export async function updateStudentProfile(req: AuthedRequest, res: Response, ne
       res.json({ profile: result.rows[0] });
     } catch (err) {
       await client.query("ROLLBACK");
+      if ((err as { code?: string }).code === "23505") {
+        throw new ApiError(409, "PHONE_IN_USE", "That phone number is already linked to another account.");
+      }
       throw err;
     } finally {
       client.release();
@@ -112,24 +141,24 @@ export async function uploadAvatar(req: AuthedRequest, res: Response, next: Next
   }
 }
 
-export async function createBudget(req: AuthedRequest, res: Response, next: NextFunction) {
-  try {
-    const parsed = createBudgetSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
-    }
-    const budget = await budgetService.createBudget({
-      userId: req.user!.id,
-      totalAmount: parsed.data.totalAmount,
-      numberOfDays: parsed.data.numberOfDays,
-      hotelId: parsed.data.hotelId,
-      planId: parsed.data.planId,
-      termsAccepted: parsed.data.termsAccepted,
-    });
-    res.status(201).json({ budget });
-  } catch (err) {
-    next(err);
-  }
+/**
+ * POST /api/student/budget — RETIRED (security finding C1).
+ *
+ * This endpoint used to create an active, spendable budget from a
+ * client-supplied amount with no payment at all. A budget can now only
+ * be created by payment activation (paymentService.activatePaymentIfNeeded)
+ * after the provider confirms the money, and the database rejects any
+ * other insert (migration 043). The route answers 410 so an old client
+ * (the legacy Expo app in app/) gets a clear message instead of a 404.
+ */
+export async function createBudget(_req: AuthedRequest, _res: Response, next: NextFunction) {
+  next(
+    new ApiError(
+      410,
+      "FUNDING_REQUIRED",
+      "Meal plans are started by paying for them. Please choose a plan and complete payment."
+    )
+  );
 }
 
 export async function getBudget(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -157,10 +186,10 @@ export async function getWithdrawalStatus(req: AuthedRequest, res: Response, nex
     const feePercent = await budgetService.getWithdrawalFeePercent();
     const [active, latest] = await Promise.all([
       pool.query(
-        `SELECT b.id, b.remaining_amount, b.end_date, (b.end_date <= CURRENT_DATE) AS contract_ended,
-                EXISTS(SELECT 1 FROM savings_withdrawals w WHERE w.budget_id = b.id) AS already_withdrawn
+        `SELECT b.id, b.remaining_amount, b.end_date, (b.end_date <= $2::date) AS contract_ended,
+                EXISTS(SELECT 1 FROM savings_withdrawals w WHERE w.budget_id = b.id AND w.status <> 'rejected') AS already_withdrawn
          FROM budgets b WHERE b.user_id = $1 AND b.status = 'active' LIMIT 1`,
-        [req.user!.id]
+        [req.user!.id, businessDate()]
       ),
       pool.query(
         `SELECT id, gross_savings, student_amount, platform_fee_percent, platform_fee_amount, payout_method,
@@ -199,6 +228,9 @@ const withdrawSchema = z.object({
   // Same backend-authoritative acknowledgement pattern as plan creation:
   // the student must have been shown the fee breakdown and agreed.
   acceptFee: z.literal(true, { errorMap: () => ({ message: "Please confirm you understand the withdrawal fee." }) }),
+  // Step-up proof (M1): PIN for accounts that have one, otherwise a fresh Google re-authentication.
+  pin: pinSchema.optional(),
+  googleIdToken: z.string().min(1).max(4096).optional(),
 });
 
 export async function requestWithdrawal(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -213,6 +245,19 @@ export async function requestWithdrawal(req: AuthedRequest, res: Response, next:
       if (!normalized) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan M-Pesa number.");
       destination = normalized;
     }
+    // Optional policy (M3): require a verified phone before withdrawing.
+    // Off by default so existing (unverified) accounts aren't locked out;
+    // enable once SMS verification is configured and users have been notified.
+    if (process.env.REQUIRE_VERIFIED_PHONE_FOR_WITHDRAWAL === "true") {
+      const v = await pool.query("SELECT phone_verified FROM users WHERE id = $1", [req.user!.id]);
+      if (!v.rows[0]?.phone_verified) {
+        throw new ApiError(403, "PHONE_NOT_VERIFIED", "Verify your phone number in your profile before withdrawing.");
+      }
+    }
+
+    // Server-side step-up before any money is reserved (same atomic PIN lockout as login).
+    await verifyStepUp(req.user!.id, { pin: parsed.data.pin, googleIdToken: parsed.data.googleIdToken }, verifyGoogleIdToken);
+
     const result = await budgetService.withdrawSavings({
       userId: req.user!.id,
       payoutMethod: parsed.data.payoutMethod,

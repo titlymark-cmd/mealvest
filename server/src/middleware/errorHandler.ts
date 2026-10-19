@@ -48,7 +48,16 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
-  console.error("Unhandled server error:", err);
+  // L-findings: malformed client input that only Postgres noticed (e.g. a
+  // non-UUID in a path parameter, a number too large for its column) is
+  // the client's error, not a 500 — and the raw DB message is never echoed.
+  const pgCode = (err as { code?: unknown })?.code;
+  if (pgCode === "22P02" || pgCode === "22003" || pgCode === "22007" || pgCode === "22008") {
+    res.status(400).json({ error: { code: "INVALID_INPUT", message: "Some of the information sent was not valid." } });
+    return;
+  }
+
+  console.error("Unhandled server error:", sanitizeForLog(err));
   res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Something went wrong." } });
 }
 
@@ -68,4 +77,13 @@ function isBodyParserError(err: unknown): err is BodyParserError {
 
 export function notFoundHandler(req: Request, res: Response) {
   res.status(404).json({ error: { code: "NOT_FOUND", message: `No route for ${req.method} ${req.path}` } });
+}
+
+/** Logs enough to debug without dumping request bodies, tokens or connection strings. */
+function sanitizeForLog(err: unknown): unknown {
+  if (err instanceof Error) {
+    const e = err as Error & { code?: unknown };
+    return { name: e.name, message: e.message.replace(/postgres(ql)?:\/\/[^\s]+/gi, "postgres://[redacted]"), code: e.code, stack: e.stack };
+  }
+  return err;
 }

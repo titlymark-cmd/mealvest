@@ -6,6 +6,7 @@ import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchStudentProfile, updateStudentProfile, uploadStudentAvatar, StudentProfile } from "../../services/studentProfileApi";
 import { NotificationSettingsSection } from "../../components/notifications/NotificationSettingsSection";
+import { VerificationSection } from "../../components/student/VerificationSection";
 
 const MAX_AVATAR_BYTES = 4 * 1024 * 1024;
 
@@ -232,6 +233,14 @@ export default function StudentProfileScreen() {
             </button>
           )}
         </Card>
+      )}
+
+      {!loading && !loadError && profile && (
+        <VerificationSection
+          emailVerified={Boolean(profile.email_verified)}
+          phoneVerified={Boolean(profile.phone_verified)}
+          onVerified={() => setProfile((p) => (p ? { ...p, phone_verified: true } : p))}
+        />
       )}
 
       {!loading && !loadError && profile && <NotificationSettingsSection />}

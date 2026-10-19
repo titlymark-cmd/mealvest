@@ -46,6 +46,7 @@ function client() {
   return axios.create({
     baseURL: env.paystackBaseUrl,
     headers: { Authorization: `Bearer ${env.paystackSecretKey}`, "Content-Type": "application/json" },
+    timeout: 30_000,
   });
 }
 
@@ -165,6 +166,12 @@ export class PaystackPaymentProvider implements PaymentProvider {
       const res = await client().get(`/transaction/verify/${encodeURIComponent(reference)}`);
       const data = res.data.data;
 
+      // Paystack's verify endpoint is keyed by reference, but never
+      // assume: a record for a different reference must not credit ours.
+      if (!data || String(data.reference) !== reference) {
+        throw new ApiError(502, "PAYSTACK_REFERENCE_MISMATCH", "Paystack returned a record for a different reference.");
+      }
+
       // Paystack's own decline/outcome reason — safe to log (no
       // secrets, just their transaction metadata) and otherwise
       // invisible to us, since activatePaymentIfNeeded only persists
@@ -189,6 +196,7 @@ export class PaystackPaymentProvider implements PaymentProvider {
         raw: res.data,
       };
     } catch (err) {
+      if (err instanceof ApiError) throw err;
       if (axios.isAxiosError(err) && err.response?.status === 404) {
         throw new ApiError(404, "PAYMENT_NOT_FOUND", "No matching Paystack transaction found for this reference.");
       }

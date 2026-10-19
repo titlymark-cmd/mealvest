@@ -21,21 +21,10 @@ export interface Budget {
  * Takes `authFetch` from useAuth() as a parameter rather than
  * importing AuthContext here, so this stays a plain function module
  * (easy to test) instead of needing to be a hook itself.
+ *
+ * Note: there is deliberately no `createBudget` here — a plan is only
+ * ever created server-side after a verified payment (paymentsApi).
  */
-export async function createBudget(
-  authFetch: (path: string, init?: RequestInit) => Promise<Response>,
-  input: { totalAmount: number; numberOfDays: number; hotelId?: string | null; termsAccepted: true }
-): Promise<Budget> {
-  const res = await authFetch("/api/student/budget", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || "Could not create your meal plan.");
-  return data.budget;
-}
-
 export async function getActiveBudget(
   authFetch: (path: string, init?: RequestInit) => Promise<Response>
 ): Promise<Budget | null> {
@@ -146,7 +135,7 @@ export interface WithdrawalResult {
  */
 export async function requestWithdrawal(
   authFetch: (path: string, init?: RequestInit) => Promise<Response>,
-  input: { payoutMethod: "mpesa"; payoutDestination: string; acceptFee: true }
+  input: { payoutMethod: "mpesa"; payoutDestination: string; acceptFee: true; pin?: string; googleIdToken?: string }
 ): Promise<WithdrawalResult> {
   const res = await authFetch("/api/student/withdraw", {
     method: "POST",

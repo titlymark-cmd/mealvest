@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
-import { createBudget, applyBoost } from "./budgetService";
+import { createFundedBudget, applyBoostInTx, BudgetRow } from "./budgetService";
 import { VerifyPaymentResult } from "./paymentProvider";
 import * as notificationEvents from "./notificationEvents";
 
@@ -121,143 +121,205 @@ export async function createPendingBoostTransaction(params: CreatePendingBoostPa
   return result.rows[0];
 }
 
+export const EXPECTED_CURRENCY = "KES";
+
+export interface ActivationResult {
+  alreadyProcessed: boolean;
+  transactionId: string;
+  /** The ledger status after this call ('success' | 'processing' | 'failed' | …). */
+  status: string;
+  /** True when money was confirmed but could not be credited automatically (kept for admin review, never lost). */
+  needsReview?: boolean;
+}
+
+/** Exact cent comparison — never compare floating KSh values directly. */
+export function amountsMatch(providerAmountKes: number, expectedAmountKes: number): boolean {
+  if (!Number.isFinite(providerAmountKes) || !Number.isFinite(expectedAmountKes)) return false;
+  return Math.round(providerAmountKes * 100) === Math.round(expectedAmountKes * 100);
+}
+
 /**
- * The ONE function that turns a verified successful payment into an
- * active budget — called by /verify (student polling after
- * checkout) and by the provider webhooks (/webhooks/paystack,
- * /webhooks/cyzora), whichever provider the row was created with.
- * Whichever one runs first does the activation; the other is a
- * guaranteed no-op. This is what makes double-crediting impossible
- * regardless of which order verify-polling and the webhook arrive in,
- * or whether both fire for the same payment.
+ * The ONE function that turns a provider-verified payment into budget
+ * credit — called by /verify (student polling), the provider webhooks
+ * and the reconciliation cron, in any order and any number of times.
+ *
+ * Security finding H1: previously the 'success' flip was COMMITTED
+ * first and the budget was created afterwards on other connections, so
+ * any failure in between left a paid transaction with no budget, and
+ * the idempotency guard then skipped it forever. Now everything —
+ * status flip, budget creation/credit, budget linkage and the
+ * activated_at marker — happens in ONE database transaction on ONE
+ * client. Either all of it commits, or none of it does and the row
+ * stays retryable (webhook 5xx → provider retry; reconciliation cron).
+ *
+ * Idempotency: the transaction row is locked FOR UPDATE and
+ * `activated_at` is the "already credited" marker, so concurrent or
+ * repeated calls credit at most once. A budget_topup can additionally
+ * only ever fund one budget (migration 043 unique index + trigger).
+ *
+ * `verified` must come from the provider's own API (or a signature-
+ * verified webhook re-checked against the API) — never from a browser.
  */
-export async function activatePaymentIfNeeded(
-  reference: string,
-  verified: VerifyPaymentResult
-): Promise<{ alreadyProcessed: boolean; transactionId: string }> {
+export async function activatePaymentIfNeeded(reference: string, verified: VerifyPaymentResult): Promise<ActivationResult> {
+  if (verified.reference !== reference) {
+    // Programming/provider error — refuse rather than credit the wrong row.
+    throw new ApiError(500, "REFERENCE_MISMATCH", "Verified payment reference does not match the transaction.");
+  }
+
   const client = await pool.connect();
+  let txId: string | null = null;
+  const afterCommit: Array<() => void> = [];
   try {
     await client.query("BEGIN");
 
-    // Row-level lock: if verify() and the webhook race each other in
-    // true parallel, the second one blocks here until the first
-    // commits, then sees status already flipped to 'success' and
-    // exits via the idempotency guard below — never both proceeding
-    // to activate at once.
-    const txResult = await client.query(
-      "SELECT * FROM transactions WHERE provider_reference = $1 FOR UPDATE",
-      [reference]
-    );
+    const txResult = await client.query("SELECT * FROM transactions WHERE provider_reference = $1 FOR UPDATE", [reference]);
     if (txResult.rows.length === 0) {
       throw new ApiError(404, "PAYMENT_NOT_FOUND", "No matching transaction found for this reference.");
     }
     const tx = txResult.rows[0];
+    txId = tx.id;
 
     // ---- IDEMPOTENCY GUARD ----
-    // Only "success" is truly terminal here — it's the one state
-    // where money has definitely moved and a budget has already been
-    // created/credited, so re-entering this function for it must be a
-    // safe no-op. "failed" is deliberately NOT short-circuited: a
-    // status that looked like a failure at one poll (e.g. Paystack's
-    // "abandoned" for an M-Pesa STK push still awaiting PIN entry,
-    // mapped to "pending" upstream, or even a genuine transient
-    // failure) can still resolve to "success" on a later poll or
-    // webhook delivery. Locking "failed" as permanent as "success"
-    // would let a payment that actually succeeds never get credited —
-    // this is what previously made a false-failure unrecoverable.
-    if (tx.status === "success") {
+    if (tx.activated_at) {
       await client.query("COMMIT");
-      return { alreadyProcessed: true, transactionId: tx.id };
+      return { alreadyProcessed: true, transactionId: tx.id, status: tx.status };
+    }
+    if (tx.needs_review) {
+      // A human is already looking at this one; never auto-credit it.
+      await client.query("COMMIT");
+      return { alreadyProcessed: true, transactionId: tx.id, status: tx.status, needsReview: true };
+    }
+    if (tx.type !== "budget_topup" && tx.type !== "plan_boost") {
+      throw new ApiError(409, "UNSUPPORTED_TRANSACTION_TYPE", "This transaction type cannot be activated.");
     }
 
     if (verified.status !== "success") {
+      if (tx.status === "success") {
+        // We previously recorded the provider's confirmation but the
+        // provider now disagrees. Never downgrade money we may have
+        // received; park it for a human.
+        await client.query(
+          `UPDATE transactions SET needs_review = true,
+             activation_error = 'Provider status changed after success was recorded', updated_at = now()
+           WHERE id = $1`,
+          [tx.id]
+        );
+        await client.query("COMMIT");
+        return { alreadyProcessed: false, transactionId: tx.id, status: tx.status, needsReview: true };
+      }
+      const newStatus = verified.status === "pending" ? "processing" : "failed";
       await client.query(
-        "UPDATE transactions SET status = $1, provider_transaction_id = $2, updated_at = now() WHERE id = $3",
-        [verified.status === "pending" ? "processing" : "failed", verified.providerTransactionId, tx.id]
+        "UPDATE transactions SET status = $1, provider_transaction_id = COALESCE($2, provider_transaction_id), updated_at = now() WHERE id = $3",
+        [newStatus, verified.providerTransactionId || null, tx.id]
       );
       await client.query("COMMIT");
-      // Only a real, final "failed" — "pending" (STK push still awaiting
-      // PIN entry, etc.) is not a failure and shouldn't notify anyone yet.
-      if (verified.status === "failed") {
+      // Only a real, final "failed" notifies — "pending" (STK push still awaiting PIN) is not a failure.
+      if (verified.status === "failed" && tx.status !== "failed") {
         notificationEvents.paymentFailed(tx.user_id, Number(tx.amount), reference);
       }
-      return { alreadyProcessed: false, transactionId: tx.id };
+      return { alreadyProcessed: false, transactionId: tx.id, status: newStatus };
     }
 
-    // ---- Amount/currency cross-check — never trust the webhook or
-    // even our own initialize-time amount blindly; use what Paystack
-    // itself reports as authoritative for what was actually paid. ----
-    if (Math.round(verified.amount) !== Math.round(Number(tx.amount))) {
+    // ---- Provider says success: validate it is THIS payment, in full ----
+    const currency = String(verified.currency || "").toUpperCase();
+    if (currency !== EXPECTED_CURRENCY || !amountsMatch(verified.amount, Number(tx.amount))) {
+      // Permanent problem: record it (committed) for manual review and
+      // never credit. The money, if any, is visible to admins.
       await client.query(
-        "UPDATE transactions SET status = 'failed', result_description = 'Amount mismatch — flagged for review', updated_at = now() WHERE id = $1",
-        [tx.id]
+        `UPDATE transactions
+           SET status = 'failed', needs_review = true,
+               result_description = 'Amount/currency mismatch — flagged for review',
+               activation_error = $2, updated_at = now()
+         WHERE id = $1`,
+        [tx.id, `expected ${tx.amount} ${EXPECTED_CURRENCY}, provider reported ${verified.amount} ${currency || "?"}`]
       );
       await client.query("COMMIT");
       throw new ApiError(409, "AMOUNT_MISMATCH", "Paid amount did not match the expected amount.");
     }
 
+    // Status flips first (same DB transaction) — migration 043's trigger
+    // requires a 'success' funding transaction for a new budget.
+    await client.query(
+      `UPDATE transactions SET status = 'success', provider_transaction_id = COALESCE($1, provider_transaction_id), updated_at = now()
+       WHERE id = $2`,
+      [verified.providerTransactionId || null, tx.id]
+    );
+
+    // Serialize all budget creation/credit for this student, so two
+    // different payments activating at the same moment can't both
+    // create an "only" active budget.
+    await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [tx.user_id]);
+
+    const amount = Number(tx.amount);
+    let credited: BudgetRow | null = null;
+    let isBoost = tx.type === "plan_boost";
+
+    if (tx.type === "plan_boost" && tx.budget_id) {
+      credited = await applyBoostInTx(client, tx.budget_id, amount);
+    }
+    if (!credited) {
+      // A new-plan payment, or a boost whose target plan is no longer
+      // active (e.g. it ended and was withdrawn while the student was
+      // paying). Credit the student's CURRENT active plan if they have
+      // one — money is never silently dropped.
+      const active = await client.query<{ id: string }>(
+        "SELECT id FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+        [tx.user_id]
+      );
+      if (active.rows[0]) {
+        credited = await applyBoostInTx(client, active.rows[0].id, amount);
+        isBoost = true;
+      } else if (tx.type === "budget_topup") {
+        credited = await createFundedBudget(client, {
+          userId: tx.user_id,
+          fundingTransactionId: tx.id,
+          totalAmount: amount,
+          numberOfDays: tx.number_of_days || 30,
+          hotelId: tx.hotel_id,
+        });
+        isBoost = false;
+      }
+    }
+
+    if (!credited) {
+      // A paid boost with no plan to credit at all. Keep the confirmed
+      // payment, mark it for review, do NOT activate.
+      await client.query(
+        `UPDATE transactions SET needs_review = true,
+           activation_error = 'Paid boost has no active plan to credit', updated_at = now()
+         WHERE id = $1`,
+        [tx.id]
+      );
+      await client.query("COMMIT");
+      console.error("[activatePaymentIfNeeded] Paid boost has no active plan to credit — flagged for review", { transactionId: tx.id });
+      return { alreadyProcessed: false, transactionId: tx.id, status: "success", needsReview: true };
+    }
+
     await client.query(
       `UPDATE transactions
-       SET status = 'success', provider_transaction_id = $1, updated_at = now()
-       WHERE id = $2`,
-      [verified.providerTransactionId, tx.id]
+         SET activated_at = now(), budget_id = $2, activation_error = NULL, updated_at = now()
+       WHERE id = $1`,
+      [tx.id, credited.id]
     );
 
     await client.query("COMMIT");
 
-    // Budget creation/crediting happens OUTSIDE the transactions-table
-    // transaction on purpose — both createBudget and applyBoost have
-    // their own internal checks and their own atomic update; nesting
-    // either inside this one risks a harder-to-reason-about combined
-    // transaction for no real benefit, since the payment being marked
-    // 'success' is already durably committed by now.
-    if (tx.type === "plan_boost") {
-      // A boost tops up a budget the student already has and already
-      // accepted terms for at plan creation — nothing new to collect
-      // here, just credit the referenced budget.
-      await applyBoost(tx.budget_id, Number(tx.amount));
-      notificationEvents.paymentSuccess(tx.user_id, Number(tx.amount), reference, true);
-    } else {
-      // A "new plan" top-up can still land here while the student
-      // already has an active budget — e.g. a retried checkout after
-      // an earlier attempt that looked failed/abandoned client-side
-      // but actually settled, or simply paying twice by mistake.
-      // createBudget() rejects that (ACTIVE_BUDGET_EXISTS) since a
-      // student can only ever have one active plan — but by the time
-      // we're here, the payment is ALREADY durably committed as
-      // 'success' a few lines up. Letting createBudget's rejection
-      // propagate used to mean real, successfully-charged money simply
-      // vanished: no budget created, nothing credited, and the error
-      // was silently swallowed by the webhook handler. Crediting it
-      // into the existing active budget instead (exactly like a boost)
-      // means a student's money is never lost to this, whichever path
-      // triggered the payment.
-      const existing = await pool.query("SELECT id FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1", [
-        tx.user_id,
-      ]);
-      if (existing.rows.length > 0) {
-        await applyBoost(existing.rows[0].id, Number(tx.amount));
-      } else {
-        await createBudget({
-          userId: tx.user_id,
-          totalAmount: Number(tx.amount),
-          numberOfDays: tx.number_of_days || 30,
-          hotelId: tx.hotel_id,
-          // Already required and validated at POST /payments/paystack/initialize
-          // (initializeSchema.termsAccepted) — this payment could not have
-          // been initiated at all without it, so it's safe to assert true
-          // here rather than re-collecting it at activation time (which
-          // happens via webhook/verify, where there is no user present to
-          // ask).
-          termsAccepted: true,
-        });
-      }
-      notificationEvents.paymentSuccess(tx.user_id, Number(tx.amount), reference, false);
-    }
-
-    return { alreadyProcessed: false, transactionId: tx.id };
+    // Side effects only after the money is durably credited.
+    afterCommit.push(() => notificationEvents.paymentSuccess(tx.user_id, amount, reference, isBoost));
+    afterCommit.forEach((fn) => fn());
+    return { alreadyProcessed: false, transactionId: tx.id, status: "success" };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
+    // Best-effort bookkeeping OUTSIDE the rolled-back transaction so the
+    // reconciliation cron and admins can see repeated failures.
+    if (txId && !(err instanceof ApiError && err.code === "AMOUNT_MISMATCH")) {
+      await pool
+        .query(
+          "UPDATE transactions SET activation_attempts = activation_attempts + 1, activation_error = $2 WHERE id = $1 AND activated_at IS NULL",
+          [txId, String((err as Error)?.message ?? err).slice(0, 500)]
+        )
+        .catch(() => {});
+    }
     throw err;
   } finally {
     client.release();

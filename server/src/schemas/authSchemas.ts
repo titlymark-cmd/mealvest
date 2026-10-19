@@ -2,10 +2,19 @@ import { z } from "zod";
 import { settlementMethodSchema } from "./settlementMethodSchema";
 
 // Simple, non-aggressive password rule per the spec: length only.
-const passwordSchema = z.string().min(8, "Password must be at least 8 characters.");
+// Max length (M5/L6): bcrypt only uses the first 72 BYTES of its input
+// and silently ignores the rest, so a longer password would give a false
+// sense of strength (two passwords sharing a 72-byte prefix are equal).
+export const PASSWORD_MAX_BYTES = 72;
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters.")
+  .refine((v) => Buffer.byteLength(v, "utf8") <= PASSWORD_MAX_BYTES, {
+    message: `Password must be at most ${PASSWORD_MAX_BYTES} bytes (about 72 plain characters).`,
+  });
 
-const emailSchema = z.string().trim().email("Enter a valid email address.");
-export const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.");
+const emailSchema = z.string().trim().max(254, "Email address is too long.").email("Enter a valid email address.");
+export const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.").max(20, "Enter a valid phone number.");
 
 // Exactly 4 digits, nothing else — same "simple, non-aggressive" rule
 // as the password above. The 4-attempt lockout (see authService
@@ -89,12 +98,12 @@ export const registerHotelSchema = z.object({
 // 009 for why phone_number is the primary identifier while email
 // stays supported as a secondary login path.
 export const loginSchema = z.object({
-  identifier: z.string().trim().min(1, "Email or phone number is required."),
-  password: z.string().min(1, "Password is required."),
+  identifier: z.string().trim().min(1, "Email or phone number is required.").max(254, "Email or phone number is too long."),
+  password: z.string().min(1, "Password is required.").max(1024, "Incorrect email/phone or password."),
 });
 
 export const refreshSchema = z.object({
-  refreshToken: z.string().min(1, "Refresh token is required."),
+  refreshToken: z.string().min(1, "Refresh token is required.").max(256, "Invalid refresh token."),
 });
 
 // Set/replace the caller's PIN — always via an authenticated request
@@ -111,7 +120,7 @@ export const setPinSchema = z.object({
 // token pair, without needing the full password again. See
 // authService.verifyPinAndRefresh.
 export const verifyPinSchema = z.object({
-  refreshToken: z.string().min(1, "Refresh token is required."),
+  refreshToken: z.string().min(1, "Refresh token is required.").max(256, "Invalid refresh token."),
   pin: pinSchema,
 });
 
@@ -126,11 +135,11 @@ export const loginPinSchema = z.object({
 });
 
 export const forgotPasswordSchema = z.object({
-  identifier: z.string().trim().min(1, "Email or phone number is required."),
+  identifier: z.string().trim().min(1, "Email or phone number is required.").max(254, "Email or phone number is too long."),
 });
 
 export const resetPasswordSchema = z.object({
-  token: z.string().min(1, "Reset token is required."),
+  token: z.string().min(1, "Reset token is required.").max(256, "Invalid reset token."),
   newPassword: passwordSchema,
 });
 

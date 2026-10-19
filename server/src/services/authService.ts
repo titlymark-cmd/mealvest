@@ -6,7 +6,10 @@ import { signAccessToken, generateRefreshToken, hashRefreshToken, verifyAccessTo
 import {
   insertRefreshToken,
   findValidRefreshTokenByHash,
-  revokeRefreshTokenByHash,
+  findRefreshTokenByHashAnyState,
+  consumeRefreshToken,
+  setReplacedBy,
+  revokeFamily,
 } from "../models/refreshTokenModel";
 import {
   findUserByEmailOrPhone,
@@ -14,8 +17,10 @@ import {
   findUserByGoogleId,
   findUserById,
   setUserPin,
-  resetPinAttempts,
-  recordFailedPinAttempt,
+  reservePinAttempt,
+  resolveRefusedPinAttempt,
+  releasePinReservationOnSuccess,
+  confirmPinFailure,
   UserRow,
 } from "../models/userModel";
 import { GoogleProfile } from "../lib/googleAuth";
@@ -24,6 +29,7 @@ import { RegisterStudentInput, RegisterHotelInput, LoginInput } from "../schemas
 import { revokeAllRefreshTokensForUser } from "../models/refreshTokenModel";
 import { sendPasswordResetEmail } from "./emailService";
 import * as notificationEvents from "./notificationEvents";
+import { runInBackground } from "../lib/background";
 
 interface AuthResult {
   accessToken: string;
@@ -31,11 +37,50 @@ interface AuthResult {
   user: { id: string; role: Role; fullName: string; email: string };
 }
 
-async function issueTokens(userId: string, role: Role, fullName: string, email: string): Promise<AuthResult> {
+async function issueTokens(
+  userId: string,
+  role: Role,
+  fullName: string,
+  email: string,
+  rotation?: { familyId: string; previousId: string }
+): Promise<AuthResult> {
   const accessToken = signAccessToken({ userId, role });
   const { token: refreshToken, hash, expiresAt } = generateRefreshToken();
-  await insertRefreshToken({ userId, tokenHash: hash, expiresAt });
+  const inserted = await insertRefreshToken({ userId, tokenHash: hash, expiresAt, familyId: rotation?.familyId ?? null });
+  if (rotation) await setReplacedBy(rotation.previousId, inserted.id);
   return { accessToken, refreshToken, user: { id: userId, role, fullName, email } };
+}
+
+/** Window in which presenting a just-rotated token is treated as a benign concurrent refresh (two tabs), not theft. */
+const REFRESH_REUSE_GRACE_MS = 30_000;
+
+/**
+ * Atomically consumes a refresh token, with reuse detection (M6):
+ *  - valid -> consumed by exactly one caller (UPDATE ... RETURNING);
+ *  - already rotated within the grace window -> 401 REFRESH_TOKEN_ROTATED
+ *    (a sibling tab won the race; the client re-reads its stored token);
+ *  - already rotated earlier -> REUSE: the whole family is revoked,
+ *    logging out every device holding a descendant of the stolen token.
+ */
+async function consumeForRotation(refreshToken: string, reason: "rotated" | "pin_unlock") {
+  const tokenHash = hashRefreshToken(refreshToken);
+  const consumed = await consumeRefreshToken(tokenHash, reason);
+  if (consumed) return consumed;
+
+  const existing = await findRefreshTokenByHashAnyState(tokenHash);
+  if (existing && existing.revoked_at && (existing.revoked_reason === "rotated" || existing.revoked_reason === "pin_unlock")) {
+    const age = Date.now() - new Date(existing.revoked_at).getTime();
+    if (age <= REFRESH_REUSE_GRACE_MS) {
+      throw new ApiError(401, "REFRESH_TOKEN_ROTATED", "Session was just refreshed. Please retry.");
+    }
+    const revoked = await revokeFamily(existing.family_id, "reuse_detected");
+    console.warn("[auth] refresh-token reuse detected — token family revoked", {
+      userId: existing.user_id,
+      familyId: existing.family_id,
+      revokedTokens: revoked,
+    });
+  }
+  throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
 }
 
 /**
@@ -292,8 +337,14 @@ async function lookupPendingLoginToken(token: string): Promise<string> {
   return result.rows[0].user_id;
 }
 
+/** Consumes the pending login atomically — exactly one concurrent caller can redeem it. */
 async function deletePendingLoginToken(token: string): Promise<void> {
-  await pool.query("DELETE FROM pending_login_tokens WHERE token_hash = $1", [hashRefreshToken(token)]);
+  const result = await pool.query("DELETE FROM pending_login_tokens WHERE token_hash = $1 AND expires_at > now()", [
+    hashRefreshToken(token),
+  ]);
+  if ((result.rowCount ?? 0) === 0) {
+    throw new ApiError(401, "LOGIN_EXPIRED", "This login attempt has expired. Please log in again.");
+  }
 }
 
 /**
@@ -331,9 +382,16 @@ export async function completeLoginWithNewPin(pendingToken: string, pin: string)
   if (user.pin_hash) {
     throw new ApiError(400, "PIN_ALREADY_SET", "A PIN is already set for this account — enter it instead.");
   }
-  const pinHash = await hashPassword(pin);
-  await setUserPin(user.id, pinHash);
   await deletePendingLoginToken(pendingToken);
+  const pinHash = await hashPassword(pin);
+  const updated = await pool.query(
+    `UPDATE users SET pin_hash = $1, pin_failed_attempts = 0, pin_locked_until = NULL, updated_at = now()
+      WHERE id = $2 AND pin_hash IS NULL`,
+    [pinHash, user.id]
+  );
+  if ((updated.rowCount ?? 0) === 0) {
+    throw new ApiError(400, "PIN_ALREADY_SET", "A PIN is already set for this account — enter it instead.");
+  }
   const fullName = await lookupFullName(user);
   return issueTokens(user.id, user.role, fullName, user.email);
 }
@@ -375,35 +433,40 @@ const DUMMY_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEeO7CFwNKSMxxMZslJvzYqfvhLcU8odxYm
  *      "click the link we emailed you" step needed here.
  */
 export async function loginWithGoogle(profile: GoogleProfile): Promise<AuthResult> {
+  // Security finding H7: only a mailbox Google itself has verified may
+  // ever be associated with a MEALVEST account.
+  if (!profile.emailVerified) {
+    throw new ApiError(401, "GOOGLE_EMAIL_UNVERIFIED", "Your Google account's email address isn't verified. Verify it with Google, or sign in with your password.");
+  }
+
   const byGoogleId = await findUserByGoogleId(profile.googleId);
   if (byGoogleId) {
     if (byGoogleId.account_status === "suspended") {
       throw new ApiError(403, "ACCOUNT_SUSPENDED", "This account has been suspended.");
     }
+    // Google sign-in skips the PIN step, so it is only offered to
+    // student accounts. Hotel and admin accounts must use password + PIN.
+    if (byGoogleId.role !== "student") {
+      throw new ApiError(403, "GOOGLE_LOGIN_NOT_ALLOWED", "Please sign in to this account with your password and PIN.");
+    }
     const fullName = await lookupFullName(byGoogleId);
     return issueTokens(byGoogleId.id, byGoogleId.role, fullName, byGoogleId.email);
   }
 
+  // NEVER link silently just because the email strings match: whoever
+  // controls a Google identity for that address would otherwise take
+  // over the existing (possibly hotel/admin) account and bypass its PIN.
+  // The owner links explicitly, while signed in, by proving their
+  // password (linkGoogleAccount below).
   const byEmail = await findUserByEmail(profile.email);
   if (byEmail) {
-    if (byEmail.account_status === "suspended") {
-      throw new ApiError(403, "ACCOUNT_SUSPENDED", "This account has been suspended.");
-    }
-    // Link: same person, different sign-in method than they used
-    // before. Their existing password (if any) is left completely
-    // untouched — google_id is simply added as an additional way in.
-    await pool.query("UPDATE users SET google_id = $1, updated_at = now() WHERE id = $2", [
-      profile.googleId,
-      byEmail.id,
-    ]);
-    const fullName = await lookupFullName(byEmail);
-    return issueTokens(byEmail.id, byEmail.role, fullName, byEmail.email);
+    throw new ApiError(
+      409,
+      "ACCOUNT_LINK_REQUIRED",
+      "An account with this email already exists. Sign in with your password, then link Google from your profile."
+    );
   }
 
-  // Brand new account. No phone number available from Google — see
-  // migration 016, phone_number is optional for non-password
-  // accounts and can be added later from the student's profile
-  // screen (needed eventually for M-Pesa, not for sign-in itself).
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -429,31 +492,22 @@ export async function loginWithGoogle(profile: GoogleProfile): Promise<AuthResul
 }
 
 export async function refresh(refreshToken: string): Promise<AuthResult> {
-  const tokenHash = hashRefreshToken(refreshToken);
-  const stored = await findValidRefreshTokenByHash(tokenHash);
-  if (!stored) {
-    throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
-  }
+  const stored = await consumeForRotation(refreshToken, "rotated");
 
-  // Rotate: the old refresh token is revoked and a new one issued on
-  // every refresh. This limits how long a stolen refresh token stays
-  // useful — if the legitimate client tries to use the now-revoked
-  // token later, that's a signal the token was stolen and replayed.
-  await revokeRefreshTokenByHash(tokenHash);
-
-  const userResult = await pool.query<UserRow>("SELECT * FROM users WHERE id = $1", [stored.user_id]);
-  const user = userResult.rows[0];
+  const user = await findUserById(stored.user_id);
   if (!user || user.account_status === "suspended") {
+    await revokeFamily(stored.family_id, "account_unavailable");
     throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
   }
 
   const fullName = await lookupFullName(user);
-  return issueTokens(user.id, user.role, fullName, user.email);
+  return issueTokens(user.id, user.role, fullName, user.email, { familyId: stored.family_id, previousId: stored.id });
 }
 
+/** Logout ends the whole session family (this device's chain of rotated tokens). */
 export async function logout(refreshToken: string): Promise<void> {
-  const tokenHash = hashRefreshToken(refreshToken);
-  await revokeRefreshTokenByHash(tokenHash);
+  const row = await findRefreshTokenByHashAnyState(hashRefreshToken(refreshToken));
+  if (row) await revokeFamily(row.family_id, "logout");
 }
 
 export function decodeAccessToken(token: string) {
@@ -475,15 +529,25 @@ const PASSWORD_RESET_TTL_MINUTES = 30;
  * itself be an oracle (a real account triggers a send attempt and a
  * fake one doesn't), defeating the whole point of the generic response.
  */
-export async function requestPasswordReset(identifier: string, resetBaseUrl: string): Promise<void> {
+export async function requestPasswordReset(identifier: string, resetBaseUrl: string | null): Promise<void> {
   const user = await findUserByEmailOrPhone(identifier);
-  if (!user || !user.password_hash) {
+  if (!user || !user.password_hash || user.account_status === "suspended") {
+    // Same visible outcome and similar work as a real request (anti-enumeration).
+    await hashPassword(identifier).catch(() => {});
+    return;
+  }
+  if (!resetBaseUrl) {
+    // M5: never build a link from the request's Host header. Without a
+    // configured base URL we refuse to send rather than risk a poisoned link.
+    console.error("[requestPasswordReset] APP_BASE_URL is not configured — reset email NOT sent.");
     return;
   }
 
-  const token = generateRefreshToken().token; // reusing the same high-entropy random-token generator
+  const token = generateRefreshToken().token;
   const tokenHash = hashRefreshToken(token);
   const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+  // Only the newest link works: requesting again invalidates older ones.
+  await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [user.id]);
   await pool.query("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)", [
     user.id,
     tokenHash,
@@ -491,44 +555,34 @@ export async function requestPasswordReset(identifier: string, resetBaseUrl: str
   ]);
 
   const resetUrl = `${resetBaseUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
-  try {
-    await sendPasswordResetEmail(user.email, resetUrl);
-  } catch (err) {
-    console.error("[requestPasswordReset] Could not send reset email:", err);
-  }
+  // Sent after the response (similar latency for real and unknown accounts).
+  runInBackground("password-reset-email", () => sendPasswordResetEmail(user.email, resetUrl));
 }
 
 /**
- * Step 2 — redeems the token, sets the new password, and revokes
- * every existing session for the account. A password reset is a
- * strong signal the old password may have been compromised; anyone
- * still holding an old refresh token gets logged out by it.
+ * Step 2 — redeems the token ATOMICALLY (DELETE ... RETURNING: exactly
+ * one concurrent redemption can win, so a token can never be replayed),
+ * sets the new password, deletes every other outstanding reset token for
+ * the account, and revokes every existing session.
  */
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
   const tokenHash = hashRefreshToken(token);
   const result = await pool.query(
-    "SELECT user_id FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now()",
+    "DELETE FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now() RETURNING user_id",
     [tokenHash]
   );
   if (result.rows.length === 0) {
-    throw new ApiError(
-      400,
-      "INVALID_RESET_TOKEN",
-      "This reset link is invalid or has expired. Please request a new one."
-    );
+    throw new ApiError(400, "INVALID_RESET_TOKEN", "This reset link is invalid or has expired. Please request a new one.");
   }
   const userId = result.rows[0].user_id;
 
   const passwordHash = await hashPassword(newPassword);
   await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [passwordHash, userId]);
-  await pool.query("DELETE FROM password_reset_tokens WHERE token_hash = $1", [tokenHash]);
-  await revokeAllRefreshTokensForUser(userId);
+  await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [userId]);
+  await revokeAllRefreshTokensForUser(userId, "password_reset");
   notificationEvents.securityPasswordChanged(userId);
 }
 
-// 4 attempts, then a 15-minute timed lockout — matches the window
-// authRateLimiter already uses for login/register, so the two limits
-// read consistently rather than introducing a second unrelated number.
 const PIN_MAX_ATTEMPTS = 4;
 const PIN_LOCKOUT_MINUTES = 15;
 
@@ -574,14 +628,12 @@ export async function verifyPinAndRefresh(refreshToken: string, pin: string): Pr
   if (!user || user.account_status === "suspended") {
     throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
   }
+  // A wrong PIN never consumes the session (user can fall back to password login).
   await verifyPinForUser(user, pin);
 
-  // Rotate, exactly like the ordinary refresh() path — a PIN-unlock
-  // is still, underneath, a token refresh; it just skips re-asking
-  // for the password.
-  await revokeRefreshTokenByHash(tokenHash);
+  const consumed = await consumeForRotation(refreshToken, "pin_unlock");
   const fullName = await lookupFullName(user);
-  return issueTokens(user.id, user.role, fullName, user.email);
+  return issueTokens(user.id, user.role, fullName, user.email, { familyId: consumed.family_id, previousId: consumed.id });
 }
 
 /**
@@ -591,35 +643,54 @@ export async function verifyPinAndRefresh(refreshToken: string, pin: string): Pr
  * lockout/attempt policy, enforced in exactly one place, so the two
  * flows can never drift apart on what "4 attempts" actually means.
  */
+function pinLockedError(lockedUntil: string | null): ApiError {
+  const minutesLeft = lockedUntil
+    ? Math.max(1, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 60000))
+    : PIN_LOCKOUT_MINUTES;
+  return new ApiError(
+    423,
+    "PIN_LOCKED",
+    `Too many incorrect PIN attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}, or log in with your password.`
+  );
+}
+
+/**
+ * Concurrency-safe PIN check (finding H4): an attempt is reserved
+ * atomically BEFORE bcrypt runs (see userModel.reservePinAttempt), so
+ * parallel wrong guesses cannot exceed PIN_MAX_ATTEMPTS per lockout.
+ */
 async function verifyPinForUser(user: UserRow, pin: string): Promise<void> {
   if (!user.pin_hash) {
     throw new ApiError(400, "PIN_NOT_SET", "No PIN has been set for this account yet.");
   }
 
-  if (user.pin_locked_until && new Date(user.pin_locked_until) > new Date()) {
-    const minutesLeft = Math.ceil((new Date(user.pin_locked_until).getTime() - Date.now()) / 60000);
-    throw new ApiError(
-      423,
-      "PIN_LOCKED",
-      `Too many incorrect PIN attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}, or log in with your password.`
-    );
+  const reservation = await reservePinAttempt(user.id, PIN_MAX_ATTEMPTS);
+  if (!reservation) {
+    const { lockedUntil, busy } = await resolveRefusedPinAttempt(user.id, PIN_MAX_ATTEMPTS, PIN_LOCKOUT_MINUTES);
+    if (busy) {
+      throw new ApiError(429, "PIN_TRY_AGAIN", "Please wait a moment and try your PIN again.");
+    }
+    throw pinLockedError(lockedUntil);
   }
 
-  const valid = await verifyPassword(pin, user.pin_hash);
+  const valid = await verifyPassword(pin, reservation.pinHash);
   if (!valid) {
-    const { attempts, lockedUntil } = await recordFailedPinAttempt(user.id, PIN_MAX_ATTEMPTS, PIN_LOCKOUT_MINUTES);
-    if (lockedUntil) {
-      throw new ApiError(
-        423,
-        "PIN_LOCKED",
-        `Too many incorrect PIN attempts. Try again in ${PIN_LOCKOUT_MINUTES} minutes, or log in with your password.`
-      );
-    }
-    const remaining = PIN_MAX_ATTEMPTS - attempts;
+    const { attempts, lockedUntil } = await confirmPinFailure(user.id, PIN_MAX_ATTEMPTS, PIN_LOCKOUT_MINUTES);
+    if (lockedUntil) throw pinLockedError(lockedUntil);
+    const remaining = Math.max(0, PIN_MAX_ATTEMPTS - attempts);
     throw new ApiError(401, "PIN_INCORRECT", `Incorrect PIN. ${remaining} attempt${remaining === 1 ? "" : "s"} left.`);
   }
 
-  await resetPinAttempts(user.id);
+  await releasePinReservationOnSuccess(user.id, reservation.reservedCount);
+}
+
+/** Step-up check for sensitive actions by an already signed-in user (e.g. savings withdrawal, M1). */
+export async function verifyPinForUserId(userId: string, pin: string): Promise<void> {
+  const user = await findUserById(userId);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(403, "ACCOUNT_SUSPENDED", "This account cannot perform this action.");
+  }
+  await verifyPinForUser(user, pin);
 }
 
 async function assertNoDuplicateAccount(email: string, phoneNumber: string): Promise<void> {
@@ -652,4 +723,82 @@ function mapDbError(err: unknown): Error {
     return new ApiError(409, "ACCOUNT_EXISTS", "An account with this email or phone number already exists.");
   }
   return err instanceof Error ? err : new Error("Unknown database error");
+}
+
+/**
+ * Explicit, authenticated account linking (H7): a signed-in STUDENT
+ * links a Google identity by proving their current password and
+ * presenting a fresh, verified Google ID token. A Google identity can
+ * belong to at most one user (users.google_id UNIQUE).
+ */
+export async function linkGoogleAccount(userId: string, profile: GoogleProfile, currentPassword: string): Promise<{ linked: true }> {
+  if (!profile.emailVerified) {
+    throw new ApiError(401, "GOOGLE_EMAIL_UNVERIFIED", "Your Google account's email address isn't verified.");
+  }
+  const user = await findUserById(userId);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(403, "ACCOUNT_SUSPENDED", "This account cannot be linked.");
+  }
+  if (user.role !== "student") {
+    throw new ApiError(403, "GOOGLE_LOGIN_NOT_ALLOWED", "Only student accounts can sign in with Google.");
+  }
+  if (!user.password_hash || !(await verifyPassword(currentPassword, user.password_hash))) {
+    throw new ApiError(401, "INVALID_CREDENTIALS", "Incorrect password.");
+  }
+  if (user.google_id && user.google_id !== profile.googleId) {
+    throw new ApiError(409, "GOOGLE_ALREADY_LINKED", "A different Google account is already linked to this account.");
+  }
+  try {
+    const result = await pool.query(
+      "UPDATE users SET google_id = $1, updated_at = now() WHERE id = $2 AND (google_id IS NULL OR google_id = $1)",
+      [profile.googleId, userId]
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      throw new ApiError(409, "GOOGLE_ALREADY_LINKED", "A different Google account is already linked to this account.");
+    }
+  } catch (err) {
+    if ((err as { code?: string }).code === "23505") {
+      throw new ApiError(409, "GOOGLE_IN_USE", "This Google account is already linked to another MEALVEST account.");
+    }
+    throw err;
+  }
+  return { linked: true };
+}
+
+/** Max age of a Google ID token accepted as step-up re-authentication. */
+const GOOGLE_REAUTH_MAX_AGE_SECONDS = 10 * 60;
+
+/**
+ * Step-up authorization for a sensitive action (savings withdrawal, M1):
+ *  - accounts WITH a PIN must enter it (same atomic lockout as login);
+ *  - accounts WITHOUT a PIN (Google-only students have neither PIN nor
+ *    password) must re-authenticate with a FRESH Google ID token for the
+ *    SAME linked Google identity.
+ * There is no path that authorizes the action with neither.
+ */
+export async function verifyStepUp(
+  userId: string,
+  proof: { pin?: string; googleIdToken?: string },
+  verifyGoogle: (idToken: string) => Promise<GoogleProfile>
+): Promise<void> {
+  const user = await findUserById(userId);
+  if (!user || user.account_status === "suspended") {
+    throw new ApiError(403, "ACCOUNT_SUSPENDED", "This account cannot perform this action.");
+  }
+  if (user.pin_hash) {
+    if (!proof.pin) throw new ApiError(400, "PIN_REQUIRED", "Enter your 4-digit PIN to confirm.");
+    await verifyPinForUser(user, proof.pin);
+    return;
+  }
+  if (!user.google_id) {
+    throw new ApiError(400, "PIN_REQUIRED", "Set up a PIN before making withdrawals.");
+  }
+  if (!proof.googleIdToken) {
+    throw new ApiError(400, "REAUTH_REQUIRED", "Confirm with Google to continue.");
+  }
+  const profile = await verifyGoogle(proof.googleIdToken);
+  const ageSeconds = Math.floor(Date.now() / 1000) - profile.issuedAt;
+  if (profile.googleId !== user.google_id || !profile.emailVerified || ageSeconds > GOOGLE_REAUTH_MAX_AGE_SECONDS || ageSeconds < -60) {
+    throw new ApiError(401, "REAUTH_FAILED", "Google confirmation failed. Please try again.");
+  }
 }

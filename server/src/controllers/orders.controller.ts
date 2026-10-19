@@ -6,7 +6,8 @@ import * as orderService from "../services/orderService";
 
 const createOrderSchema = z.object({
   hotelId: z.string().uuid(),
-  items: z.array(z.object({ itemId: z.string().uuid(), quantity: z.number().int().min(1).max(20) })).min(1),
+  // M9: bounded order size (lines and quantity) — validated server-side, prices always come from the DB.
+  items: z.array(z.object({ itemId: z.string().uuid(), quantity: z.number().int().min(1).max(20) })).min(1).max(20),
   idempotencyKey: z.string().min(1).max(100).optional(),
 });
 

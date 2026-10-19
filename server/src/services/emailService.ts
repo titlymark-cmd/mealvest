@@ -50,3 +50,32 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
     throw new ApiError(502, "EMAIL_SEND_FAILED", "Could not send the password reset email.");
   }
 }
+
+/** Email-verification link (finding H7/M3). The URL is built server-side from APP_BASE_URL only. */
+export async function sendVerificationEmail(to: string, verifyUrl: string): Promise<void> {
+  const safeUrl = verifyUrl.replace(/"/g, "%22").replace(/</g, "%3C").replace(/>/g, "%3E");
+  const html = `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #E5482E;">Confirm your MEALVEST email</h2>
+      <p>Tap the button below to confirm this email address for your MEALVEST account.</p>
+      <p>
+        <a href="${safeUrl}" style="display: inline-block; background: #E5482E; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">
+          Confirm email
+        </a>
+      </p>
+      <p style="color: #6B625C; font-size: 13px;">This link expires in 24 hours and works once. If you didn't create a MEALVEST account, ignore this email.</p>
+    </div>
+  `;
+  try {
+    await client().post("/emails", { from: env.emailFrom, to, subject: "Confirm your MEALVEST email", html });
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      console.error("[sendVerificationEmail] Resend request failed:", err.response?.status);
+    }
+    throw new ApiError(502, "EMAIL_SEND_FAILED", "Could not send the verification email.");
+  }
+}
+
+export function isEmailConfigured(): boolean {
+  return Boolean(env.resendApiKey);
+}

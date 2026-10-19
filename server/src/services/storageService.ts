@@ -31,13 +31,31 @@ function client() {
   });
 }
 
-function validateImageFile(file: { mimetype: string; size: number }): void {
-  if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-    throw new ApiError(400, "INVALID_FILE_TYPE", "Only JPEG, PNG, or WebP images are allowed.");
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
+/**
+ * Content-based type detection (finding M7). The browser-supplied
+ * Content-Type and filename are NOT trusted: the first bytes of the file
+ * must match a real JPEG, PNG or WebP signature. Anything else — SVG
+ * (scriptable), HTML, a renamed executable — is rejected. (The
+ * `file-type` package is ESM-only and this server is CommonJS, so the
+ * three signatures we accept are checked directly.)
+ */
+export function detectImageType(buffer: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
+function validateImageFile(file: { mimetype: string; size: number; buffer: Buffer }): string {
+  if (file.size > MAX_IMAGE_BYTES || file.buffer.length > MAX_IMAGE_BYTES) {
     throw new ApiError(400, "FILE_TOO_LARGE", "Image is too large — 4MB maximum.");
   }
+  const detected = detectImageType(file.buffer);
+  if (!detected || !ALLOWED_MIME_TYPES.includes(detected)) {
+    throw new ApiError(400, "INVALID_FILE_TYPE", "Only JPEG, PNG, or WebP images are allowed.");
+  }
+  return detected;
 }
 
 async function uploadToBucket(
@@ -46,13 +64,17 @@ async function uploadToBucket(
   file: { buffer: Buffer; mimetype: string; size: number },
   logLabel: string
 ): Promise<string> {
-  validateImageFile(file);
-  const ext = EXT_BY_MIME[file.mimetype];
+  // Type, extension and stored Content-Type all come from the sniffed bytes.
+  const contentType = validateImageFile(file);
+  const ext = EXT_BY_MIME[contentType];
+  if (!/^[a-z0-9/-]+$/i.test(pathPrefix) || pathPrefix.includes("..")) {
+    throw new ApiError(400, "INVALID_PATH", "Invalid upload path.");
+  }
   const objectPath = `${pathPrefix}/${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${ext}`;
 
   try {
     await client().post(`/object/${bucket}/${objectPath}`, file.buffer, {
-      headers: { "Content-Type": file.mimetype },
+      headers: { "Content-Type": contentType, "x-upsert": "false" },
       maxBodyLength: MAX_IMAGE_BYTES + 1024,
     });
   } catch (err) {
@@ -96,4 +118,32 @@ export async function uploadStudentAvatar(
   file: { buffer: Buffer; mimetype: string; size: number }
 ): Promise<string> {
   return uploadToBucket(AVATAR_BUCKET, `student/${userId}`, file, "uploadStudentAvatar");
+}
+
+/**
+ * Image URLs a hotel may store (M9): https only, and only hosts the app
+ * actually serves images from (our own Supabase Storage project, plus
+ * the stock-photo host already allowed by the CSP). The server never
+ * fetches these URLs (no SSRF surface); this stops javascript:/data:/
+ * tracking-pixel URLs being rendered to students.
+ */
+export function allowedImageHosts(): string[] {
+  const hosts = ["images.unsplash.com"];
+  try {
+    if (env.supabaseUrl) hosts.push(new URL(env.supabaseUrl).hostname);
+  } catch {
+    /* ignore malformed config */
+  }
+  for (const h of (process.env.IMAGE_URL_ALLOWED_HOSTS || "").split(",").map((x) => x.trim()).filter(Boolean)) hosts.push(h);
+  return hosts;
+}
+
+export function isAllowedImageUrl(value: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" && !u.username && !u.password && allowedImageHosts().includes(u.hostname);
 }

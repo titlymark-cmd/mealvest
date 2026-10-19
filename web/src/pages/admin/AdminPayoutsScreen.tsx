@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Wallet, Send, RefreshCw } from "lucide-react";
+import { Wallet, Send, RefreshCw, Check, X } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
@@ -9,6 +9,8 @@ import {
   fetchPayoutHistory,
   triggerPayout,
   refreshPayoutStatus,
+  approvePayout,
+  cancelPayout,
   HotelPendingBalance,
   HotelPayout,
 } from "../../services/hotelPayoutsApi";
@@ -18,6 +20,10 @@ const STATUS_COLOR: Record<string, string> = {
   processing: COLORS.warning,
   successful: COLORS.success,
   failed: COLORS.danger,
+  review: COLORS.warning,
+  approved: COLORS.warning,
+  unknown: COLORS.danger,
+  cancelled: COLORS.textFaint,
 };
 
 function timeAgo(iso: string): string {
@@ -87,6 +93,25 @@ export default function AdminPayoutsScreen() {
     }
   };
 
+  const handleDecision = async (payoutId: string, decision: "approve" | "cancel") => {
+    const p = history.find((x) => x.id === payoutId);
+    const question =
+      decision === "approve"
+        ? `Approve and send KSh ${Number(p?.amount ?? 0).toLocaleString()} to ${p?.hotel_name ?? "this hotel"}?`
+        : "Cancel this payout? Its orders go back to the unpaid balance.";
+    if (!window.confirm(question)) return;
+    setError(null);
+    setActingOn(payoutId);
+    try {
+      await (decision === "approve" ? approvePayout(authFetch, payoutId) : cancelPayout(authFetch, payoutId));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update this payout.");
+    } finally {
+      setActingOn(null);
+    }
+  };
+
   if (loading) {
     return (
       <div style={styles.center}>
@@ -149,12 +174,23 @@ export default function AdminPayoutsScreen() {
               <span style={styles.rowTitle}>{p.hotel_name}</span>
               <span style={styles.rowSub}>
                 {p.transfer_reference} · {timeAgo(p.created_at)}
+                {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
                 {p.failure_reason && ` — ${p.failure_reason}`}
               </span>
             </div>
             <span style={styles.amount}>KSh {Number(p.amount).toLocaleString()}</span>
             <span style={{ ...styles.statusChip, backgroundColor: STATUS_COLOR[p.status] }}>{p.status}</span>
-            {p.status === "processing" && (
+            {p.status === "review" && (
+              <>
+                <button onClick={() => handleDecision(p.id, "approve")} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Approve and send">
+                  <Check size={14} color={COLORS.success} />
+                </button>
+                <button onClick={() => handleDecision(p.id, "cancel")} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Cancel payout">
+                  <X size={14} color={COLORS.danger} />
+                </button>
+              </>
+            )}
+            {(p.status === "processing" || p.status === "unknown") && (
               <button onClick={() => handleRefresh(p.id)} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Refresh status">
                 <RefreshCw size={13} color={COLORS.primary} />
               </button>

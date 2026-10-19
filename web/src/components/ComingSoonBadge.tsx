@@ -37,7 +37,7 @@ export function ComingSoonBadge() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="mv-comingsoon-badge"
+        className="mv-comingsoon-badge mv-floating-badge"
         style={styles.badge}
         aria-label="Coming soon features"
       >
@@ -81,7 +81,6 @@ const styles: Record<string, React.CSSProperties> = {
   badge: {
     position: "fixed",
     right: 16,
-    bottom: 88,
     zIndex: 55,
     width: 46,
     height: 46,

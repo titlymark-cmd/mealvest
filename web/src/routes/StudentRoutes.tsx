@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import HotelListScreen from "../pages/student/HotelListScreen";
 import HotelMenuScreen from "../pages/student/HotelMenuScreen";
 import BudgetOnboardingScreen from "../pages/student/BudgetOnboardingScreen";
@@ -12,44 +12,37 @@ import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 import WithdrawSavingsScreen from "../pages/student/WithdrawSavingsScreen";
 import StudentPaymentsScreen from "../pages/student/StudentPaymentsScreen";
-import { StudentSidebar, STUDENT_MOBILE_BREAKPOINT, STUDENT_SIDEBAR_WIDTH } from "../components/student/StudentSidebar";
-import { NotificationBell } from "../components/notifications/NotificationBell";
+import { StudentTopBar, StudentBottomNav } from "../components/student/StudentNav";
 import { ComingSoonBadge } from "../components/ComingSoonBadge";
-import { useWindowSize } from "../hooks/useWindowSize";
 import { useAuth } from "../context/AuthContext";
 import { getActiveBudget } from "../services/budgetApi";
 import { COLORS } from "../styles/theme";
 import { Spinner } from "../components/Spinner";
+import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
 
 /**
- * Persistent sidebar shell for the three screens a student with an
- * active plan actually lives in day to day — same pattern as
- * AdminShell/HotelOwnerShell (see those files for the rationale).
- * Everything else here (hotel browsing, budget onboarding, the
- * meal-pass QR screen, order history, meal boost) is a focused,
- * single-purpose flow and deliberately stays OUTSIDE this shell, the
- * same way hotel-owner's own scanner screen does.
+ * Persistent student shell: sticky top bar (desktop nav + bell + account),
+ * floating pill nav on phones, and ONE scroll container for page content.
+ * The shell is keyed on the pathname so each destination fades in, but the
+ * nav chrome itself never remounts — that is what lets the pill's active
+ * thumb slide between destinations instead of popping.
+ *
+ * Focused single-purpose flows (hotel browsing, plan setup, the QR
+ * meal-pass, meal boost, savings withdrawal, payment callback) stay OUTSIDE
+ * the shell on purpose: nothing may cover a QR code or a payment action.
  */
 function StudentDashboardShell({ children }: { children: React.ReactNode }) {
-  const { width } = useWindowSize();
-  const isMobile = width < STUDENT_MOBILE_BREAKPOINT;
+  const { pathname } = useLocation();
   return (
-    <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
-      <StudentSidebar />
-      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
-        <NotificationBell />
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div id="mv-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
+        <StudentTopBar />
+        <ComingSoonBadge />
+        <main key={pathname} className="mv-page mv-has-bottomnav mv-shell-main">
+          {children}
+        </main>
       </div>
-      <ComingSoonBadge />
-      <div
-        style={{
-          height: "100%",
-          overflowY: "auto",
-          marginLeft: isMobile ? 0 : STUDENT_SIDEBAR_WIDTH,
-          paddingBottom: isMobile ? 96 : 0,
-        }}
-      >
-        {children}
-      </div>
+      <StudentBottomNav />
     </div>
   );
 }
@@ -103,11 +96,12 @@ export function StudentRoutes() {
       <Route path="/student/menu" element={<StudentDashboardShell><StudentMenuScreen /></StudentDashboardShell>} />
       <Route path="/student/profile" element={<StudentDashboardShell><StudentProfileScreen /></StudentDashboardShell>} />
       <Route path="/student/meal-pass" element={<MealPassScreen />} />
-      <Route path="/student/orders" element={<OrderHistoryScreen />} />
+      <Route path="/student/orders" element={<StudentDashboardShell><OrderHistoryScreen /></StudentDashboardShell>} />
       <Route path="/student/meal-boost" element={<MealBoostScreen />} />
       <Route path="/student/withdraw" element={<WithdrawSavingsScreen />} />
-      <Route path="/student/payments" element={<StudentPaymentsScreen />} />
+      <Route path="/student/payments" element={<StudentDashboardShell><StudentPaymentsScreen /></StudentDashboardShell>} />
       <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
+      <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="*" element={<Navigate to="/student" replace />} />
     </Routes>
   );

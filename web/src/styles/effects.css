@@ -21,82 +21,7 @@
    keep the two in sync if the palette ever changes.
    ============================================================ */
 
-@property --mv-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes mv-ring-rotate {
-  to {
-    --mv-angle: 360deg;
-  }
-}
-
-.mv-action {
-  position: relative;
-  transition: transform 260ms cubic-bezier(0.22, 0.9, 0.32, 1);
-}
-
-.mv-action::before {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(
-    from var(--mv-angle),
-    transparent 0deg,
-    #f5a623 55deg,
-    #ff8a3d 150deg,
-    #e5482e 240deg,
-    transparent 320deg
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 260ms ease;
-}
-
-.mv-action:hover,
-.mv-action:focus-visible {
-  transform: scale(1.025);
-}
-
-.mv-action:hover::before,
-.mv-action:focus-visible::before {
-  opacity: 1;
-  animation: mv-ring-rotate 1.7s linear infinite;
-}
-
-.mv-action:active {
-  transform: scale(1.01);
-}
-
-/* Opt-out modifier: keeps the scale-up hover feel but drops the
-   rotating ring entirely — for spots where the ring read as too busy
-   (the "Find hotels near me" button, hotel list rows). Combine with
-   .mv-action: className="mv-action mv-action-no-ring". */
-.mv-action-no-ring::before {
-  content: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mv-action {
-    transition: none;
-  }
-  .mv-action:hover,
-  .mv-action:focus-visible {
-    transform: none;
-  }
-  .mv-action:hover::before,
-  .mv-action:focus-visible::before {
-    animation: none;
-    opacity: 0.85;
-  }
-}
+/* .mv-action (tactile press) now lives in styles/neu.css. */
 
 /* Card-lift hover: no scale, no ring — just a gentle upward shift and
    a deeper shadow. Used for browsing grids (e.g. the student hotel
@@ -123,16 +48,6 @@
   .mv-card-lift:focus-within {
     transform: none;
   }
-}
-
-/* Keyboard/focus polish for form inputs — there was no visible focus
-   ring anywhere before this (every input sets outline:none inline),
-   which is both an accessibility gap and read as unfinished. */
-input:focus-visible,
-textarea:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.3);
-  border-color: #ff8a3d !important;
 }
 
 /* Opt-out for a borderless input nested inside its own pill/card

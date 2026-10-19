@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, PlayCircle } from "lucide-react";
-import { Logo } from "../components/Logo";
+import { PlayCircle } from "lucide-react";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { Field } from "../components/ui/Field";
+import { PasswordField } from "../components/ui/PasswordField";
 import { COLORS, FONTS, RADIUS } from "../styles/theme";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../services/authApi";
@@ -10,24 +11,15 @@ import { isGoogleAuthConfigured } from "../services/googleAuth";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 
 /**
- * The actual login form and its logic — ported unchanged from the
- * original app/src/screens/LoginFormContent.tsx. Every API call,
- * validation rule, and piece of auth state here is identical; only
- * the JSX elements changed (View/Text/TextInput -> div/span/input),
- * and navigation.navigate(...) was already a local callback prop in
- * the RN version (for the diagonal-split animation), so nothing
- * changes there either.
+ * Login form. Auth logic is unchanged (loginWithPassword / loginWithGoogle,
+ * same errors, same PIN second step handled by RootGate); only the
+ * presentation was rebuilt.
  */
-export function LoginFormContent({
-  onSwitchToRegister,
-}: {
-  onSwitchToRegister: (role: "student" | "hotel") => void;
-}) {
+export function LoginFormContent({ onSwitchToRegister }: { onSwitchToRegister: (role: "student" | "hotel") => void }) {
   const navigate = useNavigate();
   const { loginWithPassword, loginWithGoogle } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,9 +30,7 @@ export function LoginFormContent({
       setGoogleLoading(true);
       try {
         await loginWithGoogle(idToken);
-        // No manual navigation — the root route gate watches `user`
-        // from AuthContext and switches to the correct role stack
-        // automatically, exactly the same as password login.
+        // No manual navigation — the root route gate watches `user`.
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "Google sign-in failed. Please try again.");
       } finally {
@@ -49,7 +39,6 @@ export function LoginFormContent({
     },
     [loginWithGoogle]
   );
-
   const googleConfigured = isGoogleAuthConfigured();
 
   const submit = async (e: React.FormEvent) => {
@@ -67,121 +56,48 @@ export function LoginFormContent({
 
   return (
     <form style={styles.wrap} onSubmit={submit}>
-      <Logo />
       <h1 style={styles.title}>Welcome back</h1>
       <p style={styles.subtitle}>Sign in to continue.</p>
 
       {googleConfigured && (
         <>
           <GoogleSignInButton onIdToken={handleGoogleIdToken} loading={googleLoading} />
-          <div style={styles.dividerRow}>
-            <div style={styles.dividerLine} />
-            <span style={styles.dividerText}>OR</span>
-            <div style={styles.dividerLine} />
-          </div>
+          <p style={styles.or}>or sign in with your email or phone</p>
         </>
       )}
 
-      <input
-        style={styles.input}
-        placeholder="Email or phone number"
-        autoCapitalize="none"
-        value={identifier}
-        onChange={(e) => setIdentifier(e.target.value)}
-      />
-      <div style={styles.passwordRow}>
-        <input
-          style={{ ...styles.input, ...styles.passwordInput }}
-          placeholder="Password"
-          type={showPassword ? "text" : "password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <button
-          type="button"
-          style={styles.eyeButton}
-          onClick={() => setShowPassword((v) => !v)}
-          aria-label={showPassword ? "Hide password" : "Show password"}
-        >
-          {showPassword ? <EyeOff size={18} color={COLORS.textOnDarkMuted} /> : <Eye size={18} color={COLORS.textOnDarkMuted} />}
-        </button>
-      </div>
+      <Field label="Email or phone number" value={identifier} onChange={setIdentifier} autoComplete="username" autoCapitalize="none" enterKeyHint="next" />
+      <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" enterKeyHint="go" />
 
-      <button type="button" style={styles.forgotButton} onClick={() => navigate("/forgot-password")}>
-        <span style={styles.forgotText}>Forgot password?</span>
+      <button type="button" style={styles.forgot} onClick={() => navigate("/forgot-password")}>
+        Forgot password?
       </button>
 
-      {error && <p style={styles.error}>{error}</p>}
+      {error && (
+        <p role="alert" style={styles.error}>
+          {error}
+        </p>
+      )}
 
-      <PrimaryButton onPress={() => {}} loading={loading} showArrow={false} style={{ marginTop: 8 }}>
+      <PrimaryButton loading={loading} showArrow={false} style={{ marginTop: 8 }}>
         Sign in
       </PrimaryButton>
 
-      <button type="button" style={styles.demoButton} onClick={() => navigate("/demo")}>
-        <PlayCircle size={18} color={COLORS.primary} />
-        <span style={styles.demoText}>Watch the 60-second demo</span>
-      </button>
-
-      <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("student")}>
-        <span style={styles.link}>New student? Create an account</span>
-      </button>
-      <button type="button" style={styles.linkButton} onClick={() => onSwitchToRegister("hotel")}>
-        <span style={styles.link}>Registering a hotel? Sign up here</span>
-      </button>
+      <div style={styles.links}>
+        <PrimaryButton variant="secondary" type="button" showArrow={false} onPress={() => onSwitchToRegister("student")}>
+          New student? Create an account
+        </PrimaryButton>
+      </div>
     </form>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  wrap: { width: "100%", maxWidth: 420, display: "flex", flexDirection: "column" },
-  title: { fontSize: 24, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, marginTop: 22, marginBottom: 0 },
-  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
-  dividerRow: { display: "flex", flexDirection: "row", alignItems: "center", marginTop: 18, marginBottom: 18 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
-  dividerText: { marginLeft: 10, marginRight: 10, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.textOnDarkMuted },
-  input: {
-    backgroundColor: "rgba(252,244,234,0.06)",
-    borderRadius: RADIUS.sm,
-    border: `1.5px solid ${COLORS.border}`,
-    paddingTop: 14,
-    paddingBottom: 14,
-    paddingLeft: 16,
-    paddingRight: 16,
-    marginBottom: 12,
-    fontSize: 15,
-    fontFamily: FONTS.bodyMedium,
-    fontWeight: 500,
-    color: COLORS.textOnDark,
-    outline: "none",
-    width: "100%",
-  },
-  passwordRow: { position: "relative", display: "flex", flexDirection: "column", justifyContent: "center" },
-  passwordInput: { paddingRight: 44 },
-  eyeButton: { position: "absolute", right: 14, height: "100%", display: "flex", justifyContent: "center", alignItems: "center" },
-  error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, marginTop: 0, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
-  forgotButton: { alignSelf: "flex-end", marginBottom: 16, marginTop: -4 },
-  forgotText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
-  linkButton: { marginTop: 16, alignSelf: "center" },
-  demoButton: {
-    marginTop: 12,
-    width: "100%",
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 9,
-    padding: "13px 16px",
-    borderRadius: RADIUS.sm,
-    border: `1.5px solid ${COLORS.primary}`,
-    backgroundColor: "rgba(229,72,46,0.10)",
-    cursor: "pointer",
-  },
-  demoText: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 14, color: COLORS.primary },
-  link: {
-    color: COLORS.primary,
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 600,
-    fontSize: 13,
-    textAlign: "center",
-  },
+  wrap: { width: "100%", maxWidth: 440, display: "flex", flexDirection: "column" },
+  title: { margin: 0, fontSize: 28, lineHeight: "34px", fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark },
+  subtitle: { fontSize: 14, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, margin: "6px 0 24px" },
+  or: { textAlign: "center", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, margin: "14px 0 20px" },
+  forgot: { alignSelf: "flex-end", minHeight: 44, marginTop: -6, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primaryLight },
+  error: { margin: "0 0 8px", padding: "12px 14px", borderRadius: RADIUS.sm, backgroundColor: "rgba(229,72,46,0.12)", border: "1px solid rgba(229,72,46,0.5)", color: "#FF9A82", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13 },
+  links: { display: "flex", flexDirection: "column", gap: 6, marginTop: 22 },
 };

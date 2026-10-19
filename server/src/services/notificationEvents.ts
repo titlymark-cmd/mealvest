@@ -1,4 +1,16 @@
-import { notify } from "./notificationService";
+import { notify, NotifyParams } from "./notificationService";
+import { runInBackground } from "../lib/background";
+
+/**
+ * Every event is dispatched after the response via runInBackground, so
+ * on Vercel the work is registered with the request's waitUntil and is
+ * not frozen when the function returns (M2). notify() is idempotent per
+ * dedupeKey, so a retried webhook/callback never double-notifies, and a
+ * notification is never proof that money moved.
+ */
+function send(params: NotifyParams): void {
+  runInBackground("notify", () => notify(params));
+}
 import { pool } from "../config/db";
 
 /**
@@ -29,7 +41,7 @@ const formatKsh = (amount: number) => `KSh ${Math.round(amount).toLocaleString()
 // ---------------------------------------------------------------------------
 
 export function welcomeStudent(userId: string, fullName: string): void {
-  void notify({
+  send({
     userId,
     type: "welcome_student",
     title: "Welcome to MEALVEST 👋",
@@ -40,7 +52,7 @@ export function welcomeStudent(userId: string, fullName: string): void {
 }
 
 export function welcomeHotel(userId: string, hotelName: string): void {
-  void notify({
+  send({
     userId,
     type: "welcome_hotel",
     title: "Welcome to MEALVEST 👋",
@@ -51,7 +63,7 @@ export function welcomeHotel(userId: string, hotelName: string): void {
 }
 
 export function securityPasswordChanged(userId: string): void {
-  void notify({
+  send({
     userId,
     type: "security_password_changed",
     title: "Your password was changed",
@@ -68,7 +80,7 @@ export function securityPasswordChanged(userId: string): void {
 // ---------------------------------------------------------------------------
 
 export function paymentSuccess(userId: string, amount: number, reference: string, isBoost: boolean): void {
-  void notify({
+  send({
     userId,
     type: isBoost ? "boost_success" : "payment_success",
     title: "Payment successful ✅",
@@ -82,7 +94,7 @@ export function paymentSuccess(userId: string, amount: number, reference: string
 }
 
 export function paymentFailed(userId: string, amount: number, reference: string): void {
-  void notify({
+  send({
     userId,
     type: "payment_failed",
     title: "Payment failed",
@@ -95,7 +107,7 @@ export function paymentFailed(userId: string, amount: number, reference: string)
 
 export function lowBudgetWarning(userId: string, budgetId: string, spendableToday: number): void {
   const today = new Date().toISOString().slice(0, 10);
-  void notify({
+  send({
     userId,
     type: "low_budget_warning",
     title: "Low meal balance ⚠️",
@@ -114,7 +126,7 @@ export function lowBudgetWarning(userId: string, budgetId: string, spendableToda
 
 /** Fired by the meal-reminders cron (see routes/cron.routes.ts) — once per user per day, regardless of how many times that day's bucket is checked. */
 export function mealReminder(userId: string, nairobiDateStr: string): void {
-  void notify({
+  send({
     userId,
     type: "meal_reminder",
     title: "Don't forget your meal today 🍽️",
@@ -126,7 +138,7 @@ export function mealReminder(userId: string, nairobiDateStr: string): void {
 }
 
 export function mealPassGenerated(userId: string, hotelName: string, amount: number): void {
-  void notify({
+  send({
     userId,
     type: "meal_pass_generated",
     title: "Your meal pass is ready 📱",
@@ -137,7 +149,7 @@ export function mealPassGenerated(userId: string, hotelName: string, amount: num
 }
 
 export function mealRedeemed(userId: string, hotelName: string, amount: number): void {
-  void notify({
+  send({
     userId,
     type: "meal_redeemed",
     title: "Meal redeemed 🍛",
@@ -160,7 +172,7 @@ async function notifyHotelStaff(
   try {
     const result = await pool.query("SELECT user_id FROM hotel_staff WHERE hotel_id = $1", [hotelId]);
     for (const row of result.rows) {
-      void notify(build(row.user_id));
+      send(build(row.user_id));
     }
   } catch (err) {
     console.error("[notificationEvents.notifyHotelStaff] failed:", err);
@@ -193,7 +205,7 @@ export function hotelMealRedeemed(hotelId: string, hotelAmount: number, orderId:
 
 /** Admin closed a student's savings withdrawal — tells the student the money was sent (or the request was declined). */
 export function savingsWithdrawalStatusChanged(userId: string, status: "completed" | "rejected", amount: number): void {
-  void notify({
+  send({
     userId,
     type: "savings_withdrawal_status",
     title: status === "completed" ? "Savings sent ✅" : "Savings withdrawal declined",

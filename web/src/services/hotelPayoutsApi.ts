@@ -22,7 +22,13 @@ export interface HotelPayout {
   hotel_id: string;
   hotel_name?: string;
   amount: string;
-  status: "pending" | "processing" | "successful" | "failed";
+  /**
+   * review/approved: held for an admin decision (over a limit) — not sent.
+   * unknown: a send was attempted but its outcome isn't confirmed yet —
+   * money may have moved; it is reconciled under the SAME reference.
+   */
+  status: "pending" | "review" | "approved" | "unknown" | "processing" | "successful" | "failed" | "cancelled";
+  review_reason?: string | null;
   provider: string;
   transfer_reference: string;
   recipient_code: string | null;
@@ -57,5 +63,19 @@ export async function triggerPayout(authFetch: AuthFetch, hotelId: string): Prom
 export async function refreshPayoutStatus(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
   const res = await authFetch(`/api/admin/payouts/${payoutId}/refresh`, { method: "POST" });
   const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not refresh this payout's status.");
+  return data.payout;
+}
+
+/** Approve a payout held in review — it is then sent once, under its own reference. */
+export async function approvePayout(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/approve`, { method: "POST" });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not approve this payout.");
+  return data.payout;
+}
+
+/** Cancel a payout that was never sent (review/approved); its orders return to the unpaid pool. */
+export async function cancelPayout(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/cancel`, { method: "POST" });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not cancel this payout.");
   return data.payout;
 }

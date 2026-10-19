@@ -23,7 +23,10 @@ interface Props {
  * unmounting Google's button mid-flow would lose its click state.
  */
 export function GoogleSignInButton({ onIdToken, loading }: Props) {
-  const { ready, buttonRef } = useGoogleAuth(onIdToken);
+  const { ready, failed, buttonRef } = useGoogleAuth(onIdToken);
+
+  // Google's script is blocked/offline: show nothing rather than a dead placeholder.
+  if (failed) return null;
 
   return (
     <div style={styles.wrap}>

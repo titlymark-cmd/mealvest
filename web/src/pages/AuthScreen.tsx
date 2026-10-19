@@ -1,295 +1,72 @@
 import React, { useState } from "react";
+import { Store, QrCode, Wallet } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Logo } from "../components/Logo";
-import { COLORS, FONTS } from "../styles/theme";
+import { COLORS, FONTS, NEU, RADIUS } from "../styles/theme";
 import { LoginFormContent } from "./LoginFormContent";
-import { RegisterFormContent } from "./RegisterFormContent";
-import { useWindowSize } from "../hooks/useWindowSize";
+import { StudentSignupWizard } from "./StudentSignupWizard";
+import { HotelSignupWizard } from "./HotelSignupWizard";
 
 type Mode = "login" | "register-student" | "register-hotel";
 
-// Same photos the UI/UX reference design used for the two auth hero
-// panels — reused as-is per the design brief rather than substituted.
-const IMG_LOGIN_HERO = "https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=1000&q=80&auto=format&fit=crop";
-const IMG_REGISTER_HERO = "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200&q=70&auto=format&fit=crop";
-
-const DESKTOP_BREAKPOINT = 900;
-const SLIDE_MS = 900;
-const EASE = "cubic-bezier(.65,0,.35,1)";
-
-// Outer padding from the true screen edge, plus the wider of the two form
-// components' own maxWidth (RegisterFormContent's is 420) — this is the
-// furthest a form's content can ever reach in from that edge.
-const FORM_PADDING = 64;
-const FORM_SAFE_EDGE = FORM_PADDING + 420;
-
-// Login keeps the original ~45-degree diagonal; the signup side of the
-// split uses a shallower angle (15 degrees less, i.e. more vertical —
-// a less dramatic slant) per explicit design feedback. Angle is
-// measured from vertical, so 45 reproduces the original geometry
-// exactly (tan(45deg) = 1, giving half = height/2 as before).
-const LOGIN_ANGLE_DEG = 45;
-const REGISTER_ANGLE_DEG = 30;
-
 /**
- * The diagonal boundary spans the FULL screen (not just the hero image),
- * and is computed from the viewport's own height rather than a fixed
- * percentage of its width — over one screen-height of vertical travel it
- * moves a fixed multiple of that height sideways (tan(angle) * height),
- * so the line holds its angle at any desktop window size instead of
- * drifting flatter or steeper as the window gets wider or narrower.
- *
- * `formTopOffset` is solved directly from that same boundary equation: the
- * minimum distance from the top of the screen at which a form's content
- * can start appearing while staying guaranteed inside the wide part of its
- * own trapezoid — at any window size and for a form of any length (a long
- * hotel registration form just scrolls further before it's fully visible).
- */
-function diagonalGeometry(width: number, height: number, angleFromVerticalDeg: number) {
-  const half = (height * Math.tan((angleFromVerticalDeg * Math.PI) / 180)) / 2;
-  const center = width / 2;
-  const narrowX = center - half;
-  const wideX = center + half;
-  const formTopOffset = Math.max(48, FORM_SAFE_EDGE - narrowX);
-  return { narrowX, wideX, formTopOffset };
-}
-
-/**
- * The Login/Register experience — one persistently-mounted component
- * (not swapped by the router) so the diagonal-split transition
- * between them can actually animate. "/login", "/register/student"
- * and "/register/hotel" all render this same component with a
- * different initial `mode` prop (see routes/AppRoutes.tsx); switching
- * between Login and Register from WITHIN this screen changes local
- * state instead of navigating, which is what makes the animation
- * possible.
- *
- * All actual auth logic (validation, API calls, tokens, redirects)
- * lives unchanged in LoginFormContent/RegisterFormContent — this file
- * only owns layout, imagery and the transition.
+ * Login / student sign-up / hotel sign-up share ONE persistently-mounted
+ * screen (the three routes differ only by initial `mode`), so switching
+ * between them is local state, not a route swap. Desktop pairs the form
+ * pane with a brand panel; phones get a single column.
  */
 export default function AuthScreen({ mode: initialMode }: { mode: Mode }) {
   const [mode, setMode] = useState<Mode>(initialMode);
-  const { width } = useWindowSize();
-  const isDesktop = width >= DESKTOP_BREAKPOINT;
-  const isRegister = mode !== "login";
-  const registerRole: "student" | "hotel" = mode === "register-hotel" ? "hotel" : "student";
-
-  const switchToRegister = (role: "student" | "hotel") => setMode(role === "hotel" ? "register-hotel" : "register-student");
-  const switchToLogin = () => setMode("login");
-
-  if (isDesktop) {
-    return (
-      <AuthScreenDesktop
-        isRegister={isRegister}
-        registerRole={registerRole}
-        onSwitchToRegister={switchToRegister}
-        onSwitchToLogin={switchToLogin}
-      />
-    );
-  }
-  return (
-    <AuthScreenMobile
-      isRegister={isRegister}
-      registerRole={registerRole}
-      onSwitchToRegister={switchToRegister}
-      onSwitchToLogin={switchToLogin}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// DESKTOP — diagonal split (CSS clip-path animates the slide; opacity
-// cross-fades which content is on top of each side).
-// ---------------------------------------------------------------------------
-function HeroPanel({ visible, heading, subtitle, image, align }: any) {
-  return (
-    <div
-      style={{
-        ...styles.absoluteFill,
-        ...styles.heroPanel,
-        alignItems: align === "right" ? "flex-end" : "flex-start",
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? "auto" : "none",
-        transition: `opacity 550ms ease ${visible ? "180ms" : "0ms"}`,
-      }}
-    >
-      <img src={image} alt="" style={{ ...styles.absoluteFillObject, objectFit: "cover" }} />
-      <div style={styles.heroScrim} />
-      <div style={{ ...styles.heroContent, alignItems: align === "right" ? "flex-end" : "flex-start" }}>
-        <Logo size="md" />
-        <h2 style={{ ...styles.heroHeading, textAlign: align === "right" ? "right" : "left" }}>{heading}</h2>
-        <p style={{ ...styles.heroSubtitle, textAlign: align === "right" ? "right" : "left" }}>{subtitle}</p>
-      </div>
-    </div>
-  );
-}
-
-function FormPanel({ visible, align, topOffset, children }: any) {
-  // A single flex-column container, same shape as HeroPanel — a
-  // separate 100%-wide scroll wrapper here would defeat alignItems
-  // (a full-width child can't be "aligned" left/right within its
-  // parent), which is exactly what put the register form's content
-  // outside its own visible triangle. overflowY/paddingTop live
-  // directly on this element instead.
-  return (
-    <div
-      style={{
-        ...styles.absoluteFill,
-        ...styles.formPanel,
-        alignItems: align === "right" ? "flex-end" : "flex-start",
-        opacity: visible ? 1 : 0,
-        pointerEvents: visible ? "auto" : "none",
-        transition: `opacity 550ms ease ${visible ? "180ms" : "0ms"}`,
-        overflowY: "auto",
-        paddingTop: topOffset,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function AuthScreenDesktop({ isRegister, registerRole, onSwitchToRegister, onSwitchToLogin }: any) {
-  const { width, height } = useWindowSize();
-  // Two independent geometries — login's boundary/form-offset always
-  // come from the 45deg one, register's from the shallower 30deg one,
-  // so each screen keeps its own angle rather than sharing a single
-  // mirrored shape. The clip-path below picks whichever is currently
-  // active, and CSS smoothly interpolates the polygon between the two
-  // angles during the login<->register slide.
-  const loginGeom = diagonalGeometry(width, height, LOGIN_ANGLE_DEG);
-  const registerGeom = diagonalGeometry(width, height, REGISTER_ANGLE_DEG);
-  const activeGeom = isRegister ? registerGeom : loginGeom;
-
-  // Login: left region (the form) is narrow at the top, wide at the
-  // bottom. Register mirrors it: left region (the hero) wide at the top,
-  // narrow at the bottom. The right region is always the complement, so
-  // it's built from the exact same two numbers.
-  const leftTopX = isRegister ? activeGeom.wideX : activeGeom.narrowX;
-  const leftBottomX = isRegister ? activeGeom.narrowX : activeGeom.wideX;
-
-  const clipTransition: React.CSSProperties = {
-    // This is what actually slides the diagonal seam across the
-    // screen when Login/Register switch.
-    transition: `clip-path ${SLIDE_MS}ms ${EASE}`,
-  };
+  const toLogin = () => setMode("login");
+  const toRegister = (role: "student" | "hotel") => setMode(role === "hotel" ? "register-hotel" : "register-student");
 
   return (
-    <div style={styles.desktopRoot}>
-      {/* LEFT: Register hero (visible when registering) OR Login form
-          (visible when logging in). */}
-      <div
-        style={{
-          ...styles.absoluteFill,
-          ...clipTransition,
-          clipPath: `polygon(0 0, ${leftTopX}px 0, ${leftBottomX}px 100%, 0 100%)`,
-        }}
-      >
-        <div style={styles.panelInner}>
-          <HeroPanel
-            visible={isRegister}
-            image={IMG_REGISTER_HERO}
-            heading="Join the Mealvest table"
-            subtitle="Create an account and start funding meals at hotels you already trust."
-            align="left"
-          />
-          <FormPanel visible={!isRegister} align="left" topOffset={loginGeom.formTopOffset}>
-            <LoginFormContent onSwitchToRegister={onSwitchToRegister} />
-          </FormPanel>
+    <div className="mv-auth-root">
+      <aside className="mv-auth-brand" aria-hidden={false}>
+        <Link to="/" aria-label="MEALVEST home" style={{ display: "inline-flex" }}>
+          <Logo size="md" />
+        </Link>
+        <div style={{ marginTop: "auto" }}>
+          <h2 style={styles.hero}>Good food, brighter days</h2>
+          <p style={styles.heroSub}>Fund a meal plan with hotels you trust and eat well every single day.</p>
+          <ol style={styles.steps}>
+            {[
+              { icon: Store, t: "Pick a hotel you trust" },
+              { icon: Wallet, t: "Fund a plan, get a daily amount" },
+              { icon: QrCode, t: "Show your meal pass to eat" },
+            ].map(({ icon: Icon, t }) => (
+              <li key={t} style={styles.step}>
+                <span style={styles.stepIcon}>
+                  <Icon size={18} color={COLORS.accent} aria-hidden />
+                </span>
+                {t}
+              </li>
+            ))}
+          </ol>
         </div>
-      </div>
+      </aside>
 
-      {/* RIGHT: Login hero (visible when logging in) OR Register form
-          (visible when registering) — the complement of the left clip. */}
-      <div
-        style={{
-          ...styles.absoluteFill,
-          ...clipTransition,
-          clipPath: `polygon(${leftTopX}px 0, 100% 0, 100% 100%, ${leftBottomX}px 100%)`,
-        }}
-      >
-        <div style={styles.panelInner}>
-          <HeroPanel
-            visible={!isRegister}
-            image={IMG_LOGIN_HERO}
-            heading="Good food, brighter days"
-            subtitle="Fund a meal plan with hotels you trust and eat well every single day."
-            align="right"
-          />
-          <FormPanel visible={isRegister} align="right" topOffset={registerGeom.formTopOffset}>
-            <RegisterFormContent mode={registerRole} onSwitchToLogin={onSwitchToLogin} />
-          </FormPanel>
+      <main className="mv-auth-pane">
+        <div className="mv-auth-mobilelogo">
+          <Link to="/" aria-label="MEALVEST home" style={{ display: "inline-flex" }}>
+            <Logo size="sm" />
+          </Link>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// MOBILE — full-bleed hero background behind a centered form, matching the
-// reference's own mobile treatment (no diagonal at that width). The
-// background photo cross-fades between the login/register images via a
-// plain CSS opacity transition on two stacked <img> elements.
-// ---------------------------------------------------------------------------
-function AuthScreenMobile({ isRegister, registerRole, onSwitchToRegister, onSwitchToLogin }: any) {
-  return (
-    <div style={styles.mobileRoot}>
-      <img
-        src={IMG_LOGIN_HERO}
-        alt=""
-        style={{ ...styles.absoluteFillObject, objectFit: "cover", opacity: isRegister ? 0 : 1, transition: "opacity 600ms ease" }}
-      />
-      <img
-        src={IMG_REGISTER_HERO}
-        alt=""
-        style={{ ...styles.absoluteFillObject, objectFit: "cover", opacity: isRegister ? 1 : 0, transition: "opacity 600ms ease" }}
-      />
-      <div style={styles.mobileScrim} />
-
-      <div style={styles.mobileScroll}>
-        <div style={styles.mobileFormWrap}>
-          {isRegister ? (
-            <RegisterFormContent mode={registerRole} onSwitchToLogin={onSwitchToLogin} />
-          ) : (
-            <LoginFormContent onSwitchToRegister={onSwitchToRegister} />
-          )}
+        <div key={mode} className="mv-page" style={styles.content}>
+          {mode === "login" && <LoginFormContent onSwitchToRegister={toRegister} />}
+          {mode === "register-student" && <StudentSignupWizard onSwitchToLogin={toLogin} />}
+          {mode === "register-hotel" && <HotelSignupWizard onSwitchToLogin={toLogin} />}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
-  absoluteFillObject: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
-  desktopRoot: { flex: 1, width: "100%", height: "100%", position: "relative", backgroundColor: COLORS.bg, overflow: "hidden" },
-  panelInner: { position: "relative", width: "100%", height: "100%" },
-  heroPanel: { display: "flex", flexDirection: "column", justifyContent: "flex-start", padding: 56, overflow: "hidden" },
-  heroScrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(29,21,17,0.55)" },
-  heroContent: { display: "flex", flexDirection: "column", marginTop: 40, maxWidth: 380, position: "relative" },
-  heroHeading: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 32, lineHeight: "40px", color: "#fff", margin: 0, marginTop: 22 },
-  heroSubtitle: { fontFamily: FONTS.body, fontSize: 14, color: "rgba(255,255,255,0.85)", marginTop: 12, lineHeight: "21px" },
-  formPanel: { display: "flex", flexDirection: "column", paddingLeft: FORM_PADDING, paddingRight: FORM_PADDING, paddingBottom: 40 },
-  mobileRoot: { flex: 1, width: "100%", height: "100%", position: "relative", backgroundColor: COLORS.bg },
-  mobileScrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(29,21,17,0.72)" },
-  // No justifyContent:"center" here on purpose — combined with
-  // overflowY:auto, centering an over-height flex child clips its
-  // leading edge outside the scrollable range in most browsers (you
-  // can scroll to see the bottom of a too-tall form, but never far
-  // enough to reach its top). Vertical centering is done below instead
-  // via margin:auto on the child, which degrades to normal top-down
-  // flow — fully scrollable to the very top — once content overflows.
-  mobileScroll: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    flex: 1,
-    height: "100%",
-    alignItems: "center",
-    padding: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
-    overflowY: "auto",
-  },
-  mobileFormWrap: { width: "100%", display: "flex", flexDirection: "column", alignItems: "center", margin: "auto 0" },
+  content: { width: "100%", display: "flex", flexDirection: "column", alignItems: "center", margin: "auto 0", minHeight: 0 },
+  hero: { margin: 0, fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 38, lineHeight: "46px", color: COLORS.textOnDark, maxWidth: 420 },
+  heroSub: { margin: "14px 0 28px", fontFamily: FONTS.body, fontSize: 15, lineHeight: "23px", color: COLORS.textOnDarkMuted, maxWidth: 400 },
+  steps: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 12, maxWidth: 400 },
+  step: { display: "flex", alignItems: "center", gap: 14, padding: "10px 14px", borderRadius: RADIUS.md, backgroundColor: NEU.surfaceDark, boxShadow: NEU.darkRaisedSm, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 14, color: COLORS.textOnDark },
+  stepIcon: { width: 40, height: 40, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#1D1511", boxShadow: NEU.darkInset },
 };

@@ -21,7 +21,7 @@ import {
   findTransactionByProviderTransactionId,
   PendingTransactionLookup,
 } from "../services/paymentService";
-import { VerifyPaymentResult } from "../services/paymentProvider";
+import { verifyTransactionRow } from "../services/paymentVerification";
 import { getActiveBudget } from "../services/budgetService";
 import { getPayoutByReference } from "../models/hotelPayoutModel";
 import { verifyPayout, applyCyzoraPayoutWebhook } from "../services/hotelPayoutService";
@@ -182,21 +182,6 @@ export async function initializePaystackBoostPayment(req: AuthedRequest, res: Re
   }
 }
 
-/**
- * Verifies a payment with whichever provider created it and runs the
- * one idempotent activation step. Paystack rows are verified by our
- * own reference (Paystack accepts it directly); Cyzora rows by the
- * charge id / session reference stored on the row at initialize time
- * (see migration 040). The frontend polls this; nothing it returns is
- * ever derived from the client's own claims.
- */
-async function verifyTransactionRow(row: PendingTransactionLookup): Promise<VerifyPaymentResult> {
-  if (row.provider === "cyzora") {
-    return cyzoraProvider.verifyByChannel(row.provider_channel, row.provider_transaction_id ?? "", row.provider_reference);
-  }
-  return paystackProvider.verifyPayment(row.provider_reference);
-}
-
 export async function verifyPayment(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const { reference } = req.params;
@@ -211,7 +196,13 @@ export async function verifyPayment(req: AuthedRequest, res: Response, next: Nex
     const verified = await verifyTransactionRow(row);
     const result = await activatePaymentIfNeeded(reference, verified);
 
-    res.json({ reference, status: verified.status, alreadyProcessed: result.alreadyProcessed, provider: row.provider });
+    res.json({
+      reference,
+      status: verified.status,
+      alreadyProcessed: result.alreadyProcessed,
+      provider: row.provider,
+      ...(result.needsReview ? { needsReview: true } : {}),
+    });
   } catch (err) {
     next(err);
   }
@@ -252,28 +243,46 @@ export async function getPaymentStatus(req: AuthedRequest, res: Response, next: 
  * driven by event.data.status alone).
  */
 export async function paystackWebhook(req: AuthedRequest, res: Response) {
+  const signature = req.headers["x-paystack-signature"] as string | undefined;
+  let event: any;
   try {
-    const signature = req.headers["x-paystack-signature"] as string | undefined;
-    const event = verifyPaystackWebhookSignature(req.body as Buffer, signature);
-    const eventType = event?.event as string | undefined;
+    event = verifyPaystackWebhookSignature(req.body as Buffer, signature);
+  } catch (err) {
+    // Bad/missing signature: never processed, never retried into success.
+    const status = err instanceof ApiError ? err.status : 401;
+    console.warn("Paystack webhook rejected:", (err as Error).message);
+    res.status(status).json({ error: "invalid signature" });
+    return;
+  }
 
+  try {
+    const eventType = event?.event as string | undefined;
     if (eventType?.startsWith("transfer.")) {
       const reference = event?.data?.reference;
       const payout = reference ? await getPayoutByReference(reference) : null;
       if (payout) await verifyPayout(payout.id);
-    } else {
-      // Default/charge.* path — unchanged behavior from before this
-      // function started branching.
+    } else if (eventType?.startsWith("charge.")) {
+      // The body is never trusted for the outcome: handleWebhook
+      // re-verifies against Paystack's API by reference.
       const verified = await paystackProvider.handleWebhook(req.body as Buffer, signature);
       await activatePaymentIfNeeded(verified.reference, verified);
     }
+    res.status(200).send("ok");
   } catch (err) {
-    // Log server-side only — Paystack just needs a fast 200 either
-    // way, or it will retry the webhook repeatedly. Our own
-    // idempotency guard means a retry is always safe regardless.
-    console.error("Paystack webhook processing error:", (err as Error).message);
+    // Response contract (finding H1): Paystack retries any non-2xx.
+    //   4xx ApiError = permanent outcome (unknown reference, amount
+    //   mismatch already recorded for review, ...) -> 200, no retry.
+    //   anything else (DB error, Paystack API down, ...) -> 500 so the
+    //   event is redelivered; the transaction stays unactivated and the
+    //   reconciliation cron is the second safety net.
+    if (err instanceof ApiError && err.status < 500) {
+      console.error("Paystack webhook: final processing outcome:", err.code, err.message);
+      res.status(200).json({ received: true, outcome: err.code });
+      return;
+    }
+    console.error("Paystack webhook processing error (will be retried):", (err as Error).message);
+    res.status(500).json({ error: "processing failed, please retry" });
   }
-  res.status(200).send("ok");
 }
 
 

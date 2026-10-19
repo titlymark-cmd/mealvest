@@ -1,6 +1,7 @@
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import * as notificationEvents from "./notificationEvents";
+import { businessDate, dateOnly, daysBetweenDates, addDays } from "../lib/businessTime";
 
 export interface BudgetRow {
   id: string;
@@ -35,89 +36,70 @@ function computeDailyAllowance(remainingAmount: number, remainingDays: number): 
   return Math.round((remainingAmount / safeDays) * 100) / 100;
 }
 
-function daysBetween(a: Date, b: Date): number {
-  const ms = b.getTime() - a.getTime();
-  return Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+/** Days left in the plan, counted in business-timezone calendar days (minimum 1). */
+function remainingDaysFor(endDate: string | Date): number {
+  const end = dateOnly(endDate as string | Date)!;
+  return Math.max(1, daysBetweenDates(businessDate(), end));
 }
 
-const TERMS_VERSION = "2026-01-mealvest-payment-terms-v1";
+export const TERMS_VERSION = "2026-01-mealvest-payment-terms-v1";
 
-export async function createBudget(params: {
-  userId: string;
-  totalAmount?: number;
-  numberOfDays?: number;
-  hotelId?: string | null;
-  planId?: string | null;
-  termsAccepted?: boolean;
-}): Promise<BudgetRow> {
-  // Backend-authoritative — a malicious client calling this endpoint
-  // directly (skipping the disclaimer screen entirely) is rejected
-  // here regardless of what the frontend did or didn't show. This is
-  // the check that actually matters; the UI checkbox is just what
-  // makes a legitimate student's "yes" easy to give.
-  if (params.termsAccepted !== true) {
-    throw new ApiError(
-      400,
-      "TERMS_NOT_ACCEPTED",
-      "You must accept the Mealvest payment terms before starting a plan."
-    );
+type DbClient = import("pg").PoolClient;
+
+/**
+ * Creates a student's budget from a VERIFIED, successful budget_topup
+ * transaction (security finding C1). This is the ONLY way a budget can
+ * come into existence: there is no client-callable path any more, and
+ * migration 043's trigger independently rejects any INSERT whose
+ * funding_transaction_id is missing, not owned by the user, not a
+ * budget_topup, not 'success', or already used by another budget.
+ *
+ * Must be called with `client` already inside a transaction (the
+ * payment-activation transaction) so the payment's status flip, the
+ * budget insert and the activation marker commit or roll back together.
+ *
+ * Amount and length come from the transaction row the server created
+ * at initialize time and the provider confirmed — never from a request
+ * body. Terms acceptance was required (z.literal(true)) at initialize.
+ */
+export async function createFundedBudget(
+  client: DbClient,
+  params: {
+    userId: string;
+    fundingTransactionId: string;
+    totalAmount: number;
+    numberOfDays: number;
+    hotelId?: string | null;
   }
-
-  let totalAmount = params.totalAmount;
-  let numberOfDays = params.numberOfDays;
-
-  // If a planId is given, it is the ONLY source of truth for price
-  // and duration — even if the client also sent totalAmount/
-  // numberOfDays, those are ignored in favor of what's actually in
-  // the plans table. This is what makes plan selection safe: a
-  // student can say "I want Hustler Plan", never "I want to pay
-  // KSh 1" while claiming the Hustler Plan's allocation.
-  if (params.planId) {
-    const planResult = await pool.query(
-      "SELECT price, duration_days FROM plans WHERE id = $1 AND status = 'active'",
-      [params.planId]
-    );
-    if (planResult.rows.length === 0) {
-      throw new ApiError(404, "PLAN_NOT_FOUND", "This meal plan is not available.");
-    }
-    totalAmount = Number(planResult.rows[0].price);
-    numberOfDays = planResult.rows[0].duration_days;
-  }
-
-  if (!totalAmount || totalAmount <= 0) {
+): Promise<BudgetRow> {
+  const { totalAmount, numberOfDays } = params;
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
     throw new ApiError(400, "INVALID_ARGUMENT", "Budget amount must be greater than zero.");
   }
-  if (!numberOfDays || numberOfDays <= 0) {
+  if (!Number.isInteger(numberOfDays) || numberOfDays <= 0) {
     throw new ApiError(400, "INVALID_ARGUMENT", "Plan length must be at least 1 day.");
   }
 
-  const existing = await pool.query(
-    "SELECT id FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1",
-    [params.userId]
-  );
-  if (existing.rows.length > 0) {
-    throw new ApiError(409, "ACTIVE_BUDGET_EXISTS", "You already have an active meal plan.");
-  }
-
-  const startDate = new Date();
-  const endDate = new Date(startDate.getTime() + numberOfDays * 24 * 60 * 60 * 1000);
+  const startDate = businessDate();
+  const endDate = addDays(startDate, numberOfDays);
   const dailyAllowance = computeDailyAllowance(totalAmount, numberOfDays);
 
-  const result = await pool.query<BudgetRow>(
+  const result = await client.query<BudgetRow>(
     `INSERT INTO budgets
-       (user_id, hotel_id, plan_id, total_amount, remaining_amount, amount_spent, daily_allowance, number_of_days, start_date, end_date, status, terms_accepted_at, terms_version)
-     VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7, $8, 'active', now(), $9)
+       (user_id, hotel_id, total_amount, remaining_amount, amount_spent, daily_allowance, number_of_days,
+        start_date, end_date, status, terms_accepted_at, terms_version, funding_transaction_id)
+     VALUES ($1, $2, $3, $3, 0, $4, $5, $6, $7, 'active', now(), $8, $9)
      RETURNING *`,
     [
       params.userId,
       params.hotelId ?? null,
-      params.planId ?? null,
       totalAmount,
       dailyAllowance,
       numberOfDays,
-      startDate.toISOString().slice(0, 10),
-      endDate.toISOString().slice(0, 10),
+      startDate,
+      endDate,
       TERMS_VERSION,
+      params.fundingTransactionId,
     ]
   );
 
@@ -149,6 +131,15 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
     // the moment they open the app on a new day, even before they've
     // ordered anything that day.
     budget = await applyDailyRollover(client, result.rows[0]);
+
+    // Recalculated and persisted while the row is still locked, so it
+    // can never overwrite a concurrent deduction's view of the budget.
+    const remainingDaysNow = remainingDaysFor(budget.end_date);
+    const freshAllowance = computeDailyAllowance(Number(budget.remaining_amount), remainingDaysNow);
+    if (freshAllowance !== Number(budget.daily_allowance)) {
+      await client.query("UPDATE budgets SET daily_allowance = $1 WHERE id = $2", [freshAllowance, budget.id]);
+      budget.daily_allowance = String(freshAllowance);
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -157,14 +148,7 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
     client.release();
   }
 
-  const remainingDays = daysBetween(new Date(), new Date(budget.end_date));
-  const freshAllowance = computeDailyAllowance(Number(budget.remaining_amount), remainingDays);
-
-  if (freshAllowance !== Number(budget.daily_allowance)) {
-    await pool.query("UPDATE budgets SET daily_allowance = $1 WHERE id = $2", [freshAllowance, budget.id]);
-    budget.daily_allowance = String(freshAllowance);
-  }
-
+  const remainingDays = remainingDaysFor(budget.end_date);
   return { ...budget, remainingDays };
 }
 
@@ -203,8 +187,8 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
  * doesn't lock, it assumes the caller already did.
  */
 async function applyDailyRollover(client: import("pg").PoolClient, budget: BudgetRow): Promise<BudgetRow> {
-  const todayResult = await client.query("SELECT CURRENT_DATE AS today");
-  const today: string = todayResult.rows[0].today.toISOString().slice(0, 10);
+  // Business-timezone "today" (L9) — the server's clock, never the client's.
+  const today: string = businessDate();
 
   // node-postgres parses the DATE column as a JS Date object by
   // default, not the plain "YYYY-MM-DD" string this file's own
@@ -214,9 +198,7 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
   // EVERY read, crediting banked_amount again and again instead of
   // once per calendar day. Normalizing to the same string shape
   // before comparing fixes it (safe for a string, a Date, or null).
-  const lastSpendDate: string | null = budget.last_spend_date
-    ? new Date(budget.last_spend_date).toISOString().slice(0, 10)
-    : null;
+  const lastSpendDate: string | null = dateOnly(budget.last_spend_date as string | Date | null);
 
   if (lastSpendDate === today) {
     return budget; // Already caught up — the common case, no write needed.
@@ -229,12 +211,7 @@ async function applyDailyRollover(client: import("pg").PoolClient, budget: Budge
     // First-ever spend on this budget — nothing to roll over yet,
     // just start tracking from today.
   } else {
-    const daysElapsed = Math.max(
-      1,
-      Math.round(
-        (new Date(today).getTime() - new Date(lastSpendDate).getTime()) / (24 * 60 * 60 * 1000)
-      )
-    );
+    const daysElapsed = Math.max(1, daysBetweenDates(lastSpendDate, today));
     const unusedFromLastActiveDay = Math.max(0, dailyAllowance - Number(budget.spent_today));
     const fullySkippedDays = daysElapsed - 1;
     pendingRollover =
@@ -305,7 +282,7 @@ export async function confirmRollover(userId: string): Promise<BudgetRow & { rem
     }
 
     await client.query("COMMIT");
-    const remainingDays = daysBetween(new Date(), new Date(budget.end_date));
+    const remainingDays = remainingDaysFor(budget.end_date);
     return { ...budget, remainingDays };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -345,7 +322,7 @@ export async function declineRollover(userId: string): Promise<BudgetRow & { rem
     }
 
     await client.query("COMMIT");
-    const remainingDays = daysBetween(new Date(), new Date(budget.end_date));
+    const remainingDays = remainingDaysFor(budget.end_date);
     return { ...budget, remainingDays };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -407,70 +384,96 @@ export async function transferRemainingToNextDay(userId: string): Promise<Budget
   }
 }
 
+export interface DeductionResult {
+  budget: BudgetRow;
+  /** Spendable-today after this deduction; the caller fires the low-balance notification AFTER its commit. */
+  spendableTodayAfter: number;
+  lowBalance: boolean;
+}
+
+/**
+ * Deducts `amount` from the student's active budget using the CALLER'S
+ * transaction (finding H2). The budget row is locked FOR UPDATE on
+ * `client`, so concurrent orders serialize on it and can never both
+ * spend the same balance; nothing is committed here — the order
+ * payment that called this commits (or rolls back) the deduction and
+ * the order status change together.
+ */
+export async function deductFromBudgetInTx(client: DbClient, userId: string, amount: number): Promise<DeductionResult> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, "INVALID_ARGUMENT", "Deduction amount must be greater than zero.");
+  }
+  const result = await client.query<BudgetRow>(
+    "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+    [userId]
+  );
+  let budget = result.rows[0];
+  if (!budget) {
+    throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
+  }
+
+  budget = await applyDailyRollover(client, budget);
+
+  // Two independent caps, both must pass: today's spendable amount
+  // (daily_allowance + whatever rolled in from past days), AND the
+  // budget's total remaining_amount.
+  const spendableToday =
+    Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today)) * 100) / 100;
+
+  if (amount > spendableToday) {
+    throw new ApiError(
+      402,
+      "DAILY_LIMIT_EXCEEDED",
+      `This order costs more than today's available balance (${spendableToday} left today, including any rolled-over amount).`
+    );
+  }
+  if (Number(budget.remaining_amount) < amount) {
+    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This order costs more than your remaining plan balance.");
+  }
+
+  const newRemaining = Math.round((Number(budget.remaining_amount) - amount) * 100) / 100;
+  const newSpent = Math.round((Number(budget.amount_spent) + amount) * 100) / 100;
+  const newSpentToday = Math.round((Number(budget.spent_today) + amount) * 100) / 100;
+  // If today's spend eats into the banked rollover, draw it down so it
+  // can't be double-counted as still-available tomorrow.
+  const bankedUsedToday = Math.max(0, newSpentToday - Number(budget.daily_allowance));
+  const newBanked = Math.round((Number(budget.banked_amount) - bankedUsedToday) * 100) / 100;
+
+  // The WHERE clause re-asserts the balance condition so the database
+  // itself refuses an overspend even if the arithmetic above were wrong.
+  const updated = await client.query<BudgetRow>(
+    `UPDATE budgets SET remaining_amount = $1, amount_spent = $2, spent_today = $3, banked_amount = $4, updated_at = now()
+     WHERE id = $5 AND status = 'active' AND remaining_amount >= $6
+     RETURNING *`,
+    [newRemaining, newSpent, newSpentToday, Math.max(0, newBanked), budget.id, amount]
+  );
+  if (updated.rows.length === 0) {
+    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This order costs more than your remaining plan balance.");
+  }
+
+  const updatedBudget = updated.rows[0];
+  // Same "below a quarter of today's daily amount" threshold the
+  // student dashboard's credit-ring colour coding uses.
+  const spendableTodayAfter =
+    Math.round((Number(updatedBudget.daily_allowance) + Number(updatedBudget.banked_amount) - Number(updatedBudget.spent_today)) * 100) / 100;
+  return {
+    budget: updatedBudget,
+    spendableTodayAfter,
+    lowBalance: spendableTodayAfter < Number(updatedBudget.daily_allowance) / 4,
+  };
+}
+
+/** Standalone wrapper (own transaction) — kept for callers that don't need to compose. */
 export async function deductFromBudget(userId: string, amount: number): Promise<BudgetRow> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query<BudgetRow>(
-      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
-      [userId]
-    );
-    let budget = result.rows[0];
-    if (!budget) {
-      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
-    }
-
-    budget = await applyDailyRollover(client, budget);
-
-    // Two independent caps, both must pass: today's spendable amount
-    // (daily_allowance + whatever rolled in from past days), AND the
-    // budget's total remaining_amount — the daily cap alone can't
-    // let someone overspend the whole plan just because a lot rolled
-    // over, and the total cap alone can't let someone blow the whole
-    // plan in one day the way the old code allowed.
-    const spendableToday =
-      Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today)) * 100) / 100;
-
-    if (amount > spendableToday) {
-      throw new ApiError(
-        402,
-        "DAILY_LIMIT_EXCEEDED",
-        `This order costs more than today's available balance (${spendableToday} left today, including any rolled-over amount).`
-      );
-    }
-    if (Number(budget.remaining_amount) < amount) {
-      throw new ApiError(402, "INSUFFICIENT_BALANCE", "This order costs more than your remaining plan balance.");
-    }
-
-    const newRemaining = Math.round((Number(budget.remaining_amount) - amount) * 100) / 100;
-    const newSpent = Math.round((Number(budget.amount_spent) + amount) * 100) / 100;
-    const newSpentToday = Math.round((Number(budget.spent_today) + amount) * 100) / 100;
-    // If today's spend eats into the banked rollover (not just
-    // today's own allowance), draw it down accordingly, so it can't
-    // be double-counted as still-available tomorrow.
-    const bankedUsedToday = Math.max(0, newSpentToday - Number(budget.daily_allowance));
-    const newBanked = Math.round((Number(budget.banked_amount) - bankedUsedToday) * 100) / 100;
-
-    const updated = await client.query<BudgetRow>(
-      `UPDATE budgets SET remaining_amount = $1, amount_spent = $2, spent_today = $3, banked_amount = $4, updated_at = now()
-       WHERE id = $5 RETURNING *`,
-      [newRemaining, newSpent, newSpentToday, Math.max(0, newBanked), budget.id]
-    );
+    const result = await deductFromBudgetInTx(client, userId, amount);
     await client.query("COMMIT");
-
-    const updatedBudget = updated.rows[0];
-    // Same "below a quarter of today's daily amount" threshold the
-    // student dashboard's credit-ring color coding already uses
-    // (dailyCreditStatus.ts) — consistent red-alert definition in one
-    // place conceptually, even though the actual threshold constant
-    // is duplicated here since that file is frontend-only.
-    const newSpendableToday =
-      Math.round((Number(updatedBudget.daily_allowance) + Number(updatedBudget.banked_amount) - Number(updatedBudget.spent_today)) * 100) / 100;
-    if (newSpendableToday < Number(updatedBudget.daily_allowance) / 4) {
-      notificationEvents.lowBudgetWarning(userId, updatedBudget.id, newSpendableToday);
+    if (result.lowBalance) {
+      notificationEvents.lowBudgetWarning(userId, result.budget.id, result.spendableTodayAfter);
     }
-
-    return updatedBudget;
+    return result.budget;
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
@@ -480,47 +483,36 @@ export async function deductFromBudget(userId: string, amount: number): Promise<
 }
 
 /**
- * Meal Boost — adds money to an ALREADY ACTIVE budget, paid for via
- * its own Paystack transaction (see paymentService.activatePaymentIfNeeded,
- * type='plan_boost'). Deliberately minimal: only total_amount and
- * remaining_amount move. daily_allowance is NOT recomputed here —
- * getActiveBudget already recalculates it fresh on every read
- * (remaining_amount / remainingDays), so the next time the student's
- * dashboard loads, the boosted amount is already reflected in a
- * higher daily rate without this function needing to duplicate that
- * logic. Today's already-spent/banked/pending-tomorrow figures are
- * untouched — a boost adds to what's left for the rest of the plan,
- * it doesn't rewrite today.
+ * Meal Boost / top-up credit — adds `amount` to an ACTIVE budget inside
+ * the CALLER'S transaction (the payment-activation transaction, H1), so
+ * the payment's success flip and the credit commit together. Only
+ * total_amount and remaining_amount move; daily_allowance is recomputed
+ * on the next read (getActiveBudget).
+ *
+ * Returns null (instead of throwing) when the budget is no longer
+ * active, so activation can decide what to do with the money rather
+ * than losing it.
  */
-export async function applyBoost(budgetId: string, amount: number): Promise<BudgetRow> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<BudgetRow>(
-      "SELECT * FROM budgets WHERE id = $1 AND status = 'active' FOR UPDATE",
-      [budgetId]
-    );
-    const budget = result.rows[0];
-    if (!budget) {
-      throw new ApiError(404, "BUDGET_NOT_FOUND", "This meal plan is no longer active.");
-    }
-
-    const newTotal = Math.round((Number(budget.total_amount) + amount) * 100) / 100;
-    const newRemaining = Math.round((Number(budget.remaining_amount) + amount) * 100) / 100;
-
-    const updated = await client.query<BudgetRow>(
-      `UPDATE budgets SET total_amount = $1, remaining_amount = $2, updated_at = now()
-       WHERE id = $3 RETURNING *`,
-      [newTotal, newRemaining, budgetId]
-    );
-    await client.query("COMMIT");
-    return updated.rows[0];
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
+export async function applyBoostInTx(client: DbClient, budgetId: string, amount: number): Promise<BudgetRow | null> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, "INVALID_ARGUMENT", "Boost amount must be greater than zero.");
   }
+  const result = await client.query<BudgetRow>(
+    "SELECT * FROM budgets WHERE id = $1 AND status = 'active' FOR UPDATE",
+    [budgetId]
+  );
+  const budget = result.rows[0];
+  if (!budget) return null;
+
+  const newTotal = Math.round((Number(budget.total_amount) + amount) * 100) / 100;
+  const newRemaining = Math.round((Number(budget.remaining_amount) + amount) * 100) / 100;
+
+  const updated = await client.query<BudgetRow>(
+    `UPDATE budgets SET total_amount = $1, remaining_amount = $2, updated_at = now()
+     WHERE id = $3 RETURNING *`,
+    [newTotal, newRemaining, budgetId]
+  );
+  return updated.rows[0];
 }
 
 /**
@@ -584,8 +576,9 @@ export async function withdrawSavings(params: {
       throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan to withdraw from.");
     }
 
-    const endDateResult = await client.query("SELECT (end_date <= CURRENT_DATE) AS ended FROM budgets WHERE id = $1", [
+    const endDateResult = await client.query("SELECT (end_date <= $2::date) AS ended FROM budgets WHERE id = $1", [
       budget.id,
+      businessDate(),
     ]);
     if (!endDateResult.rows[0].ended) {
       throw new ApiError(
@@ -595,7 +588,10 @@ export async function withdrawSavings(params: {
       );
     }
 
-    const existing = await client.query("SELECT id FROM savings_withdrawals WHERE budget_id = $1", [budget.id]);
+    // A REJECTED request (whose amount was restored) doesn't block a new one (migration 047).
+    const existing = await client.query("SELECT id FROM savings_withdrawals WHERE budget_id = $1 AND status <> 'rejected'", [
+      budget.id,
+    ]);
     if (existing.rows.length > 0) {
       throw new ApiError(409, "ALREADY_WITHDRAWN", "This plan's savings have already been withdrawn.");
     }
@@ -664,6 +660,92 @@ export async function withdrawSavings(params: {
       hotel_incentive_amount: hotelIncentiveAmount,
       status: "pending",
     };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Admin rejection of a savings withdrawal (finding M1). withdrawSavings
+ * reserved the money by closing the plan (status 'completed',
+ * remaining 0); rejecting gives it back EXACTLY ONCE, in one database
+ * transaction:
+ *
+ *  - the withdrawal row is locked and must still be open
+ *    (pending/processing/failed); restored_at must be NULL,
+ *  - the student row is locked (same lock order as payment activation),
+ *  - the gross amount goes back to the ORIGINAL plan, re-opened as
+ *    'active' (its end date has passed, so the student can withdraw
+ *    again) — or, if the student has since started another plan, it is
+ *    credited to that active plan instead (only one may be active),
+ *  - the row is marked rejected with restored_at/amount/budget; migration
+ *    047's trigger makes those immutable and 'rejected' final.
+ *
+ * A repeated or concurrent rejection finds the row already final and
+ * fails with 409 — it can never restore twice.
+ */
+export async function rejectWithdrawalAndRestore(params: {
+  withdrawalId: string;
+  adminUserId: string;
+  note?: string | null;
+}): Promise<Record<string, unknown>> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const wResult = await client.query("SELECT * FROM savings_withdrawals WHERE id = $1 FOR UPDATE", [params.withdrawalId]);
+    const w = wResult.rows[0];
+    if (!w) throw new ApiError(404, "WITHDRAWAL_NOT_FOUND", "No matching withdrawal found.");
+    if (!["pending", "processing", "failed"].includes(w.status) || w.restored_at) {
+      throw new ApiError(409, "WITHDRAWAL_FINAL", `This withdrawal is already ${w.status} and can't be changed.`);
+    }
+
+    await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [w.user_id]);
+
+    const gross = Number(w.gross_savings);
+    let restoredTo: string | null = null;
+
+    if (gross > 0) {
+      const original = await client.query<BudgetRow>("SELECT * FROM budgets WHERE id = $1 FOR UPDATE", [w.budget_id]);
+      const active = await client.query<BudgetRow>(
+        "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+        [w.user_id]
+      );
+      if (active.rows[0] && active.rows[0].id !== w.budget_id) {
+        const credited = await applyBoostInTx(client, active.rows[0].id, gross);
+        restoredTo = credited?.id ?? null;
+      } else if (original.rows[0]) {
+        const b = original.rows[0];
+        const updated = await client.query<BudgetRow>(
+          `UPDATE budgets
+              SET status = 'active', remaining_amount = remaining_amount + $2, updated_at = now()
+            WHERE id = $1 AND status IN ('completed', 'active')
+            RETURNING id`,
+          [b.id, gross]
+        );
+        restoredTo = updated.rows[0]?.id ?? null;
+      }
+      if (!restoredTo) {
+        // Nowhere safe to put it back automatically — refuse rather than lose it.
+        throw new ApiError(409, "RESTORE_TARGET_MISSING", "The student's plan could not be found to restore this amount. Resolve manually.");
+      }
+    }
+
+    const updated = await client.query(
+      `UPDATE savings_withdrawals
+          SET status = 'rejected', restored_at = now(), restored_amount = $2, restored_to_budget_id = $3,
+              admin_note = COALESCE($4, admin_note), processed_at = now(), processed_by = $5
+        WHERE id = $1 AND restored_at IS NULL
+        RETURNING *`,
+      [w.id, gross, restoredTo, params.note ?? null, params.adminUserId]
+    );
+    if (updated.rows.length === 0) {
+      throw new ApiError(409, "WITHDRAWAL_FINAL", "This withdrawal has already been closed.");
+    }
+    await client.query("COMMIT");
+    return updated.rows[0];
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;

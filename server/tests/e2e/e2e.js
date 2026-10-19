@@ -100,7 +100,8 @@ async function webhook(event, { secret, signature, contentType = "application/js
      VALUES ('e2e-admin@example.com', '254711000001', 'x', 'mealvest_admin', 'password', true, 'active') RETURNING id`
   ))[0];
   await q("INSERT INTO admins (user_id, full_name) VALUES ($1, 'E2E Admin')", [adminUser.id]);
-  adminToken = jwt.sign({ userId: adminUser.id, role: "mealvest_admin" }, JWT_SECRET, { expiresIn: "1h" });
+  // Same claims/algorithm/issuer/audience as src/lib/jwt.ts signAccessToken (L2 hardening).
+  adminToken = jwt.sign({ userId: adminUser.id, role: "mealvest_admin" }, JWT_SECRET, { algorithm: "HS256", expiresIn: "1h", issuer: "mealvest-api", audience: "mealvest-app" });
 
   const regA = await api("/api/auth/register/student", {
     method: "POST",
@@ -386,7 +387,7 @@ async function webhook(event, { secret, signature, contentType = "application/js
   await mock("/__reset");
   const wsLocked = await api("/api/student/withdrawal-status", { token: tokenA });
   check("withdrawal status: locked while plan active, fee 10%, net = 90% of remaining", wsLocked.status === 200 && wsLocked.data.locked === true && wsLocked.data.reason === "CONTRACT_ACTIVE" && wsLocked.data.feePercent === 10 && Math.abs(wsLocked.data.netAmount - 0.9 * Number(wsLocked.data.availableSavings)) < 0.011, JSON.stringify(wsLocked.data));
-  const earlyWithdraw = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  const earlyWithdraw = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true, pin: "1234" } });
   check("withdraw before plan end -> 403 CONTRACT_ACTIVE (lock enforced server-side)", earlyWithdraw.status === 403 && earlyWithdraw.data.error.code === "CONTRACT_ACTIVE", JSON.stringify(earlyWithdraw.data));
   const noAccept = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001" } });
   check("withdraw without acceptFee -> 400", noAccept.status === 400);
@@ -395,15 +396,20 @@ async function webhook(event, { secret, signature, contentType = "application/js
   const wsOpen = await api("/api/student/withdrawal-status", { token: tokenA });
   const grossBefore = Number(wsOpen.data.availableSavings);
   check("withdrawal status: unlocked once end_date passed", wsOpen.data.locked === false && wsOpen.data.reason === null && grossBefore > 0, JSON.stringify(wsOpen.data));
-  const badPhone = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0812345678", acceptFee: true } });
+  const badPhone = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0812345678", acceptFee: true, pin: "1234" } });
   check("withdraw to a non-Kenyan number -> 400 INVALID_PHONE_NUMBER", badPhone.status === 400 && badPhone.data.error.code === "INVALID_PHONE_NUMBER");
-  const wd = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  // Security fix M1: the withdrawal needs the PIN, verified server-side.
+  const noPin = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  check("withdraw without PIN -> 400 PIN_REQUIRED, nothing reserved", noPin.status === 400 && noPin.data.error.code === "PIN_REQUIRED" && (await q("SELECT status FROM budgets WHERE user_id=(SELECT id FROM users WHERE email='e2e-a@example.com') AND status='active'")).length === 1, JSON.stringify(noPin.data));
+  const wrongPin = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true, pin: "9999" } });
+  check("withdraw with wrong PIN -> 401 PIN_INCORRECT, nothing reserved", wrongPin.status === 401 && wrongPin.data.error.code === "PIN_INCORRECT", JSON.stringify(wrongPin.data));
+  const wd = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true, pin: "1234" } });
   const expectedFee = Math.round(grossBefore * 10) / 100;
   check("withdraw -> 201 with gross/fee/net; fee is exactly 10%, student gets the remainder", wd.status === 201 && wd.data.gross_savings === grossBefore && wd.data.platform_fee_percent === 10 && wd.data.platform_fee_amount === expectedFee && Math.abs(wd.data.student_amount + wd.data.platform_fee_amount - grossBefore) < 0.001 && wd.data.status === "pending", JSON.stringify(wd.data));
   const wdRow = (await q("SELECT * FROM savings_withdrawals WHERE id = $1", [wd.data.withdrawalId]))[0];
   const budgetAfter = (await q("SELECT status, remaining_amount FROM budgets WHERE id = $1", [budgetId]))[0];
   check("withdrawal row persisted with fee columns, destination normalised, plan closed with 0 remaining", wdRow && Number(wdRow.platform_fee_percent) === 10 && Number(wdRow.student_amount) + Number(wdRow.platform_fee_amount) === Number(wdRow.gross_savings) && wdRow.payout_destination === "254700000001" && budgetAfter.status === "completed" && Number(budgetAfter.remaining_amount) === 0, JSON.stringify({ wdRow: wdRow && { s: wdRow.student_amount, f: wdRow.platform_fee_amount, g: wdRow.gross_savings, d: wdRow.payout_destination }, budgetAfter }));
-  const wdAgain = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true } });
+  const wdAgain = await api("/api/student/withdraw", { method: "POST", token: tokenA, body: { payoutMethod: "mpesa", payoutDestination: "0700000001", acceptFee: true, pin: "1234" } });
   check("second withdrawal -> 404 (plan no longer active), never a double payout", wdAgain.status === 404, `${wdAgain.status}`);
   const myWd = await api("/api/student/withdrawals", { token: tokenA });
   const myWdB = await api("/api/student/withdrawals", { token: tokenB });

@@ -9,21 +9,21 @@ import { listMyPayments, StudentPayment } from "../../services/paymentsApi";
 import { listMyWithdrawals, WithdrawalRecord } from "../../services/budgetApi";
 
 const PAYMENT_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "Awaiting confirmation", color: COLORS.warning },
-  processing: { label: "Awaiting confirmation", color: COLORS.warning },
-  success: { label: "Paid", color: COLORS.success },
-  failed: { label: "Failed — not charged", color: COLORS.danger },
-  cancelled: { label: "Cancelled", color: COLORS.textFaint },
-  expired: { label: "Expired", color: COLORS.textFaint },
-  refunded: { label: "Refunded", color: COLORS.textFaint },
+  pending: { label: "Awaiting confirmation", color: COLORS.warningText },
+  processing: { label: "Awaiting confirmation", color: COLORS.warningText },
+  success: { label: "Paid", color: COLORS.successText },
+  failed: { label: "Failed — not charged", color: COLORS.dangerText },
+  cancelled: { label: "Cancelled", color: COLORS.textMuted },
+  expired: { label: "Expired", color: COLORS.textMuted },
+  refunded: { label: "Refunded", color: COLORS.textMuted },
 };
 
 const WITHDRAWAL_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "Requested — being processed", color: COLORS.warning },
-  processing: { label: "Being sent", color: COLORS.warning },
-  completed: { label: "Sent to M-Pesa", color: COLORS.success },
-  failed: { label: "Failed — MEALVEST will follow up", color: COLORS.danger },
-  rejected: { label: "Declined", color: COLORS.danger },
+  pending: { label: "Requested — being processed", color: COLORS.warningText },
+  processing: { label: "Being sent", color: COLORS.warningText },
+  completed: { label: "Sent to M-Pesa", color: COLORS.successText },
+  failed: { label: "Failed — MEALVEST will follow up", color: COLORS.dangerText },
+  rejected: { label: "Declined", color: COLORS.dangerText },
 };
 
 const TYPE_LABEL: Record<string, string> = {

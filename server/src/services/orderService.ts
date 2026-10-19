@@ -1,6 +1,6 @@
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
-import { deductFromBudget } from "./budgetService";
+import { deductFromBudgetInTx } from "./budgetService";
 import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
 import * as notificationEvents from "./notificationEvents";
 
@@ -97,6 +97,11 @@ export async function createOrder(params: {
      RETURNING *`,
     [params.userId, params.hotelId, JSON.stringify(pricedLines), amount, params.idempotencyKey ?? null]
   );
+  // A concurrent insert with the same key may have won the race; never
+  // hand back another student's order.
+  if (result.rows[0].user_id !== params.userId) {
+    throw new ApiError(403, "FORBIDDEN", "This order does not belong to you.");
+  }
   return result.rows[0];
 }
 
@@ -152,17 +157,29 @@ export async function payOrderFromBudget(orderId: string, userId: string) {
       return order;
     }
 
-    await deductFromBudget(userId, Number(order.amount));
+    // Same client, same transaction (finding H2): the deduction and the
+    // order's 'paid' flip commit together or not at all. Lock order is
+    // always order row -> budget row, so this can't deadlock with
+    // another payment for the same student.
+    const deduction = await deductFromBudgetInTx(client, userId, Number(order.amount));
 
     const qrPayload = generateOrderQrPayload(order.id);
 
     const updated = await client.query(
       `UPDATE orders SET status = 'paid', qr_token = $1, updated_at = now()
-       WHERE id = $2 RETURNING *`,
+       WHERE id = $2 AND status = 'pending_payment' RETURNING *`,
       [qrPayload, orderId]
     );
+    if (updated.rows.length === 0) {
+      // Cannot happen while we hold the row lock; refuse rather than keep a deduction without a paid order.
+      throw new ApiError(409, "ORDER_STATE_CHANGED", "This order changed while it was being paid. Please try again.");
+    }
 
     await client.query("COMMIT");
+
+    if (deduction.lowBalance) {
+      notificationEvents.lowBudgetWarning(userId, deduction.budget.id, deduction.spendableTodayAfter);
+    }
 
     const paidOrder = updated.rows[0];
     const hotelResult = await pool.query("SELECT name FROM hotels WHERE id = $1", [paidOrder.hotel_id]);
@@ -220,7 +237,8 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
     if (order.status === "redeemed") {
       throw new ApiError(409, "ALREADY_REDEEMED", "This QR code has already been redeemed.");
     }
-    if (order.status !== "paid") {
+    // 'ready' is a paid order the hotel has prepared — still redeemable.
+    if (order.status !== "paid" && order.status !== "ready") {
       throw new ApiError(409, "NOT_PAID", "This order has not been paid for.");
     }
 
@@ -273,7 +291,7 @@ export async function verifyOrderQr(qrPayload: string, hotelId: string) {
   if (order.status === "redeemed") {
     throw new ApiError(409, "ALREADY_REDEEMED", "This QR code has already been redeemed.");
   }
-  if (order.status !== "paid") {
+  if (order.status !== "paid" && order.status !== "ready") {
     throw new ApiError(409, "NOT_PAID", "This order has not been paid for.");
   }
 

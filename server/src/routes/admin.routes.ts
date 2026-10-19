@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { auditAdminMutations } from "../services/auditLog";
 import {
   getAdminOverview,
   createHotel,
@@ -34,11 +35,14 @@ import {
   triggerPayout,
   refreshPayoutStatus,
   previewPayoutFee,
+  approvePayout,
+  cancelPayout,
 } from "../controllers/hotelPayouts.controller";
 import { adminNotificationRateLimiter, financialActionRateLimiter } from "../middleware/rateLimit";
 
 export const adminRouter = Router();
-adminRouter.use(requireAuth, requireRole("mealvest_admin"));
+// Audit runs BEFORE the role guard so denied attempts are recorded too (M8).
+adminRouter.use(requireAuth, auditAdminMutations, requireRole("mealvest_admin"));
 
 adminRouter.get("/overview", getAdminOverview);
 adminRouter.get("/alerts", getAlerts);
@@ -70,3 +74,5 @@ adminRouter.get("/payouts/fee-preview", previewPayoutFee);
 adminRouter.get("/payouts", listPayoutHistory);
 adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
 adminRouter.post("/payouts/:payoutId/refresh", financialActionRateLimiter, refreshPayoutStatus);
+adminRouter.post("/payouts/:payoutId/approve", financialActionRateLimiter, approvePayout);
+adminRouter.post("/payouts/:payoutId/cancel", financialActionRateLimiter, cancelPayout);
