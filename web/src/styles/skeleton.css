@@ -1,0 +1,161 @@
+/* ============================================================
+   MEALVEST — skeleton loaders
+   One shimmer (the existing .mv-skel + mv-shimmer keyframes) and a
+   small set of layout classes. Shapes mirror the real screens so the
+   page doesn't jump when data arrives. Motion stops for users who
+   prefer reduced motion (handled by .mv-skel in neu.css).
+   ============================================================ */
+
+.sk {
+  display: block;
+  flex-shrink: 0;
+  width: var(--sk-w, 100%);
+  height: var(--sk-h, 14px);
+  border-radius: var(--sk-r, 10px);
+}
+/* On cream surfaces (dropdown, modals) the shimmer must be dark-on-light. */
+.sk-light .mv-skel,
+.mv-skel.sk-on-light {
+  background: linear-gradient(90deg, rgba(44, 22, 16, 0.06) 25%, rgba(44, 22, 16, 0.12) 50%, rgba(44, 22, 16, 0.06) 75%);
+  background-size: 400px 100%;
+}
+
+.sk-region {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+}
+.sk-page {
+  flex: 1;
+  min-height: 100vh;
+  background: var(--mv-espresso);
+  padding: 24px;
+}
+.sk-page[data-embedded="true"] {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* Raised placeholder surface: same depth as the real cards it stands in for. */
+.sk-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 22px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+  min-width: 0;
+}
+.sk-light .sk-surface {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  padding: 0;
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+/* Unsized blocks sitting side by side share the row instead of each taking 100%. */
+.sk-row > .sk:not([style*="--sk-w"]) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.sk-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.sk-stats {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.sk-cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+}
+.sk-table {
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+  overflow: hidden;
+}
+.sk-table-head {
+  display: flex;
+  gap: 16px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.14);
+}
+.sk-table-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border-top: 1px solid var(--mv-hairline);
+}
+.sk-table-row > *,
+.sk-table-head > * {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  /* Narrow phones: keep the first three columns, like the real tables scroll/collapse. */
+  .sk-table-row > :nth-child(n + 4),
+  .sk-table-head > :nth-child(n + 4) {
+    display: none;
+  }
+}
+.sk-list {
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+}
+.sk-list > .sk-row {
+  padding: 14px 16px;
+  border-top: 1px solid var(--mv-hairline);
+}
+.sk-list > .sk-row:first-child {
+  border-top: 0;
+}
+.sk-light .sk-list {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+}
+.sk-light .sk-list > .sk-row {
+  border-top-color: rgba(44, 22, 16, 0.08);
+}
+
+.sk-boot {
+  min-height: 100vh;
+  width: 100%;
+  background: var(--mv-espresso);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px;
+  align-items: center;
+}
+.sk-boot > * {
+  width: 100%;
+  max-width: 1080px;
+}

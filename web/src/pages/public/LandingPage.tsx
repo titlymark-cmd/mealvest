@@ -79,7 +79,7 @@ function Hero() {
 /** Section A — a vertical stepper (numbered rail), sticky intro on wide screens. */
 function HowItWorks() {
   return (
-    <section className="mvp-section" aria-labelledby="mvp-how-title">
+    <section className="mvp-section mvp-desktop-only" aria-labelledby="mvp-how-title">
       <div className="mv-container mvp-how">
         <div className="mvp-how-intro">
           <span className="mvp-eyebrow">How it works</span>

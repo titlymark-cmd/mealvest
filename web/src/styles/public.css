@@ -419,6 +419,13 @@
   gap: 8px;
 }
 
+/* Hidden on phones, shown from 768px up. */
+@media (max-width: 767px) {
+  .mvp-desktop-only {
+    display: none;
+  }
+}
+
 /* ---------- A. How it works (stepper) ---------- */
 .mvp-how {
   display: grid;

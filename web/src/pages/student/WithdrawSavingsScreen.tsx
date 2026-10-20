@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, PiggyBank, Lock, Check, Smartphone, KeyRound } from "lucide-react";
-import { Card } from "../../components/Card";
+import { ArrowLeft, PiggyBank, Lock, Check, Smartphone, KeyRound, TriangleAlert, RefreshCw, CalendarClock, Send, Info } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
-import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
+import { Modal } from "../../components/ui/Modal";
+import { EmptyState } from "../../components/student/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getWithdrawalStatus, requestWithdrawal, WithdrawalStatus, WithdrawalResult } from "../../services/budgetApi";
 import { fetchStudentProfile } from "../../services/studentProfileApi";
 import { GoogleSignInButton } from "../../components/GoogleSignInButton";
+import { SkeletonRegion, SkeletonHero, SkeletonForm, Skeleton } from "../../components/ui/Skeleton";
 
 const ksh = (v: number | string) => `KSh ${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -16,6 +16,23 @@ function formatDate(iso: string | undefined): string {
   if (!iso) return "";
   const d = new Date(iso.length === 10 ? iso + "T00:00:00" : iso);
   return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+}
+
+function daysUntil(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const end = new Date(iso.length === 10 ? iso + "T00:00:00" : iso).getTime();
+  if (Number.isNaN(end)) return null;
+  return Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+}
+
+/** One line of a receipt. */
+function Line({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="sv-receipt-row" data-strong={strong || undefined}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
 }
 
 /**
@@ -26,6 +43,10 @@ function formatDate(iso: string | undefined): string {
  * screen only shows that breakdown and collects the M-Pesa number.
  * Nothing here can withdraw early: POST /student/withdraw re-checks
  * the lock inside a row lock regardless of what the UI showed.
+ *
+ * The redesign changes presentation only. The one interaction change: the
+ * browser's native confirm() is now an in-app confirmation sheet with the
+ * same wording and the same fee / net / destination breakdown.
  */
 export default function WithdrawSavingsScreen() {
   const { authFetch } = useAuth();
@@ -41,8 +62,12 @@ export default function WithdrawSavingsScreen() {
   // Step-up proof (security fix M1): the server re-verifies this.
   const [pin, setPin] = useState("");
   const [needsGoogle, setNeedsGoogle] = useState(false);
+  // Held only between "Withdraw" and "Confirm" in the sheet below.
+  const [pendingProof, setPendingProof] = useState<{ pin?: string; googleIdToken?: string } | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const [st, profile] = await Promise.all([getWithdrawalStatus(authFetch), fetchStudentProfile(authFetch).catch(() => null)]);
       setStatus(st);
@@ -60,7 +85,7 @@ export default function WithdrawSavingsScreen() {
     load();
   }, [load]);
 
-  const validateAndConfirm = (): boolean => {
+  const validateInputs = (): boolean => {
     setError(null);
     if (phone.replace(/\D/g, "").length < 9) {
       setError("Enter the M-Pesa number to send your savings to.");
@@ -70,13 +95,7 @@ export default function WithdrawSavingsScreen() {
       setError("Please confirm you understand the MEALVEST fee.");
       return false;
     }
-    const net = status?.netAmount ?? 0;
-    return window.confirm(
-      `Withdraw ${ksh(status?.availableSavings ?? 0)}?\n\n` +
-        `MEALVEST fee (${status?.feePercent}%): ${ksh(status?.feeAmount ?? 0)}\n` +
-        `You receive: ${ksh(net)} to ${phone.trim()}\n\n` +
-        "This closes your current plan. Continue?"
-    );
+    return true;
   };
 
   const send = async (proof: { pin?: string; googleIdToken?: string }) => {
@@ -94,236 +113,252 @@ export default function WithdrawSavingsScreen() {
       setPin("");
     } finally {
       setSubmitting(false);
+      setPendingProof(null);
     }
   };
 
-  const submit = async () => {
+  const submit = () => {
     if (!/^\d{4}$/.test(pin)) {
       setError("Enter your 4-digit PIN to confirm this withdrawal.");
       return;
     }
-    if (!validateAndConfirm()) return;
-    await send({ pin });
+    if (!validateInputs()) return;
+    setPendingProof({ pin });
   };
 
-  const submitWithGoogle = async (googleIdToken: string) => {
-    if (!validateAndConfirm()) return;
-    await send({ googleIdToken });
+  const submitWithGoogle = (googleIdToken: string) => {
+    if (!validateInputs()) return;
+    setPendingProof({ googleIdToken });
   };
+
+  const back = (
+    <button type="button" onClick={() => navigate(-1)} className="sv-backlink">
+      <ArrowLeft size={16} aria-hidden />
+      Back
+    </button>
+  );
+
+  // ----- Loading ------------------------------------------------------------
 
   if (loading) {
     return (
-      <div style={styles.center}>
-        <Spinner size="large" color={COLORS.primary} />
+      <div className="sv-flow-bg">
+        <main className="sv-flow">
+          {back}
+          <SkeletonRegion label="your savings">
+            <div className="sk-row" aria-hidden="true">
+              <Skeleton w={52} h={52} r={999} />
+              <div className="sk-col">
+                <Skeleton h={26} w="60%" r={8} />
+                <Skeleton h={12} w="85%" />
+              </div>
+            </div>
+            <SkeletonHero h={230} />
+            <SkeletonForm fields={2} />
+          </SkeletonRegion>
+        </main>
       </div>
     );
   }
+
+  // ----- Result -------------------------------------------------------------
 
   if (result) {
     return (
-      <div style={styles.center}>
-        <div style={styles.successCircle}>
-          <Check size={28} color="#fff" strokeWidth={3} />
-        </div>
-        <p style={styles.statusTitle}>Withdrawal requested</p>
-        <Card style={styles.breakdownCard}>
-          <Row label="Savings withdrawn" value={ksh(result.gross_savings)} />
-          <Row label={`MEALVEST fee (${result.platform_fee_percent}%)`} value={`− ${ksh(result.platform_fee_amount)}`} muted />
-          <div style={styles.divider} />
-          <Row label="You receive" value={ksh(result.student_amount)} strong />
-        </Card>
-        <p style={styles.statusSub}>
-          MEALVEST sends this to {phone.trim()} by M-Pesa. You'll get a notification once it has gone out, and you can
-          track it under Payments &amp; savings.
-        </p>
-        <button onClick={() => navigate("/student/home", { replace: true })} style={styles.linkBtn}>
-          <span style={styles.linkText}>Back to my dashboard</span>
-        </button>
+      <div className="sv-flow-bg">
+        <main className="sv-flow sv-flow--center">
+          <span className="sv-medal" data-tone="ok" aria-hidden="true">
+            <Check size={46} strokeWidth={3} />
+          </span>
+          <h1 className="sv-title" style={{ fontSize: 24 }}>Withdrawal requested</h1>
+          <div className="sv-receipt-rows" style={{ width: "100%", maxWidth: 380 }}>
+            <Line label="Savings withdrawn" value={ksh(result.gross_savings)} />
+            <Line label={`MEALVEST fee (${result.platform_fee_percent}%)`} value={`− ${ksh(result.platform_fee_amount)}`} />
+            <Line label="You receive" value={ksh(result.student_amount)} strong />
+          </div>
+          <p className="sv-lede" style={{ margin: 0 }}>
+            MEALVEST sends this to {phone.trim()} by M-Pesa. You'll get a notification once it has gone out, and you can track it under Payments &amp; savings.
+          </p>
+          <button type="button" onClick={() => navigate("/student/home", { replace: true })} className="sv-link">
+            Back to my dashboard
+          </button>
+        </main>
       </div>
     );
   }
 
-  const locked = !status || status.locked;
-  const gross = Number(status?.availableSavings ?? 0);
+  // ----- Couldn't load -------------------------------------------------------
+
+  if (!status) {
+    return (
+      <div className="sv-flow-bg">
+        <main className="sv-flow">
+          {back}
+          <EmptyState role="alert" icon={<RefreshCw size={28} />} title="We couldn't load your savings" body={error ?? "Something went wrong."}>
+            <PrimaryButton type="button" variant="secondary" showArrow={false} icon={<RefreshCw size={16} aria-hidden />} onPress={load}>
+              Try again
+            </PrimaryButton>
+          </EmptyState>
+        </main>
+      </div>
+    );
+  }
+
+  const locked = status.locked;
+  const gross = Number(status.availableSavings ?? 0);
+  const net = status.netAmount ?? 0;
+  const daysLeft = status.reason === "CONTRACT_ACTIVE" ? daysUntil(status.contractEndDate) : null;
 
   return (
-    <div style={styles.container}>
-      <button onClick={() => navigate(-1)} style={styles.backRow}>
-        <ArrowLeft size={16} color={COLORS.primary} />
-        <span style={styles.backText}>Back</span>
-      </button>
+    <div className="sv-flow-bg">
+      <main className="sv-flow">
+        {back}
 
-      <div style={styles.headerRow}>
-        <div style={styles.iconCircle}>
-          <PiggyBank size={20} color="#fff" />
-        </div>
-        <div>
-          <h1 style={styles.title}>Withdraw savings</h1>
-          <p style={styles.subtitle}>Your unspent plan balance, including every day you carried over.</p>
-        </div>
-      </div>
+        <header className="sv-flow-head">
+          <span className="sv-flow-icon" aria-hidden="true">
+            <PiggyBank size={24} />
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <h1 className="sv-title" style={{ fontSize: 28 }}>Withdraw savings</h1>
+            <p className="sv-lede" style={{ marginTop: 4 }}>Your unspent plan balance, including every day you carried over.</p>
+          </div>
+        </header>
 
-      {error && <p style={styles.error}>{error}</p>}
+        {error && (
+          <div className="sv-toast" data-tone="bad" role="alert" style={{ alignItems: "flex-start" }}>
+            <TriangleAlert size={18} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{error}</span>
+          </div>
+        )}
 
-      {status && status.reason === "NO_ACTIVE_BUDGET" && (
-        <Card style={styles.infoCard}>
-          <p style={styles.infoText}>
-            You don't have an active plan right now, so there's nothing to withdraw.
-            {status.latestWithdrawal && (
-              <>
-                {" "}
-                Your last withdrawal of <strong>{ksh(status.latestWithdrawal.student_amount)}</strong> is{" "}
-                <strong>{status.latestWithdrawal.status}</strong>.
-              </>
-            )}
-          </p>
-          <button onClick={() => navigate("/student/payments")} style={styles.linkBtn}>
-            <span style={styles.linkText}>See payments &amp; savings history</span>
-          </button>
-        </Card>
-      )}
-
-      {status && status.reason !== "NO_ACTIVE_BUDGET" && (
-        <>
-          <Card style={styles.breakdownCard}>
-            <span style={styles.cardLabel}>AVAILABLE SAVINGS</span>
-            <span style={styles.bigAmount}>{ksh(gross)}</span>
-            <div style={styles.divider} />
-            <Row label={`MEALVEST fee (${status.feePercent}%)`} value={`− ${ksh(status.feeAmount ?? 0)}`} muted />
-            <Row label="You receive" value={ksh(status.netAmount ?? 0)} strong />
-          </Card>
-
-          {locked ? (
-            <Card style={styles.lockCard}>
-              <Lock size={16} color={COLORS.textMuted} />
-              <div style={{ flex: 1 }}>
-                <span style={styles.lockTitle}>
-                  {status.reason === "ALREADY_WITHDRAWN" ? "Already withdrawn" : "Unlocks at the end of your plan"}
-                </span>
-                <span style={styles.lockText}>
-                  {status.reason === "ALREADY_WITHDRAWN"
-                    ? "This plan's savings have already been requested."
-                    : `Savings can be withdrawn from ${formatDate(status.contractEndDate)}, once your plan period ends. Until then, carry unused credit forward and it stays yours.`}
-                </span>
-              </div>
-            </Card>
-          ) : (
-            <>
-              <span style={styles.label}>M-Pesa number to receive the money</span>
-              <div style={styles.inputRow}>
-                <Smartphone size={16} color={COLORS.textOnDarkMuted} />
-                <input
-                  style={styles.input}
-                  type="tel"
-                  inputMode="tel"
-                  placeholder="07XX XXX XXX"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </div>
-
-              <button style={styles.checkboxRow} onClick={() => setAcceptFee((v) => !v)}>
-                <div style={{ ...styles.checkbox, ...(acceptFee ? styles.checkboxChecked : null) }}>
-                  {acceptFee && <Check size={13} color="#fff" strokeWidth={3} />}
-                </div>
-                <span style={styles.checkboxLabel}>
-                  I understand MEALVEST keeps a {status.feePercent}% fee on this withdrawal, that I receive{" "}
-                  {ksh(status.netAmount ?? 0)}, and that this closes my current plan.
-                </span>
-              </button>
-
-              {needsGoogle ? (
+        {status.reason === "NO_ACTIVE_BUDGET" && (
+          <EmptyState icon={<PiggyBank size={30} />} title="Nothing to withdraw">
+            <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: "var(--sv-muted)" }}>
+              You don't have an active plan right now, so there's nothing to withdraw.
+              {status.latestWithdrawal && (
                 <>
-                  <span style={styles.label}>Confirm it's you</span>
-                  <p style={styles.lockText}>
-                    Your account signs in with Google, so confirm this withdrawal with Google to send {ksh(status.netAmount ?? 0)}.
-                  </p>
-                  {acceptFee && gross > 0 && <GoogleSignInButton onIdToken={submitWithGoogle} loading={submitting} />}
-                </>
-              ) : (
-                <>
-                  <span style={styles.label}>Your 4-digit PIN</span>
-                  <div style={styles.inputRow}>
-                    <KeyRound size={16} color={COLORS.textOnDarkMuted} />
-                    <input
-                      style={styles.input}
-                      type="password"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      maxLength={4}
-                      placeholder="••••"
-                      aria-label="PIN"
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
-                    />
-                  </div>
-
-                  <PrimaryButton
-                    onPress={submit}
-                    disabled={!acceptFee || submitting || gross <= 0 || pin.length !== 4}
-                    loading={submitting}
-                    style={{ marginTop: 16 }}
-                  >
-                    Withdraw {ksh(status.netAmount ?? 0)}
-                  </PrimaryButton>
+                  {" "}
+                  Your last withdrawal of <strong style={{ color: "var(--mv-cream)" }}>{ksh(status.latestWithdrawal.student_amount)}</strong> is{" "}
+                  <strong style={{ color: "var(--mv-cream)" }}>{status.latestWithdrawal.status}</strong>.
                 </>
               )}
-            </>
-          )}
+            </p>
+            <PrimaryButton type="button" variant="secondary" showArrow={false} onPress={() => navigate("/student/payments/statements")}>
+              See payments &amp; savings history
+            </PrimaryButton>
+          </EmptyState>
+        )}
 
-          <button onClick={() => navigate("/terms")} style={styles.linkBtn}>
-            <span style={styles.linkText}>Read the savings &amp; withdrawal policy</span>
-          </button>
-        </>
-      )}
+        {status.reason !== "NO_ACTIVE_BUDGET" && (
+          <>
+            <section className="sv-receipt" aria-label="Savings breakdown">
+              <div className="sv-amountplate" style={{ gap: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: "#6b625c" }}>Available savings</span>
+                <span style={{ fontSize: "clamp(34px, 10vw, 44px)", fontWeight: 800, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{ksh(gross)}</span>
+              </div>
+              <div className="sv-receipt-rows">
+                <Line label={`MEALVEST fee (${status.feePercent}%)`} value={`− ${ksh(status.feeAmount ?? 0)}`} />
+                <Line label="You receive" value={ksh(net)} strong />
+              </div>
+            </section>
+
+            {locked ? (
+              <div className="sv-note" role="status" style={{ padding: 16, gap: 14 }}>
+                <span className="sv-row-icon" aria-hidden="true" style={{ flexShrink: 0, marginTop: 0 }}>
+                  <Lock size={18} />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <b style={{ display: "block", fontSize: 14, marginBottom: 4 }}>
+                    {status.reason === "ALREADY_WITHDRAWN" ? "Already withdrawn" : "Unlocks at the end of your plan"}
+                  </b>
+                  <span>
+                    {status.reason === "ALREADY_WITHDRAWN"
+                      ? "This plan's savings have already been requested."
+                      : `Savings can be withdrawn from ${formatDate(status.contractEndDate)}, once your plan period ends. Until then, carry unused credit forward and it stays yours.`}
+                  </span>
+                  {daysLeft !== null && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, color: "var(--mv-amber)", fontWeight: 700 }}>
+                      <CalendarClock size={15} aria-hidden />
+                      {daysLeft === 0 ? "Unlocks today" : `${daysLeft} ${daysLeft === 1 ? "day" : "days"} to go`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <section>
+                  <label className="sv-fieldlabel" htmlFor="wd-phone">M-Pesa number to receive the money</label>
+                  <div className="sv-input">
+                    <Smartphone size={18} aria-hidden />
+                    <input id="wd-phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                  </div>
+                </section>
+
+                <button type="button" role="checkbox" aria-checked={acceptFee} className="sv-check" onClick={() => setAcceptFee((v) => !v)}>
+                  <span className="sv-check-box" aria-hidden="true">
+                    <Check size={15} strokeWidth={3} />
+                  </span>
+                  <span>
+                    I understand MEALVEST keeps a {status.feePercent}% fee on this withdrawal, that I receive {ksh(net)}, and that this closes my current plan.
+                  </span>
+                </button>
+
+                {needsGoogle ? (
+                  <section>
+                    <span className="sv-fieldlabel">Confirm it's you</span>
+                    <p className="sv-lede" style={{ margin: "0 0 12px 6px" }}>
+                      Your account signs in with Google, so confirm this withdrawal with Google to send {ksh(net)}.
+                    </p>
+                    {acceptFee && gross > 0 && <GoogleSignInButton onIdToken={submitWithGoogle} loading={submitting} />}
+                  </section>
+                ) : (
+                  <>
+                    <section>
+                      <label className="sv-fieldlabel" htmlFor="wd-pin">Your 4-digit PIN</label>
+                      <div className="sv-input">
+                        <KeyRound size={18} aria-hidden />
+                        <input
+                          id="wd-pin"
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={4}
+                          placeholder="••••"
+                          value={pin}
+                          onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                        />
+                      </div>
+                    </section>
+
+                    <PrimaryButton onPress={submit} loading={submitting} disabled={!acceptFee || gross <= 0} showArrow={false} icon={<Send size={18} aria-hidden />}>
+                      {`Withdraw ${ksh(net)}`}
+                    </PrimaryButton>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </main>
+
+      <Modal
+        open={pendingProof !== null}
+        title={`Withdraw ${ksh(gross)}?`}
+        icon={<Info size={22} color="#E5482E" aria-hidden />}
+        onClose={() => !submitting && setPendingProof(null)}
+        actions={
+          <>
+            <PrimaryButton type="button" showArrow={false} loading={submitting} onPress={() => pendingProof && send(pendingProof)}>
+              {`Confirm — receive ${ksh(net)}`}
+            </PrimaryButton>
+            <PrimaryButton type="button" variant="secondary" showArrow={false} disabled={submitting} onPress={() => setPendingProof(null)}>
+              Cancel
+            </PrimaryButton>
+          </>
+        }
+      >
+        {`MEALVEST fee (${status.feePercent}%): ${ksh(status.feeAmount ?? 0)}. You receive ${ksh(net)} to ${phone.trim()}. This closes your current plan.`}
+      </Modal>
     </div>
   );
 }
-
-function Row({ label, value, muted, strong }: { label: string; value: string; muted?: boolean; strong?: boolean }) {
-  return (
-    <div style={styles.row}>
-      <span style={{ ...styles.rowLabel, ...(muted ? { color: COLORS.textFaint } : null) }}>{label}</span>
-      <span style={{ ...styles.rowValue, ...(strong ? styles.rowValueStrong : null), ...(muted ? { color: COLORS.textMuted } : null) }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column", maxWidth: 560 },
-  center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
-  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
-  headerRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 18 },
-  iconCircle: { width: 42, height: 42, borderRadius: RADIUS.pill, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`, flexShrink: 0 },
-  title: { fontSize: 20, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0 },
-  subtitle: { fontSize: 12, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, margin: "2px 0 0 0" },
-  error: { color: COLORS.danger, fontSize: 13, marginBottom: 12, fontFamily: FONTS.bodySemibold, fontWeight: 600 },
-  infoCard: { display: "flex", flexDirection: "column", gap: 8 },
-  infoText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, margin: 0, lineHeight: "19px" },
-  breakdownCard: { display: "flex", flexDirection: "column", gap: 6, width: "100%", maxWidth: 420 },
-  cardLabel: { fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 700, color: COLORS.textFaint, letterSpacing: 0.6 },
-  bigAmount: { fontSize: 28, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text },
-  divider: { height: 1, backgroundColor: COLORS.borderSoft, margin: "6px 0" },
-  row: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
-  rowLabel: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted },
-  rowValue: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
-  rowValueStrong: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.primary },
-  lockCard: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 12 },
-  lockTitle: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
-  lockText: { display: "block", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, marginTop: 3, lineHeight: "18px" },
-  label: { display: "block", fontSize: 13, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textOnDark, marginTop: 20, marginBottom: 8 },
-  inputRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "rgba(252,244,234,0.06)", borderRadius: RADIUS.sm, border: `1.5px solid ${COLORS.border}`, paddingLeft: 14, paddingRight: 14 },
-  input: { flex: 1, fontSize: 16, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, paddingTop: 13, paddingBottom: 13, backgroundColor: "transparent", border: "none", outline: "none" },
-  checkboxRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 16, textAlign: "left" },
-  checkbox: { width: 20, height: 20, borderRadius: 5, border: `2px solid ${COLORS.border}`, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1, flexShrink: 0 },
-  checkboxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  checkboxLabel: { flex: 1, fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, lineHeight: "17px" },
-  linkBtn: { marginTop: 16, alignSelf: "center" },
-  linkText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textAlign: "center" },
-  successCircle: { width: 56, height: 56, borderRadius: RADIUS.pill, backgroundColor: COLORS.success, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 },
-  statusTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 18, color: COLORS.textOnDark, margin: "0 0 14px 0", textAlign: "center" },
-  statusSub: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 14, textAlign: "center", lineHeight: "18px", maxWidth: 380 },
-};

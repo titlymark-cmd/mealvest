@@ -5,6 +5,7 @@ import "./styles/reset.css";
 import "./styles/effects.css";
 import "./styles/neu.css";
 import "./styles/student.css";
+import "./styles/skeleton.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
