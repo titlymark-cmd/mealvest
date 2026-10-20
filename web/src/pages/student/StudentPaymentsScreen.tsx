@@ -1,65 +1,57 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Receipt, PiggyBank } from "lucide-react";
-import { Card } from "../../components/Card";
-import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS } from "../../styles/theme";
+import { Eye, EyeOff, Zap, FileText, PiggyBank, Lock, ChevronRight, RefreshCw, Wallet as WalletIcon, Utensils } from "lucide-react";
+import { PrimaryButton } from "../../components/PrimaryButton";
+import { EmptyState, Money } from "../../components/student/ui";
+import { TransactionRow } from "../../components/student/TransactionRow";
+import { toTransactions, Transaction } from "../../components/student/transactions";
 import { useAuth } from "../../context/AuthContext";
 import { listMyPayments, StudentPayment } from "../../services/paymentsApi";
-import { listMyWithdrawals, WithdrawalRecord } from "../../services/budgetApi";
+import { getActiveBudget, getWithdrawalStatus, listMyWithdrawals, Budget, WithdrawalRecord, WithdrawalStatus } from "../../services/budgetApi";
+import logo from "../../assets/mealvest-logo.png";
 
-const PAYMENT_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "Awaiting confirmation", color: COLORS.warningText },
-  processing: { label: "Awaiting confirmation", color: COLORS.warningText },
-  success: { label: "Paid", color: COLORS.successText },
-  failed: { label: "Failed — not charged", color: COLORS.dangerText },
-  cancelled: { label: "Cancelled", color: COLORS.textMuted },
-  expired: { label: "Expired", color: COLORS.textMuted },
-  refunded: { label: "Refunded", color: COLORS.textMuted },
-};
-
-const WITHDRAWAL_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "Requested — being processed", color: COLORS.warningText },
-  processing: { label: "Being sent", color: COLORS.warningText },
-  completed: { label: "Sent to M-Pesa", color: COLORS.successText },
-  failed: { label: "Failed — MEALVEST will follow up", color: COLORS.dangerText },
-  rejected: { label: "Declined", color: COLORS.dangerText },
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  budget_topup: "Meal plan payment",
-  plan_boost: "Meal Boost top-up",
-  order_payment: "Order payment",
-  refund: "Refund",
-};
-
-const PROVIDER_LABEL: Record<string, string> = { cyzora: "M-Pesa via Cyzora", paystack: "M-Pesa via Paystack", daraja: "M-Pesa" };
-
-const ksh = (v: string | number) => `KSh ${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const RECENT_COUNT = 4;
 
 /**
- * The student's own ledger: every plan payment / boost attempt with
- * the outcome the server recorded (set only by provider verify or
- * webhook — nothing here is derived client-side), plus their savings
- * withdrawals with MEALVEST's fee shown separately.
+ * Wallet (route unchanged: /student/payments).
+ *
+ * MEALVEST has no stored-value wallet endpoint: a student's money lives in
+ * their meal plan (budget). So the wallet shows the plan's own authoritative
+ * figures straight from /api/student/budget (remaining_amount, today's
+ * spendable amount, carried-over amount, days left) — nothing is summed or
+ * derived from the transaction list. Adding money is the existing Meal Boost
+ * flow; the statements are the existing payment + withdrawal ledgers.
+ *
+ * Privacy: the balance is hidden every time this page opens. `revealed` is
+ * plain component state (never persisted, never logged, no PIN involved) and
+ * is purely presentational: it changes what is rendered, not any data.
  */
 export default function StudentPaymentsScreen() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
+
+  const [revealed, setRevealed] = useState(false);
+  const [budget, setBudget] = useState<Budget | null>(null);
+  const [withdrawal, setWithdrawal] = useState<WithdrawalStatus | null>(null);
   const [payments, setPayments] = useState<StudentPayment[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"payments" | "savings">("payments");
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const [p, w] = await Promise.all([listMyPayments(authFetch), listMyWithdrawals(authFetch)]);
+      const [b, p, w] = await Promise.all([getActiveBudget(authFetch), listMyPayments(authFetch), listMyWithdrawals(authFetch)]);
+      setBudget(b);
       setPayments(p);
       setWithdrawals(w);
+      // Savings lock state is secondary; the wallet still works without it.
+      getWithdrawalStatus(authFetch)
+        .then(setWithdrawal)
+        .catch(() => setWithdrawal(null));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load your payments.");
+      setError(err instanceof Error ? err.message : "Could not load your wallet.");
     } finally {
       setLoading(false);
     }
@@ -69,130 +61,207 @@ export default function StudentPaymentsScreen() {
     load();
   }, [load]);
 
-  const totalPaid = payments.filter((p) => p.status === "success").reduce((sum, p) => sum + Number(p.amount), 0);
+  const recent: Transaction[] = useMemo(() => toTransactions(payments, withdrawals).slice(0, RECENT_COUNT), [payments, withdrawals]);
+
+  if (loading) {
+    return (
+      <div className="mv-container sv-page" aria-busy="true" aria-label="Loading your wallet">
+        <h1 className="sv-title">Wallet</h1>
+        <div className="sv-wallet-layout">
+          <div className="mv-skel" style={{ height: 360 }} />
+          <div className="mv-skel" style={{ height: 300 }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mv-container sv-page">
+        <h1 className="sv-title">Wallet</h1>
+        <EmptyState role="alert" icon={<RefreshCw size={28} />} title="We couldn't open your wallet" body={error}>
+          <PrimaryButton type="button" variant="secondary" showArrow={false} icon={<RefreshCw size={16} aria-hidden />} onPress={load}>
+            Try again
+          </PrimaryButton>
+        </EmptyState>
+      </div>
+    );
+  }
+
+  const dailyCredit = budget ? Number(budget.daily_allowance) : 0;
+  const banked = budget ? Number(budget.banked_amount) : 0;
+  const spentToday = budget ? Number(budget.spent_today) : 0;
+  const availableToday = Math.max(0, dailyCredit + banked - spentToday);
+  const daysTotal = budget?.number_of_days ?? 0;
+  const daysLeft = budget ? budget.remainingDays ?? budget.number_of_days : 0;
+
+  const savingsOpen = Boolean(withdrawal && !withdrawal.locked);
 
   return (
-    <div style={styles.container}>
-      <button onClick={() => navigate(-1)} style={styles.backRow}>
-        <ArrowLeft size={16} color={COLORS.primary} />
-        <span style={styles.backText}>Back</span>
-      </button>
+    <div className="mv-container sv-page">
+      <header>
+        <h1 className="sv-title">Wallet</h1>
+        <p className="sv-lede">Your meal-plan money, kept private until you choose to show it.</p>
+      </header>
 
-      <h1 style={styles.title}>Payments &amp; savings</h1>
-      <p style={styles.subtitle}>Everything you've paid into MEALVEST and every withdrawal, with its reference.</p>
+      <div className="sv-wallet-layout">
+        {/* ---- The wallet ---- */}
+        <section className="sv-wallet" aria-label="Your MEALVEST wallet">
+          <div className="sv-wallet-body">
+            <div className="sv-wallet-head">
+              <div className="sv-wallet-brand">
+                <img src={logo} alt="" />
+                <div>
+                  <strong>MEALVEST</strong>
+                  <span>Meal wallet</span>
+                </div>
+              </div>
+              {budget && (
+                <button
+                  type="button"
+                  className="sv-eye"
+                  aria-pressed={revealed}
+                  aria-label={revealed ? "Hide wallet amounts" : "Show wallet amounts"}
+                  onClick={() => setRevealed((v) => !v)}
+                >
+                  {revealed ? <Eye size={20} aria-hidden /> : <EyeOff size={20} aria-hidden />}
+                </button>
+              )}
+            </div>
 
-      <div style={styles.tabRow}>
-        <button onClick={() => setTab("payments")} style={{ ...styles.tab, ...(tab === "payments" ? styles.tabActive : null) }}>
-          <Receipt size={14} color={tab === "payments" ? "#fff" : COLORS.textOnDarkMuted} />
-          <span style={{ ...styles.tabText, ...(tab === "payments" ? styles.tabTextActive : null) }}>Payments</span>
-        </button>
-        <button onClick={() => setTab("savings")} style={{ ...styles.tab, ...(tab === "savings" ? styles.tabActive : null) }}>
-          <PiggyBank size={14} color={tab === "savings" ? "#fff" : COLORS.textOnDarkMuted} />
-          <span style={{ ...styles.tabText, ...(tab === "savings" ? styles.tabTextActive : null) }}>Savings withdrawals</span>
-        </button>
-      </div>
+            {budget ? (
+              <>
+                <div className="sv-plate">
+                  <div className="sv-plate-label">
+                    <WalletIcon size={15} aria-hidden />
+                    Plan balance
+                  </div>
+                  <div className="sv-figure" aria-live="polite">
+                    <span className="sv-figure-cur">KSh</span>
+                    <span className="sv-figure-val" data-hidden={!revealed}>
+                      <Money value={budget.remaining_amount} hidden={!revealed} withCurrency={false} />
+                    </span>
+                  </div>
+                  <div className="sv-plate-sub">What's left of your plan, including anything carried over.</div>
+                </div>
 
-      {loading && (
-        <div style={{ marginTop: 30, display: "flex" }}>
-          <Spinner color={COLORS.primary} />
+                <div className="sv-wallet-cells">
+                  <div className="sv-cell">
+                    <span>Available today</span>
+                    <span>
+                      <Money value={availableToday} hidden={!revealed} />
+                    </span>
+                  </div>
+                  <div className="sv-cell">
+                    <span>Carried over</span>
+                    <span>
+                      <Money value={banked} hidden={!revealed} />
+                    </span>
+                  </div>
+                  <div className="sv-cell">
+                    <span>Plan days left</span>
+                    <span>
+                      {daysLeft} of {daysTotal}
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="sv-plate">
+                <div className="sv-plate-label">
+                  <WalletIcon size={15} aria-hidden />
+                  No active plan
+                </div>
+                <div className="sv-plate-sub" style={{ marginTop: 8, fontSize: 13.5, lineHeight: 1.5 }}>
+                  Your wallet fills when you start a meal plan. Pick a hotel to set one up.
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ---- Actions + activity ---- */}
+        <div className="sv-stack" style={{ gap: 18 }}>
+          <div className="sv-actions">
+            {budget ? (
+              <button type="button" className="sv-action" data-primary="true" onClick={() => navigate("/student/meal-boost")}>
+                <span className="sv-action-icon" aria-hidden="true">
+                  <Zap size={20} />
+                </span>
+                <span>
+                  <b>Add money</b>
+                  <small>Top up your plan with M-Pesa</small>
+                </span>
+              </button>
+            ) : (
+              <button type="button" className="sv-action" data-primary="true" onClick={() => navigate("/student")}>
+                <span className="sv-action-icon" aria-hidden="true">
+                  <Utensils size={20} />
+                </span>
+                <span>
+                  <b>Start a meal plan</b>
+                  <small>Choose a hotel and pay with M-Pesa</small>
+                </span>
+              </button>
+            )}
+
+            <button type="button" className="sv-action" onClick={() => navigate("/student/withdraw")}>
+              <span className="sv-action-icon" aria-hidden="true">
+                {savingsOpen ? <PiggyBank size={20} /> : <Lock size={18} />}
+              </span>
+              <span>
+                <b>Savings</b>
+                <small>{savingsOpen ? "Withdraw to M-Pesa" : "Opens when your plan ends"}</small>
+              </span>
+            </button>
+
+
+            <button type="button" className="sv-action" onClick={() => navigate("/student/menu")} disabled={!budget}>
+              <span className="sv-action-icon" aria-hidden="true">
+                <Utensils size={20} />
+              </span>
+              <span>
+                <b>Order a meal</b>
+                <small>Spend from your plan</small>
+              </span>
+            </button>
+          </div>
+
+          <button type="button" className="sv-statement-cta" onClick={() => navigate("/student/payments/statements")}>
+            <span className="sv-action-icon" aria-hidden="true">
+              <FileText size={20} />
+            </span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <b>View payment statements</b>
+              <small>Every payment, refund and withdrawal, with its reference</small>
+            </span>
+            <ChevronRight size={20} aria-hidden />
+          </button>
+
+          <section aria-labelledby="recent-activity" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <h2 className="sv-h2" id="recent-activity">
+              Recent activity
+            </h2>
+            {recent.length === 0 ? (
+              <div className="sv-group">
+                <div className="sv-row" style={{ minHeight: 72 }}>
+                  <span className="sv-row-main">
+                    <span className="sv-row-label">No activity yet</span>
+                    <span className="sv-row-sub">Payments you make into MEALVEST will appear here.</span>
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="sv-group">
+                {recent.map((t) => (
+                  <TransactionRow key={t.id} tx={t} hidden={!revealed} compact />
+                ))}
+              </div>
+            )}
+            {!revealed && recent.length > 0 && <p className="sv-meta" style={{ margin: "0 0 0 6px" }}>Amounts are hidden. Use the eye button on your wallet to show them.</p>}
+          </section>
         </div>
-      )}
-      {!loading && error && <p style={styles.errorText}>{error}</p>}
-
-      {!loading && !error && tab === "payments" && (
-        <>
-          <Card style={styles.summaryCard}>
-            <span style={styles.summaryLabel}>TOTAL PAID INTO MEAL PLANS</span>
-            <span style={styles.summaryValue}>{ksh(totalPaid)}</span>
-            <span style={styles.summarySub}>{payments.filter((p) => p.status === "success").length} successful payments</span>
-          </Card>
-          {payments.length === 0 && <p style={styles.emptyText}>No payments yet.</p>}
-          <div style={styles.list}>
-            {payments.map((p) => {
-              const st = PAYMENT_STATUS[p.status] || { label: p.status, color: COLORS.textFaint };
-              return (
-                <Card key={p.id} style={styles.rowCard}>
-                  <div style={styles.rowTop}>
-                    <span style={styles.rowTitle}>{TYPE_LABEL[p.type] || p.type}</span>
-                    <span style={styles.rowAmount}>{ksh(p.amount)}</span>
-                  </div>
-                  <span style={{ ...styles.rowStatus, color: st.color }}>{st.label}</span>
-                  <span style={styles.rowMeta}>
-                    {when(p.created_at)} · {PROVIDER_LABEL[p.provider] || p.provider}
-                    {p.number_of_days ? ` · ${p.number_of_days}-day plan` : ""}
-                    {p.hotel_name ? ` · ${p.hotel_name}` : ""}
-                  </span>
-                  {p.provider_reference && <span style={styles.rowRef}>Ref {p.provider_reference}</span>}
-                  {p.status === "failed" && p.result_description && <span style={styles.rowNote}>{p.result_description}</span>}
-                </Card>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {!loading && !error && tab === "savings" && (
-        <>
-          {withdrawals.length === 0 && (
-            <Card style={styles.summaryCard}>
-              <p style={styles.emptyInCard}>
-                No savings withdrawals yet. When a plan ends, any unspent balance (including days you carried over) can be
-                withdrawn to M-Pesa from your dashboard. MEALVEST keeps a small fee, shown before you confirm.
-              </p>
-            </Card>
-          )}
-          <div style={styles.list}>
-            {withdrawals.map((w) => {
-              const st = WITHDRAWAL_STATUS[w.status] || { label: w.status, color: COLORS.textFaint };
-              return (
-                <Card key={w.id} style={styles.rowCard}>
-                  <div style={styles.rowTop}>
-                    <span style={styles.rowTitle}>Savings withdrawal{w.hotel_name ? ` · ${w.hotel_name}` : ""}</span>
-                    <span style={styles.rowAmount}>{ksh(w.student_amount)}</span>
-                  </div>
-                  <span style={{ ...styles.rowStatus, color: st.color }}>{st.label}</span>
-                  <span style={styles.rowMeta}>
-                    {when(w.created_at)} · savings {ksh(w.gross_savings)} − fee {Number(w.platform_fee_percent)}% ({ksh(w.platform_fee_amount)})
-                  </span>
-                  <span style={styles.rowMeta}>
-                    To {w.payout_method === "mpesa" ? "M-Pesa" : w.payout_method || ""} {w.payout_destination}
-                  </span>
-                  {w.payout_reference && <span style={styles.rowRef}>M-Pesa ref {w.payout_reference}</span>}
-                </Card>
-              );
-            })}
-          </div>
-        </>
-      )}
+      </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column", maxWidth: 640 },
-  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
-  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
-  title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, margin: 0 },
-  subtitle: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 14 },
-  tabRow: { display: "flex", flexDirection: "row", gap: 6, backgroundColor: COLORS.bgDeep, borderRadius: RADIUS.pill, padding: 4, alignSelf: "flex-start" },
-  tab: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: RADIUS.pill },
-  tabActive: { backgroundColor: COLORS.primary },
-  tabText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
-  tabTextActive: { color: "#fff" },
-  errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, marginTop: 20 },
-  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, marginTop: 20, textAlign: "center" },
-  emptyInCard: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, margin: 0, lineHeight: "19px" },
-  summaryCard: { marginTop: 16, display: "flex", flexDirection: "column" },
-  summaryLabel: { fontSize: 10, fontFamily: FONTS.bodySemibold, fontWeight: 700, color: COLORS.textFaint, letterSpacing: 0.6 },
-  summaryValue: { fontSize: 24, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.text, marginTop: 2 },
-  summarySub: { fontSize: 11, fontFamily: FONTS.body, color: COLORS.textMuted, marginTop: 2 },
-  list: { display: "flex", flexDirection: "column", gap: 10, paddingBottom: 24, marginTop: 14 },
-  rowCard: { display: "flex", flexDirection: "column", padding: 14, gap: 3 },
-  rowTop: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
-  rowTitle: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
-  rowAmount: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 14, color: COLORS.text, flexShrink: 0 },
-  rowStatus: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11 },
-  rowMeta: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted },
-  rowRef: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, wordBreak: "break-all" },
-  rowNote: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.danger },
-};

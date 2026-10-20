@@ -12,6 +12,8 @@ import PaymentCallbackScreen from "../pages/student/PaymentCallbackScreen";
 import StudentProfileScreen from "../pages/student/StudentProfileScreen";
 import WithdrawSavingsScreen from "../pages/student/WithdrawSavingsScreen";
 import StudentPaymentsScreen from "../pages/student/StudentPaymentsScreen";
+import StudentStatementsScreen from "../pages/student/StudentStatementsScreen";
+import StudentNotificationsScreen from "../pages/student/StudentNotificationsScreen";
 import { StudentTopBar, StudentBottomNav } from "../components/student/StudentNav";
 import { ComingSoonBadge } from "../components/ComingSoonBadge";
 import { useAuth } from "../context/AuthContext";
@@ -100,6 +102,8 @@ export function StudentRoutes() {
       <Route path="/student/meal-boost" element={<MealBoostScreen />} />
       <Route path="/student/withdraw" element={<WithdrawSavingsScreen />} />
       <Route path="/student/payments" element={<StudentDashboardShell><StudentPaymentsScreen /></StudentDashboardShell>} />
+      <Route path="/student/payments/statements" element={<StudentDashboardShell><StudentStatementsScreen /></StudentDashboardShell>} />
+      <Route path="/student/notifications" element={<StudentDashboardShell><StudentNotificationsScreen /></StudentDashboardShell>} />
       <Route path="/payment/callback" element={<PaymentCallbackScreen />} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="*" element={<Navigate to="/student" replace />} />

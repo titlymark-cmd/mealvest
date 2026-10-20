@@ -75,7 +75,7 @@ export function StudentTopBar() {
         </nav>
 
         <span className="mv-topbar-spacer" />
-        <NotificationBell />
+        <NotificationBell mobileHref="/student/notifications" />
 
         <div ref={ref} style={{ position: "relative" }}>
           <button

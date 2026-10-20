@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bell, Check } from "lucide-react";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
@@ -10,6 +11,11 @@ import {
   NotificationItem,
 } from "../../services/notificationsApi";
 import { onForegroundPush } from "../../services/pushNotifications";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { NOTIFICATIONS_CHANGED_EVENT } from "./notificationMeta";
+
+/** Same breakpoint where the student nav switches from top bar to floating pill. */
+const PHONE_QUERY = "(max-width: 767px)";
 
 function timeAgo(isoDate: string): string {
   const diffMs = Date.now() - new Date(isoDate).getTime();
@@ -32,8 +38,14 @@ function timeAgo(isoDate: string): string {
  * inside the app (not the service worker's cross-context click
  * handler, which uses the Clients API instead).
  */
-export function NotificationBell() {
+export function NotificationBell({ mobileHref }: { mobileHref?: string } = {}) {
   const { authFetch } = useAuth();
+  const navigate = useNavigate();
+  // On phones the dropdown can't fit beside the nav chrome, so shells that
+  // provide a dedicated page (`mobileHref`) navigate to it instead. Shells
+  // that don't (admin, hotel owner) keep the dropdown everywhere, unchanged.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const usesPage = Boolean(mobileHref) && isPhone;
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -59,6 +71,17 @@ export function NotificationBell() {
     };
   }, [refreshCount]);
 
+  // The notifications page announces read-state changes so this badge follows.
+  useEffect(() => {
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshCount);
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, refreshCount);
+  }, [refreshCount]);
+
+  // Resizing from desktop to phone with the dropdown open must not strand it.
+  useEffect(() => {
+    if (usesPage) setOpen(false);
+  }, [usesPage]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
@@ -68,6 +91,10 @@ export function NotificationBell() {
   }, [open]);
 
   const toggleOpen = () => {
+    if (usesPage && mobileHref) {
+      navigate(mobileHref);
+      return;
+    }
     const next = !open;
     setOpen(next);
     if (next) {
@@ -96,14 +123,20 @@ export function NotificationBell() {
 
   return (
     <div ref={containerRef} style={styles.wrap}>
-      <button onClick={toggleOpen} style={styles.bellBtn} aria-label="Notifications">
+      <button
+        onClick={toggleOpen}
+        style={styles.bellBtn}
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-haspopup={usesPage ? undefined : "true"}
+        aria-expanded={usesPage ? undefined : open}
+      >
         <Bell size={18} color={COLORS.textOnDark} />
         {unreadCount > 0 && (
           <span style={styles.badge}>{unreadCount > 9 ? "9+" : unreadCount}</span>
         )}
       </button>
 
-      {open && (
+      {open && !usesPage && (
         <div style={styles.panel}>
           <div style={styles.panelHeader}>
             <span style={styles.panelTitle}>Notifications</span>

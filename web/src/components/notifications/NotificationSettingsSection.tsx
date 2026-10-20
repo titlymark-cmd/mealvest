@@ -1,23 +1,20 @@
 import React, { useEffect, useState } from "react";
-import { Bell } from "lucide-react";
-import { Card } from "../Card";
+import { BellRing, CreditCard, Wallet, Megaphone, ShieldAlert, UtensilsCrossed, Send } from "lucide-react";
 import { Switch } from "../Switch";
-import { Spinner } from "../Spinner";
-import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { fetchPreferences, updatePreferences, sendTestNotification, NotificationPreferences } from "../../services/notificationsApi";
 
-const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; sub: string }> = [
-  { key: "meal_reminders", label: "Meal Reminders", sub: "Reminders to use your meal pass" },
-  { key: "payment_updates", label: "Payment Updates", sub: "Plan and Meal Boost payment results" },
-  { key: "wallet_alerts", label: "Wallet Alerts", sub: "Meal passes, redemptions, low balance" },
-  { key: "announcements", label: "Announcements", sub: "Platform news from MEALVEST" },
-  { key: "security_alerts", label: "Security Alerts", sub: "Password and account changes" },
+const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; sub: string; Icon: React.ComponentType<{ size?: number }> }> = [
+  { key: "meal_reminders", label: "Meal reminders", sub: "Reminders to use your meal pass", Icon: UtensilsCrossed },
+  { key: "payment_updates", label: "Payment updates", sub: "Plan and Meal Boost payment results", Icon: CreditCard },
+  { key: "wallet_alerts", label: "Wallet alerts", sub: "Meal passes, redemptions, low balance", Icon: Wallet },
+  { key: "announcements", label: "Announcements", sub: "Platform news from MEALVEST", Icon: Megaphone },
+  { key: "security_alerts", label: "Security alerts", sub: "Password and account changes", Icon: ShieldAlert },
 ];
 
 /**
  * Embedded in StudentProfileScreen — see that file for the surrounding
- * page. Uses the same Card/Field visual language, not a redesign.
+ * page. Renders as a grouped settings list (.sv-group rows).
  *
  * Push notifications need a Firebase project configured server-side
  * (see fcmService.ts) before they can actually send anything — until
@@ -71,74 +68,62 @@ export function NotificationSettingsSection() {
   };
 
   if (loading || !prefs) {
-    return (
-      <Card style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-        <Spinner color={COLORS.primary} />
-      </Card>
-    );
+    return <div className="mv-skel" style={{ height: 120 }} aria-busy="true" aria-label="Loading notification settings" />;
   }
 
   return (
-    <Card style={styles.card}>
-      <div style={styles.headerRow}>
-        <Bell size={16} color={COLORS.primary} />
-        <span style={styles.headerTitle}>Notifications</span>
-      </div>
-
-      <div style={styles.row}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <span style={styles.rowLabel}>Push Notifications</span>
-          <span style={styles.rowSub}>Get alerts on this device, even when the app is closed</span>
+    <section aria-labelledby="notif-settings-heading">
+      <h2 className="sv-group-title" id="notif-settings-heading">
+        Notifications
+      </h2>
+      <div className="sv-group">
+        <div className="sv-row">
+          <span className="sv-row-icon" aria-hidden="true">
+            <BellRing size={18} />
+          </span>
+          <span className="sv-row-main">
+            <span className="sv-row-label">Push notifications</span>
+            <span className="sv-row-sub">Get alerts on this device, even when the app is closed</span>
+          </span>
+          <span className="sv-badge" data-tone="warn">
+            Coming soon
+          </span>
         </div>
-        <span style={styles.comingSoonChip}>Coming soon</span>
-      </div>
 
-      {TOGGLE_ROWS.map((row) => (
-        <div key={row.key} style={styles.row}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={styles.rowLabel}>{row.label}</span>
-            <span style={styles.rowSub}>{row.sub}</span>
+        {TOGGLE_ROWS.map(({ key, label, sub, Icon }) => (
+          <div key={key} className="sv-row">
+            <span className="sv-row-icon" aria-hidden="true">
+              <Icon size={18} />
+            </span>
+            <span className="sv-row-main">
+              <span className="sv-row-label" id={`pref-${key}`}>
+                {label}
+              </span>
+              <span className="sv-row-sub">{sub}</span>
+            </span>
+            <span aria-labelledby={`pref-${key}`} style={{ display: "inline-flex" }}>
+              <Switch value={Boolean(prefs[key])} onValueChange={() => toggle(key)} />
+            </span>
           </div>
-          <Switch value={Boolean(prefs[row.key])} onValueChange={() => toggle(row.key)} />
-        </div>
-      ))}
+        ))}
 
-      <button onClick={handleTest} disabled={testStatus === "sending"} style={styles.testBtn}>
-        <span style={styles.testText}>
-          {testStatus === "sending" ? "Sending…" : testStatus === "sent" ? "Test sent ✓" : "Send Test Notification"}
+        <button type="button" className="sv-row" onClick={handleTest} disabled={testStatus === "sending"}>
+          <span className="sv-row-icon" aria-hidden="true">
+            <Send size={18} />
+          </span>
+          <span className="sv-row-main">
+            <span className="sv-row-label">
+              {testStatus === "sending" ? "Sending…" : testStatus === "sent" ? "Test sent" : "Send a test notification"}
+            </span>
+            <span className="sv-row-sub">Check that alerts reach you</span>
+          </span>
+        </button>
+      </div>
+      {savingKey && (
+        <span className="sv-meta" role="status" style={{ display: "block", marginTop: 8, marginLeft: 6 }}>
+          Saving…
         </span>
-      </button>
-      {savingKey && <span style={styles.savingHint}>Saving…</span>}
-    </Card>
+      )}
+    </section>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  card: { display: "flex", flexDirection: "column", marginTop: 16 },
-  headerRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
-  headerTitle: { fontFamily: FONTS.displaySemibold, fontWeight: 700, fontSize: 15, color: COLORS.text },
-  row: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderTop: `1px solid ${COLORS.borderSoft}`,
-  },
-  rowLabel: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
-  rowSub: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-  comingSoonChip: {
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 700,
-    fontSize: 10,
-    color: COLORS.primaryDark,
-    backgroundColor: COLORS.accentSoft,
-    borderRadius: RADIUS.pill,
-    padding: "4px 10px",
-    flexShrink: 0,
-  },
-  testBtn: { marginTop: 14, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: RADIUS.sm, padding: "11px 12px" },
-  testText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary, textAlign: "center", display: "block" },
-  savingHint: { fontFamily: FONTS.body, fontSize: 10, color: COLORS.textFaint, textAlign: "center", marginTop: 6 },
-};
