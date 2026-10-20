@@ -98,6 +98,8 @@ function PublicTopBar() {
  * position is derived from the URL (right after refresh, deep links and
  * back/forward) and moves to the Account slot while its sheet is open.
  */
+let lastThumbIndex: number | null = null;
+
 function PublicBottomNav() {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
@@ -106,6 +108,22 @@ function PublicBottomNav() {
 
   const routeIndex = pathname.startsWith("/hotels") ? 1 : 0;
   const index = open ? 2 : routeIndex;
+
+  // Every public page mounts its own copy of this pill, so on Home <-> Hotels the thumb
+  // element is brand new and would just appear in place. Start it where the previous
+  // copy left it, then move it on the next frames so the slide transition plays.
+  const [thumbIndex, setThumbIndex] = useState<number>(lastThumbIndex ?? index);
+  useEffect(() => {
+    lastThumbIndex = index;
+    let id2 = 0;
+    const id1 = requestAnimationFrame(() => {
+      id2 = requestAnimationFrame(() => setThumbIndex(index));
+    });
+    return () => {
+      cancelAnimationFrame(id1);
+      cancelAnimationFrame(id2);
+    };
+  }, [index]);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -159,14 +177,15 @@ function PublicBottomNav() {
       <nav
         className="mv-bottomnav"
         aria-label="Main"
-        style={{ ["--mv-nav-count" as string]: 3, ["--mv-nav-index" as string]: index } as React.CSSProperties}
+        data-sheet-open={open}
+        style={{ ["--mv-nav-count" as string]: 3, ["--mv-nav-index" as string]: thumbIndex } as React.CSSProperties}
       >
         <span className="mv-bottomnav-thumb" aria-hidden />
-        <NavLink to="/" end aria-label="Home">
+        <NavLink to="/" end aria-label="Home" onClick={() => setOpen(false)}>
           <House size={20} aria-hidden />
           <span>Home</span>
         </NavLink>
-        <NavLink to="/hotels" aria-label="Hotels">
+        <NavLink to="/hotels" aria-label="Hotels" onClick={() => setOpen(false)}>
           <Store size={20} aria-hidden />
           <span>Hotels</span>
         </NavLink>

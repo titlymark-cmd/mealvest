@@ -91,6 +91,21 @@ a {
   text-decoration: none;
 }
 
+/* Mobile browsers paint a translucent blue box over anything tappable for a
+   split second. Only <button> had it switched off (neu.css), so every <a>
+   (all the NavLinks in the bottom navs) still flashed. Turn it off for every
+   tappable element and drop the double-tap-zoom delay while at it. */
+a,
+button,
+summary,
+label,
+[role="button"],
+[role="tab"],
+[role="menuitem"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 @keyframes mv-spin {
   to {
     transform: rotate(360deg);

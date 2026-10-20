@@ -360,6 +360,10 @@ button:not(:disabled):active {
   opacity: 0;
 }
 .mv-bottomnav a {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  outline: none;
   position: relative;
   z-index: 1;
   display: flex;
@@ -376,6 +380,9 @@ button:not(:disabled):active {
 }
 .mv-bottomnav a svg {
   transition: transform 320ms var(--mv-ease), color var(--mv-dur-base) ease;
+}
+.mv-bottomnav a:focus:not(:focus-visible) {
+  outline: none;
 }
 .mv-bottomnav a[aria-current="page"] {
   color: var(--mv-cream);

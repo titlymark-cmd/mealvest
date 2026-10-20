@@ -524,6 +524,8 @@
   padding: 6px 20px 22px;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
+  scroll-padding-left: 20px;
+  scroll-padding-right: 20px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
@@ -541,6 +543,7 @@
     margin: 0;
     padding: 6px 0 22px;
     overflow: visible;
+    scroll-padding: 0;
   }
   .mvp-shelf > * {
     flex: none;
@@ -885,6 +888,9 @@
 
 /* ---------- Mobile pill: button slot + account sheet ---------- */
 .mv-bottomnav .mvp-navbtn {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  outline: none;
   position: relative;
   z-index: 1;
   display: flex;
@@ -911,6 +917,15 @@
 .mv-bottomnav .mvp-navbtn[aria-expanded="true"] svg {
   color: var(--mv-amber);
   transform: translateY(-1px) scale(1.12);
+}
+/* While the Account sheet is open the thumb sits on Account, so the route link that
+   still has aria-current (Home or Hotels) must look inactive, not highlighted too. */
+.mv-bottomnav[data-sheet-open="true"] a[aria-current="page"] {
+  color: rgba(252, 244, 234, 0.6);
+}
+.mv-bottomnav[data-sheet-open="true"] a[aria-current="page"] svg {
+  color: inherit;
+  transform: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .mv-bottomnav .mvp-navbtn svg {
