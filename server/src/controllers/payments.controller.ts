@@ -37,7 +37,7 @@ export function activePaymentProvider(): "paystack" | "cyzora" {
   return env.paymentProviderDefault === "cyzora" ? "cyzora" : "paystack";
 }
 
-const MIN_AMOUNT = 50;
+const MIN_AMOUNT = 500;
 const MAX_AMOUNT = 50000;
 
 // Meal Boost is a small top-up to an already-active plan, not a new
