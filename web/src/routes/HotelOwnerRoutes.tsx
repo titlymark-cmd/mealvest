@@ -8,6 +8,7 @@ import HotelOwnerOverviewScreen from "../pages/hotelOwner/HotelOwnerOverviewScre
 import HotelOwnerOrdersScreen from "../pages/hotelOwner/HotelOwnerOrdersScreen";
 import HotelMenuManageScreen from "../pages/hotelOwner/HotelMenuManageScreen";
 import HotelStudentsScreen from "../pages/hotelOwner/HotelStudentsScreen";
+import HotelOwnerEarningsScreen from "../pages/hotelOwner/HotelOwnerEarningsScreen";
 import HotelProfileScreen from "../pages/hotelOwner/HotelProfileScreen";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
 
@@ -43,6 +44,7 @@ export function HotelOwnerRoutes() {
       <Route path="/hotel-owner/scanner" element={<HotelScannerScreen />} />
       <Route path="/hotel-owner/orders" element={<HotelOwnerShell><HotelOwnerOrdersScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/menu" element={<HotelOwnerShell><HotelMenuManageScreen /></HotelOwnerShell>} />
+      <Route path="/hotel-owner/earnings" element={<HotelOwnerShell><HotelOwnerEarningsScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/students" element={<HotelOwnerShell><HotelStudentsScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/profile" element={<HotelOwnerShell><HotelProfileScreen /></HotelOwnerShell>} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />

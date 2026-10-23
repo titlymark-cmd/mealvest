@@ -3,6 +3,8 @@ import { ApiError } from "../middleware/errorHandler";
 import { deductFromBudgetInTx } from "./budgetService";
 import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
 import * as notificationEvents from "./notificationEvents";
+import * as hotelPayoutService from "./hotelPayoutService";
+import { runInBackground } from "../lib/background";
 
 export interface CartLine {
   itemId: string;
@@ -119,12 +121,15 @@ export async function getOrdersForUser(userId: string) {
 }
 
 export async function getOrdersForHotel(hotelId: string, status?: string) {
+  // student_name: the same name the hotel already sees on its Students list —
+  // staff need it to call out a ready meal at the counter. LEFT JOIN so an
+  // order is never dropped if a student row is missing.
+  const base = `SELECT o.*, s.full_name AS student_name
+                FROM orders o LEFT JOIN students s ON s.user_id = o.user_id
+                WHERE o.hotel_id = $1`;
   const result = status
-    ? await pool.query("SELECT * FROM orders WHERE hotel_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 100", [
-        hotelId,
-        status,
-      ])
-    : await pool.query("SELECT * FROM orders WHERE hotel_id = $1 ORDER BY created_at DESC LIMIT 100", [hotelId]);
+    ? await pool.query(`${base} AND o.status = $2 ORDER BY o.created_at DESC LIMIT 100`, [hotelId, status])
+    : await pool.query(`${base} ORDER BY o.created_at DESC LIMIT 100`, [hotelId]);
   return result.rows;
 }
 
@@ -261,6 +266,15 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
     const hotelName = hotelNameResult.rows[0]?.name || "the hotel";
     notificationEvents.mealRedeemed(redeemedOrder.user_id, hotelName, Number(redeemedOrder.amount));
     notificationEvents.hotelMealRedeemed(hotelId, hotelAmount, redeemedOrder.id);
+
+    // Automated payout evaluation. Runs only after the redemption has
+    // COMMITTED (so earnings exist exactly once: a repeated scan fails
+    // above with ALREADY_REDEEMED and never reaches this line), in the
+    // background so the hotel's scan response never waits on — or fails
+    // because of — a payout. evaluateAutoPayout never throws, is a no-op
+    // unless AUTO_PAYOUTS_ENABLED=true, and the reconciliation sweep
+    // re-evaluates if this task is ever lost.
+    runInBackground("auto-payout", () => hotelPayoutService.evaluateAutoPayout(hotelId));
 
     return redeemedOrder;
   } catch (err) {

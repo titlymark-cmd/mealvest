@@ -51,6 +51,8 @@ export interface HotelDashboard {
     today_orders: string;
     pending_orders: string;
     redeemed_orders: string;
+    /** Returned by GET /api/hotel/dashboard but previously undeclared/unused. */
+    cancelled_orders?: string;
     revenue_today: string;
     net_earnings: string;
     menu_item_count: string;
@@ -108,8 +110,17 @@ export interface HotelOrder {
   id: string;
   status: string;
   amount: string;
-  items: Array<{ name: string; quantity: number }>;
+  items: Array<{ name: string; quantity: number; unitPrice?: number }>;
   created_at: string;
+  // The fields below are returned by the backend's hotel order view
+  // (server/src/lib/hotelOrderView.ts) and were not previously typed or shown.
+  /** The hotel's own net for this order — set once the order is redeemed. */
+  hotel_amount?: string | null;
+  updated_at?: string;
+  redeemed?: boolean;
+  redeemed_at?: string | null;
+  /** List responses only: the paying student's name, for handover at the counter. */
+  student_name?: string | null;
 }
 
 export async function fetchHotelOrders(authFetch: AuthFetch, status?: string): Promise<HotelOrder[]> {
@@ -267,4 +278,52 @@ export async function fetchHotelStudents(authFetch: AuthFetch, search?: string):
   const res = await authFetch(`/api/hotel/students${qs}`);
   const data = await parseOrError<{ students: HotelStudent[] }>(res, "Could not load your students.");
   return data.students;
+}
+
+/**
+ * GET /api/hotel/payouts (hotel_owner only). Amounts are the hotel's own net.
+ * `status` mirrors hotel_payouts.status; the UI maps it to plain-language
+ * labels rather than showing the raw value.
+ */
+export type HotelPayoutStatus =
+  | "pending"
+  | "review"
+  | "approved"
+  | "unknown"
+  | "processing"
+  | "successful"
+  | "failed"
+  | "cancelled";
+
+export interface HotelPayoutRecord {
+  id: string;
+  amount: string;
+  status: HotelPayoutStatus;
+  reference: string;
+  /** True when created by the automatic threshold trigger rather than an admin. */
+  automated: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HotelEarnings {
+  summary: {
+    /** Redeemed-but-not-yet-paid-out earnings. */
+    pending_amount: string;
+    pending_order_count: string;
+    paid_out_total: string;
+    last_paid_at: string | null;
+    /** Automatic payouts master switch (server AUTO_PAYOUTS_ENABLED). */
+    auto_enabled: boolean;
+    /** Minimum accumulated balance (KSh) before an automatic payout is made. */
+    threshold: string;
+    /** Why the next automatic payout is waiting — hotel-safe categories only. */
+    auto_hold: "payout_in_progress" | "failed_recently" | "needs_support" | null;
+  };
+  payouts: HotelPayoutRecord[];
+}
+
+export async function fetchHotelEarnings(authFetch: AuthFetch): Promise<HotelEarnings> {
+  const res = await authFetch("/api/hotel/payouts");
+  return parseOrError(res, "Could not load your earnings.");
 }

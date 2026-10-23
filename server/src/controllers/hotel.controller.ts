@@ -7,6 +7,9 @@ import { updateHotelLocationSchema } from "../schemas/hotelLocationSchema";
 import * as orderService from "../services/orderService";
 import { uploadHotelImage } from "../services/storageService";
 import { imageUrlSchema } from "../schemas/hotelLocationSchema";
+import { toHotelOrderView } from "../lib/hotelOrderView";
+import { env } from "../config/env";
+import { getUnpaidBalance, autoPayoutBlockReason } from "../models/hotelPayoutModel";
 
 /** Upper bound for a single menu item (M9) — far above any real meal, well inside NUMERIC(10,2). */
 const MAX_MENU_PRICE = 10_000;
@@ -210,6 +213,65 @@ export async function listHotelStudents(req: AuthedRequest, res: Response, next:
   }
 }
 
+/**
+ * GET /api/hotel/payouts — the hotel's own settlement picture: what it has
+ * earned but not yet been paid (redeemed orders not claimed by any payout),
+ * what has been paid out, and the payout history.
+ *
+ * Read-only and scoped to the caller's own hotel (or ?hotelId= for admin
+ * oversight). Money figures are all hotel_amount / payout amounts — the
+ * hotel's net — so, like the dashboard, nothing here lets a hotel back out
+ * MEALVEST's commission. Internal payout columns (provider, recipient and
+ * transfer codes, which admin approved it, review reason, the provider's raw
+ * failure text) are intentionally not selected.
+ */
+export async function getHotelPayouts(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = await resolveHotelId(req);
+    const [unpaid, blockReason, totals, history] = await Promise.all([
+      // The same authoritative "payable balance" the payout engine itself uses.
+      getUnpaidBalance(hotelId),
+      env.autoPayoutsEnabled
+        ? autoPayoutBlockReason(hotelId, env.autoPayoutMaxConsecutiveFailures, env.autoPayoutFailureCooldownMinutes)
+        : Promise.resolve(null),
+      pool.query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'successful'), 0) AS paid_out_total,
+                MAX(updated_at) FILTER (WHERE status = 'successful') AS last_paid_at
+         FROM hotel_payouts WHERE hotel_id = $1`,
+        [hotelId]
+      ),
+      pool.query(
+        `SELECT id, amount, status, transfer_reference AS reference,
+                (initiated_by_admin_id IS NULL) AS automated, created_at, updated_at
+         FROM hotel_payouts WHERE hotel_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        [hotelId]
+      ),
+    ]);
+    // The engine's internal block reasons are collapsed to three hotel-safe categories.
+    const autoHold =
+      blockReason === null
+        ? null
+        : blockReason.startsWith("payout_")
+        ? "payout_in_progress"
+        : blockReason === "failure_cooldown"
+        ? "failed_recently"
+        : "needs_support";
+    res.json({
+      summary: {
+        pending_amount: unpaid.total,
+        pending_order_count: String(unpaid.orderCount),
+        ...totals.rows[0],
+        auto_enabled: env.autoPayoutsEnabled,
+        threshold: String(env.autoPayoutThresholdKes),
+        auto_hold: autoHold,
+      },
+      payouts: history.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function updateHotelLocation(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const parsed = updateHotelLocationSchema.safeParse(req.body);
@@ -246,11 +308,6 @@ export async function updateHotelLocation(req: AuthedRequest, res: Response, nex
 
 const qrSchema = z.object({ qrPayload: z.string().min(1) });
 
-/** Strips MEALVEST's commission figure before an order row reaches a hotel_staff/hotel_owner response — hotel_amount (their own cut) stays. */
-function withoutCommission<T extends { commission_amount?: unknown }>(order: T): Omit<T, "commission_amount"> {
-  const { commission_amount, ...rest } = order;
-  return rest;
-}
 
 /** Read-only pre-check — the scanner UI shows details before staff commit to redeeming. */
 export async function verifyQr(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -260,7 +317,7 @@ export async function verifyQr(req: AuthedRequest, res: Response, next: NextFunc
 
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.verifyOrderQr(parsed.data.qrPayload, hotelId);
-    res.json({ valid: true, order: withoutCommission(order) });
+    res.json({ valid: true, order: toHotelOrderView(order) });
   } catch (err) {
     if (err instanceof ApiError) {
       res.json({ valid: false, code: err.code, message: err.message });
@@ -278,7 +335,7 @@ export async function redeemQr(req: AuthedRequest, res: Response, next: NextFunc
 
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.redeemOrderByQr(parsed.data.qrPayload, hotelId, req.user!.id);
-    res.json({ valid: true, order: withoutCommission(order), message: "Meal redeemed successfully." });
+    res.json({ valid: true, order: toHotelOrderView(order), message: "Meal redeemed successfully." });
   } catch (err) {
     if (err instanceof ApiError) {
       res.json({ valid: false, code: err.code, message: err.message });
@@ -293,7 +350,7 @@ export async function listHotelOrders(req: AuthedRequest, res: Response, next: N
     const hotelId = await resolveHotelId(req);
     const orders = await orderService.getOrdersForHotel(hotelId, req.query.status as string | undefined);
     const isAdminView = req.user!.role === "mealvest_admin";
-    res.json({ orders: isAdminView ? orders : orders.map(withoutCommission) });
+    res.json({ orders: isAdminView ? orders : orders.map(toHotelOrderView) });
   } catch (err) {
     next(err);
   }
@@ -303,7 +360,7 @@ export async function markOrderReady(req: AuthedRequest, res: Response, next: Ne
   try {
     const hotelId = await getOwnHotelId(req.user!.id);
     const order = await orderService.markOrderReady(req.params.orderId, hotelId);
-    res.json({ order });
+    res.json({ order: toHotelOrderView(order) });
   } catch (err) {
     next(err);
   }

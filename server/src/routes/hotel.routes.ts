@@ -5,6 +5,7 @@ import { MAX_IMAGE_BYTES } from "../services/storageService";
 import {
   getHotelDashboard,
   getHotelWeeklyRevenue,
+  getHotelPayouts,
   listHotelStudents,
   updateHotelLocation,
   verifyQr,
@@ -48,6 +49,8 @@ hotelRouter.get("/revenue/weekly", requireRole("hotel_staff", "hotel_owner", "me
 hotelRouter.get("/orders", requireRole("hotel_staff", "hotel_owner", "mealvest_admin"), listHotelOrders);
 hotelRouter.get("/menu", requireRole("hotel_staff", "hotel_owner", "mealvest_admin"), listOwnMenu);
 hotelRouter.get("/students", requireRole("hotel_owner", "mealvest_admin"), listHotelStudents);
+// Money screens are owner-only (staff see the counter-ops dashboard, not settlement history).
+hotelRouter.get("/payouts", requireRole("hotel_owner", "mealvest_admin"), getHotelPayouts);
 
 hotelRouter.patch("/orders/:orderId/ready", requireRole("hotel_staff", "hotel_owner"), markOrderReady);
 hotelRouter.post("/qr/verify", requireRole("hotel_staff", "hotel_owner"), verifyQr);

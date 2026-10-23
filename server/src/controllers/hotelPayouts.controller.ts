@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/errorHandler";
 import * as model from "../models/hotelPayoutModel";
 import * as payoutService from "../services/hotelPayoutService";
 import * as cyzoraPayouts from "../services/cyzoraPayoutService";
+import { env } from "../config/env";
 
 /**
  * Admin-only — mounted under adminRouter (admin.routes.ts), which
@@ -20,11 +21,28 @@ export async function listPendingPayouts(_req: AuthedRequest, res: Response, nex
     // `payout_supported` is decided server-side per the ACTIVE provider
     // (Paystack and Cyzora can automate different settlement methods)
     // so the admin screen never has to hardcode either provider's list.
-    const hotels = (await model.listHotelsWithPendingBalance()).map((h) => ({
-      ...h,
-      payout_supported: Boolean(h.payment_method && payoutService.isPayoutSupported(h.payment_method)),
-    }));
-    res.json({ hotels, provider, configured: payoutService.isPayoutConfigured() });
+    const threshold = payoutService.effectiveThresholdKes();
+    const hotels = await Promise.all(
+      (await model.listHotelsWithPendingBalance()).map(async (h) => ({
+        ...h,
+        payout_supported: Boolean(h.payment_method && payoutService.isPayoutSupported(h.payment_method)),
+        // Accumulating hotels stay visible: unpaid earnings below the
+        // threshold are payable balance, not lost or expired.
+        below_threshold: Number(h.pending_amount) < threshold,
+        auto_payout_blocked_reason: await model.autoPayoutBlockReason(
+          h.hotel_id,
+          env.autoPayoutMaxConsecutiveFailures,
+          env.autoPayoutFailureCooldownMinutes
+        ),
+      }))
+    );
+    res.json({
+      hotels,
+      provider,
+      configured: payoutService.isPayoutConfigured(),
+      auto_payouts_enabled: env.autoPayoutsEnabled,
+      threshold_kes: threshold,
+    });
   } catch (err) {
     next(err);
   }
@@ -47,7 +65,7 @@ export async function previewPayoutFee(req: AuthedRequest, res: Response, next: 
 
 export async function listPayoutHistory(_req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const payouts = await model.listAllPayouts();
+    const payouts = await model.listAllPayouts(env.payoutStaleProcessingMinutes);
     res.json({ payouts });
   } catch (err) {
     next(err);

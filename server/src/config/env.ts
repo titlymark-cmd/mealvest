@@ -222,6 +222,29 @@ export const env = {
   // -----------------------------------------------------------------
   payoutMaxAmountKes: positiveNumberEnv("PAYOUT_MAX_AMOUNT_KES", 50_000),
   payoutDailyLimitKes: positiveNumberEnv("PAYOUT_DAILY_LIMIT_KES", 200_000),
+
+  // -----------------------------------------------------------------
+  // Automated hotel payouts. Evaluated after every QR redemption (see
+  // orderService.redeemOrderByQr -> hotelPayoutService.evaluateAutoPayout).
+  //   AUTO_PAYOUTS_ENABLED          master switch, OFF unless exactly
+  //                                 "true" — enable only after the Cyzora
+  //                                 payout webhook is confirmed working.
+  //   AUTO_PAYOUT_THRESHOLD_KES     minimum accumulated unpaid hotel
+  //                                 earnings (>=) before a payout is sent.
+  //                                 Also applied to manual admin payouts.
+  //   AUTO_PAYOUT_MAX_CONSECUTIVE_FAILURES / _FAILURE_COOLDOWN_MINUTES
+  //                                 stop automatic retry loops after
+  //                                 definitive failures; an admin can
+  //                                 still trigger manually.
+  //   PAYOUT_STALE_PROCESSING_MINUTES
+  //                                 a 'processing' payout older than this
+  //                                 is flagged for admin attention.
+  // -----------------------------------------------------------------
+  autoPayoutsEnabled: process.env.AUTO_PAYOUTS_ENABLED === "true",
+  autoPayoutThresholdKes: positiveNumberEnv("AUTO_PAYOUT_THRESHOLD_KES", 40),
+  autoPayoutMaxConsecutiveFailures: positiveNumberEnv("AUTO_PAYOUT_MAX_CONSECUTIVE_FAILURES", 3),
+  autoPayoutFailureCooldownMinutes: positiveNumberEnv("AUTO_PAYOUT_FAILURE_COOLDOWN_MINUTES", 60),
+  payoutStaleProcessingMinutes: positiveNumberEnv("PAYOUT_STALE_PROCESSING_MINUTES", 120),
 };
 
 // Loud, boot-blocking guard: a live-looking secret key outside a

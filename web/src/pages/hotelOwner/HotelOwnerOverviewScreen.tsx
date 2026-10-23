@@ -1,371 +1,364 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   QrCode,
-  DollarSign,
+  Wallet,
   ShoppingBag,
-  TrendingUp,
-  MapPin,
-  UtensilsCrossed,
-  ChevronRight,
-  LogOut,
   ClipboardList,
+  TrendingUp,
+  UtensilsCrossed,
+  MapPin,
+  PackageCheck,
+  Landmark,
+  Users,
 } from "lucide-react";
-import { Card } from "../../components/Card";
-import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { formatKsh, timeAgo } from "../../components/shared/format";
+import { timeAgo } from "../../components/shared/format";
+import { SkeletonRegion, SkeletonStats, SkeletonChart, SkeletonList } from "../../components/ui/Skeleton";
+import {
+  Banner,
+  Panel,
+  PanelHead,
+  PageHeader,
+  StatTile,
+  StatusPill,
+  HOTEL_STATUS,
+  VERIFICATION_STATUS,
+  formatDate,
+  itemsSummary,
+  orderCode,
+  useNotice,
+  whole,
+} from "../../components/hotel/hd";
 import {
   fetchHotelDashboard,
   fetchHotelWeeklyRevenue,
   fetchHotelOrders,
+  fetchOwnMenu,
   markOrderReady,
   HotelDashboard,
-  WeeklyRevenueDay,
+  HotelMenuItem,
   HotelOrder,
+  WeeklyRevenueDay,
 } from "../../services/hotelStaffApi";
 
-function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
-  return (
-    <Card style={styles.statCard}>
-      <div style={styles.statIcon}>{icon}</div>
-      <span style={styles.statLabel}>{label}</span>
-      <span style={styles.statValue}>{value}</span>
-      {sub && <span style={styles.statSub}>{sub}</span>}
-    </Card>
-  );
+const REFRESH_MS = 30_000;
+const MAX_ROWS = 4;
+
+function daysUntil(isoDate: string): number {
+  const end = new Date(isoDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((end.getTime() - today.getTime()) / 86_400_000);
 }
 
-const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function shortAmount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(Math.round(n));
+}
 
 export default function HotelOwnerOverviewScreen() {
-  const { authFetch, logout } = useAuth();
-  const navigate = useNavigate();
+  const { authFetch } = useAuth();
+  const { notice, notify } = useNotice();
+
   const [dashboard, setDashboard] = useState<HotelDashboard | null>(null);
   const [week, setWeek] = useState<WeeklyRevenueDay[]>([]);
-  const [pendingOrders, setPendingOrders] = useState<HotelOrder[]>([]);
+  const [preparing, setPreparing] = useState<HotelOrder[]>([]);
+  const [ready, setReady] = useState<HotelOrder[]>([]);
+  const [menu, setMenu] = useState<HotelMenuItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [dash, w, orders] = await Promise.all([
-        fetchHotelDashboard(authFetch),
-        fetchHotelWeeklyRevenue(authFetch),
-        fetchHotelOrders(authFetch, "paid"),
-      ]);
-      setDashboard(dash);
-      setWeek(w);
-      setPendingOrders(orders);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load your dashboard.");
-    } finally {
-      setLoading(false);
-    }
-  }, [authFetch]);
+  // `silent` refreshes (the 30s poll) never blank the page or replace good data with an error.
+  const load = useCallback(
+    async (silent = false) => {
+      try {
+        const [dash, days, paid, rdy, items] = await Promise.all([
+          fetchHotelDashboard(authFetch),
+          fetchHotelWeeklyRevenue(authFetch),
+          fetchHotelOrders(authFetch, "paid"),
+          fetchHotelOrders(authFetch, "ready"),
+          fetchOwnMenu(authFetch).catch(() => null), // secondary: never block the dashboard on the menu
+        ]);
+        setDashboard(dash);
+        setWeek(days);
+        setPreparing(paid);
+        setReady(rdy);
+        setMenu(items);
+        setError(null);
+      } catch (err) {
+        if (!silent) setError(err instanceof Error ? err.message : "Could not load your dashboard.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [authFetch]
+  );
 
   useEffect(() => {
     load();
+    const id = window.setInterval(() => {
+      if (!document.hidden) load(true);
+    }, REFRESH_MS);
+    return () => window.clearInterval(id);
   }, [load]);
 
-  const handleMarkReady = async (orderId: string) => {
-    setActingOn(orderId);
+  const handleMarkReady = async (order: HotelOrder) => {
+    setActingOn(order.id);
     try {
-      await markOrderReady(authFetch, orderId);
-      await load();
+      await markOrderReady(authFetch, order.id);
+      notify(`${orderCode(order.id)} marked ready for pickup.`);
+      await load(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update this order.");
+      notify(err instanceof Error ? err.message : "Could not update this order.", "bad");
     } finally {
       setActingOn(null);
     }
   };
 
-  const weekTotal = useMemo(() => week.reduce((sum, d) => sum + Number(d.revenue), 0), [week]);
-  const maxDay = Math.max(1, ...week.map((d) => Number(d.revenue)));
-  const bestDayLabel = useMemo(() => {
-    if (week.length === 0) return null;
-    const best = week.reduce((a, b) => (Number(b.revenue) > Number(a.revenue) ? b : a));
-    return DAY_LABELS[new Date(best.day).getUTCDay()];
-  }, [week]);
+  const weekValues = useMemo(() => week.map((d) => Number(d.revenue)), [week]);
+  const weekTotal = weekValues.reduce((a, b) => a + b, 0);
+  const maxDay = Math.max(1, ...weekValues);
+  // The API returns the trailing 7 days oldest-first, ending today. Labelling by position avoids
+  // re-parsing a DATE the server serialises as a timezone-dependent timestamp.
+  const dayLabels = useMemo(
+    () =>
+      week.map((_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (week.length - 1 - i));
+        return d.toLocaleDateString("en-KE", { weekday: "short" });
+      }),
+    [week]
+  );
+  const bestIndex = weekTotal > 0 ? weekValues.indexOf(Math.max(...weekValues)) : -1;
+  const chartLabel = week.length
+    ? `Revenue by day this week. ${weekValues.map((v, i) => `${dayLabels[i]} ${whole(v)}`).join(", ")}.`
+    : "No revenue data";
 
   if (loading) {
     return (
-      <div style={styles.center}>
-        <Spinner size="large" color={COLORS.primary} />
+      <div className="hd-page mv-page">
+        <SkeletonRegion label="dashboard">
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <SkeletonStats count={4} />
+            <SkeletonChart h={150} />
+            <SkeletonList rows={3} thumb="none" />
+          </div>
+        </SkeletonRegion>
       </div>
     );
   }
 
-  const visiblePending = pendingOrders.slice(0, 4);
+  if (!dashboard) {
+    return (
+      <div className="hd-page">
+        <PageHeader eyebrow="Hotel dashboard" title="Overview" />
+        <Banner tone="bad" title="We couldn't load your dashboard" action={<button className="hd-btn hd-btn-dark hd-btn-sm" onClick={() => { setLoading(true); load(); }}>Try again</button>}>
+          {error ?? "Please check your connection and try again."}
+        </Banner>
+      </div>
+    );
+  }
+
+  const { hotel, stats } = dashboard;
+  const place = hotel.location || hotel.address;
+  const statusMeta = HOTEL_STATUS[hotel.status] ?? { label: hotel.status, tone: "muted" as const };
+  const verification = hotel.payment_verification_status;
+  const contractDays = hotel.contract_end_date ? daysUntil(hotel.contract_end_date) : null;
+  const visibleMeals = menu ? menu.filter((m) => m.available).length : null;
+  const hiddenMeals = menu ? menu.length - (visibleMeals ?? 0) : 0;
+  const pendingCount = Number(stats.pending_orders);
+  const waiting = preparing.slice(0, MAX_ROWS);
+  const pickup = ready.slice(0, MAX_ROWS);
 
   return (
-    <div style={styles.container}>
-      {error && <p style={styles.errorText}>{error}</p>}
-
-      <div style={styles.banner}>
-        <div style={styles.bannerTint} />
-        <div style={styles.bannerContent}>
-          <span style={styles.bannerEyebrow}>HOTEL DASHBOARD</span>
-          <h1 style={styles.bannerTitle}>{dashboard?.hotel.name || "—"}</h1>
-          <div style={styles.chipRow}>
-            {(dashboard?.hotel.location || dashboard?.hotel.address) && (
-              <span style={styles.chip}>
-                <MapPin size={12} color={COLORS.text} /> {dashboard.hotel.location || dashboard.hotel.address}
+    <div className="hd-page mv-page">
+      <PageHeader
+        eyebrow="Hotel dashboard"
+        title={hotel.name || "Your hotel"}
+        subtitle={
+          <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "6px 12px", alignItems: "center" }}>
+            <StatusPill tone={statusMeta.tone} onDark>
+              {statusMeta.label}
+            </StatusPill>
+            {place && (
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+                <MapPin size={13} aria-hidden="true" /> {place}
               </span>
             )}
-            {dashboard && (
-              <span style={styles.chip}>
-                <UtensilsCrossed size={12} color={COLORS.text} /> {dashboard.stats.menu_item_count} meals listed
+            {visibleMeals !== null && (
+              <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+                <UtensilsCrossed size={13} aria-hidden="true" /> {visibleMeals} of {menu!.length} meals visible
               </span>
             )}
-          </div>
-        </div>
+          </span>
+        }
+        actions={
+          <Link to="/hotel-owner/scanner" className="hd-btn hd-btn-primary">
+            <QrCode size={18} aria-hidden="true" /> Scan QR
+          </Link>
+        }
+      />
 
-        <div style={styles.bannerRightGroup}>
-          <button className="mv-action" onClick={() => navigate("/hotel-owner/scanner")} style={styles.scanPill}>
-            <div style={styles.scanIcon}>
-              <QrCode size={18} color="#fff" />
-            </div>
-            <div style={{ textAlign: "left" }}>
-              <span style={styles.scanTitle}>Scan QR code</span>
-              <span style={styles.scanSubtitle}>Redeem a meal</span>
-            </div>
-          </button>
-          <button onClick={() => logout()} style={styles.bannerLogoutBtn} aria-label="Log out">
-            <LogOut size={16} color="#fff" />
-          </button>
-        </div>
-      </div>
+      {error && <Banner tone="bad" title="Some information may be out of date">{error}</Banner>}
 
-      <div style={styles.statsGrid}>
-        {dashboard && (
-          <StatCard
-            icon={<DollarSign size={16} color={COLORS.primary} />}
-            label="Revenue today"
-            value={formatKsh(dashboard.stats.revenue_today)}
-            sub={`${dashboard.stats.today_orders} orders in`}
+      {verification && verification !== "verified" && (
+        <Banner
+          tone={verification === "pending" ? "warn" : "bad"}
+          title={`Settlement details: ${(VERIFICATION_STATUS[verification]?.label ?? verification).toLowerCase()}`}
+          action={
+            <Link to="/hotel-owner/profile" className="hd-btn hd-btn-dark hd-btn-sm">
+              Review
+            </Link>
+          }
+        >
+          {verification === "pending"
+            ? "MEALVEST is still verifying where your payouts are sent."
+            : "Check your payout details so settlements can reach you."}
+        </Banner>
+      )}
+
+      {contractDays !== null && contractDays <= 30 && (
+        <Banner tone={contractDays < 0 ? "bad" : "warn"} title={contractDays < 0 ? "Your contract has ended" : `Your contract ends in ${contractDays} day${contractDays === 1 ? "" : "s"}`}>
+          Contract end date: {formatDate(hotel.contract_end_date)}.
+        </Banner>
+      )}
+
+      {menu && menu.length === 0 && (
+        <Banner
+          title="Your menu is empty"
+          action={
+            <Link to="/hotel-owner/menu" className="hd-btn hd-btn-dark hd-btn-sm">
+              Add a meal
+            </Link>
+          }
+        >
+          Students can't order until you list at least one meal.
+        </Banner>
+      )}
+
+      <section className="hd-stats" aria-label="Today at a glance">
+        <StatTile icon={<Wallet size={17} color="#c93a22" />} label="Revenue today" value={whole(stats.revenue_today)} sub={`${stats.today_orders} order${Number(stats.today_orders) === 1 ? "" : "s"} today`} />
+        <StatTile
+          icon={<ShoppingBag size={17} color="#8f5600" />}
+          label="Preparing now"
+          value={String(pendingCount)}
+          sub={pendingCount > 0 ? "Waiting on you" : "All caught up"}
+        />
+        <StatTile
+          icon={<PackageCheck size={17} color="#3f7d2c" />}
+          label="Meals redeemed"
+          value={String(Number(stats.redeemed_orders))}
+          sub={stats.cancelled_orders !== undefined ? `${Number(stats.cancelled_orders)} cancelled` : undefined}
+        />
+        <StatTile
+          icon={<TrendingUp size={17} color="#c93a22" />}
+          label="Total earned"
+          value={whole(stats.net_earnings)}
+          sub={hotel.settlement_schedule ? `Settles ${hotel.settlement_schedule}` : undefined}
+        />
+      </section>
+
+      <div className="hd-grid-2">
+        <Panel aria-label="Revenue this week">
+          <PanelHead
+            icon={<TrendingUp size={18} color="#c93a22" aria-hidden="true" />}
+            title="This week"
+            subtitle={
+              <>
+                {whole(weekTotal)} earned
+                {bestIndex >= 0 ? ` · best day ${dayLabels[bestIndex]}` : ""}
+              </>
+            }
           />
-        )}
-        {dashboard && (
-          <StatCard
-            icon={<ShoppingBag size={16} color={COLORS.warning} />}
-            label="Active orders"
-            value={String(dashboard.stats.pending_orders)}
-            sub={Number(dashboard.stats.pending_orders) > 0 ? "Needs your action" : "All caught up"}
-          />
-        )}
-        {dashboard && (
-          <StatCard
-            icon={<TrendingUp size={16} color={COLORS.success} />}
-            label="Total revenue"
-            value={formatKsh(dashboard.stats.net_earnings)}
-            sub={dashboard.hotel.settlement_schedule || undefined}
-          />
-        )}
-      </div>
-
-      <div style={styles.twoCol}>
-        <Card style={styles.panelCard}>
-          <div style={styles.panelHeaderRow}>
-            <TrendingUp size={16} color={COLORS.primary} />
-            <div>
-              <span style={styles.panelTitle}>This week</span>
-              <span style={styles.panelSubtitle}>
-                {formatKsh(weekTotal)}
-                {bestDayLabel ? ` · best day ${bestDayLabel}` : ""}
-              </span>
+          {weekTotal === 0 ? (
+            <div className="hd-well" style={{ textAlign: "center", fontSize: 13, color: "#6b625c" }}>
+              No redeemed meals in the last 7 days yet. Revenue appears here as students collect their meals.
             </div>
-          </div>
+          ) : (
+            <div className="hd-chart" role="img" aria-label={chartLabel}>
+              {weekValues.map((v, i) => {
+                const today = i === weekValues.length - 1;
+                return (
+                  <div className="hd-bar-col" key={i} aria-hidden="true">
+                    <span className="hd-bar-val">{v > 0 ? shortAmount(v) : ""}</span>
+                    <div className="hd-bar-track">
+                      <div className="hd-bar-fill" data-today={today} style={{ height: `${Math.max(v > 0 ? 6 : 0, (v / maxDay) * 100)}%` }} />
+                    </div>
+                    <span className="hd-bar-day" data-today={today}>
+                      {today ? "Today" : dayLabels[i]}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
 
-          <div style={styles.chartRow}>
-            {week.map((d) => (
-              <div key={d.day} style={styles.barCol}>
-                <span style={styles.barValue}>{Number(d.revenue) >= 1000 ? `${(Number(d.revenue) / 1000).toFixed(1)}k` : Number(d.revenue)}</span>
-                <div style={styles.barTrack}>
-                  <div
-                    style={{
-                      ...styles.barFill,
-                      height: `${Math.max(4, (Number(d.revenue) / maxDay) * 100)}%`,
-                      background: Number(d.revenue) === maxDay && maxDay > 1 ? COLORS.primary : COLORS.accentSoft,
-                    }}
-                  />
+        <Panel aria-label="Orders to action">
+          <PanelHead
+            icon={<ClipboardList size={18} color="#8f5600" aria-hidden="true" />}
+            title="Orders to action"
+            subtitle={`${preparing.length} preparing · ${ready.length} ready for pickup`}
+            right={
+              <Link to="/hotel-owner/orders" className="hd-btn hd-btn-quiet hd-btn-sm">
+                All orders
+              </Link>
+            }
+          />
+          {preparing.length === 0 && ready.length === 0 ? (
+            <div className="hd-well" style={{ textAlign: "center", fontSize: 13, color: "#6b625c" }}>
+              Nothing waiting on you right now.
+            </div>
+          ) : (
+            <div className="hd-list">
+              {waiting.map((o) => (
+                <div className="hd-row" key={o.id}>
+                  <div className="hd-row-main">
+                    <span className="hd-row-title">{itemsSummary(o.items)}</span>
+                    <span className="hd-row-meta">
+                      {orderCode(o.id)}
+                      {o.student_name ? ` · ${o.student_name}` : ""} · {timeAgo(o.created_at)}
+                    </span>
+                  </div>
+                  <button className="hd-btn hd-btn-primary hd-btn-sm" disabled={actingOn === o.id} onClick={() => handleMarkReady(o)}>
+                    {actingOn === o.id ? "Saving…" : "Mark ready"}
+                  </button>
                 </div>
-                <span style={styles.barLabel}>{DAY_LABELS[new Date(d.day).getUTCDay()]}</span>
-              </div>
-            ))}
-          </div>
-
-          <div style={styles.chartFooterRow}>
-            <span style={styles.chartFooterLabel}>Your revenue this week</span>
-            <span style={styles.chartFooterValue}>{formatKsh(weekTotal)}</span>
-          </div>
-        </Card>
-
-        <Card style={styles.panelCard}>
-          <div style={styles.panelHeaderRow}>
-            <ClipboardList size={16} color={COLORS.warning} />
-            <div>
-              <span style={styles.panelTitle}>Needs attention</span>
-              <span style={styles.panelSubtitle}>{pendingOrders.length} order{pendingOrders.length === 1 ? "" : "s"} awaiting prep</span>
+              ))}
+              {preparing.length > MAX_ROWS && <p className="hd-panel-sub" style={{ padding: "10px 0 0" }}>+{preparing.length - MAX_ROWS} more preparing</p>}
+              {pickup.map((o) => (
+                <div className="hd-row" key={o.id}>
+                  <div className="hd-row-main">
+                    <span className="hd-row-title">{itemsSummary(o.items)}</span>
+                    <span className="hd-row-meta">
+                      {orderCode(o.id)}
+                      {o.student_name ? ` · ${o.student_name}` : ""} · {timeAgo(o.created_at)}
+                    </span>
+                  </div>
+                  <StatusPill tone="ready">Ready</StatusPill>
+                </div>
+              ))}
+              {ready.length > 0 && <p className="hd-panel-sub" style={{ padding: "10px 0 0" }}>Scan the student's QR code to hand over a ready meal.</p>}
             </div>
-          </div>
-
-          {pendingOrders.length === 0 && <p style={styles.emptyText}>No orders waiting on you right now.</p>}
-
-          {visiblePending.map((o) => (
-            <div key={o.id} style={styles.attentionRow}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={styles.attentionName}>{o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}</span>
-                <span style={styles.attentionMeta}>
-                  {formatKsh(o.amount)} · {timeAgo(o.created_at)}
-                </span>
-              </div>
-              <button
-                onClick={() => handleMarkReady(o.id)}
-                disabled={actingOn === o.id}
-                style={{ ...styles.attentionBtn, backgroundColor: COLORS.success }}
-              >
-                <span style={styles.attentionBtnText}>Mark Ready</span>
-              </button>
-            </div>
-          ))}
-
-          <button onClick={() => navigate("/hotel-owner/orders")} style={styles.viewAllRow}>
-            <span style={styles.viewAllText}>View all orders</span>
-            <ChevronRight size={14} color={COLORS.primary} />
-          </button>
-        </Card>
+          )}
+        </Panel>
       </div>
+
+      <nav className="hd-stats" aria-label="Shortcuts" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
+        <Link to="/hotel-owner/menu" className="hd-shortcut">
+          <UtensilsCrossed size={18} color="#c93a22" aria-hidden="true" /> Manage menu
+          {hiddenMeals > 0 && <StatusPill tone="warn">{hiddenMeals} hidden</StatusPill>}
+        </Link>
+        <Link to="/hotel-owner/earnings" className="hd-shortcut">
+          <Landmark size={18} color="#c93a22" aria-hidden="true" /> Earnings &amp; payouts
+        </Link>
+        <Link to="/hotel-owner/students" className="hd-shortcut">
+          <Users size={18} color="#c93a22" aria-hidden="true" /> Students
+        </Link>
+      </nav>
+
+      {notice}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, display: "flex", flexDirection: "column" },
-  center: { flex: 1, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
-  errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, marginBottom: 12 },
-  banner: {
-    position: "relative",
-    borderRadius: RADIUS.lg,
-    overflow: "hidden",
-    padding: 28,
-    marginBottom: 20,
-    display: "flex",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
-    minHeight: 150,
-  },
-  bannerTint: {
-    position: "absolute",
-    inset: 0,
-    background: "radial-gradient(circle at 85% 30%, rgba(255,255,255,0.18), transparent 55%)",
-  },
-  bannerContent: { position: "relative", display: "flex", flexDirection: "column", gap: 8, minWidth: 0 },
-  bannerEyebrow: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.85)", letterSpacing: 1 },
-  bannerTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 28, color: "#fff", margin: 0 },
-  chipRow: { display: "flex", flexDirection: "row", gap: 8, marginTop: 4, flexWrap: "wrap" },
-  chip: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#fff",
-    borderRadius: RADIUS.pill,
-    padding: "6px 12px",
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 600,
-    fontSize: 12,
-    color: COLORS.text,
-  },
-  bannerRightGroup: { position: "relative", display: "flex", flexDirection: "row", alignItems: "center", gap: 12 },
-  scanPill: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    borderRadius: RADIUS.md,
-    padding: "10px 18px",
-  },
-  scanIcon: { width: 32, height: 32, borderRadius: RADIUS.sm, backgroundColor: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  scanTitle: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 13, color: "#fff" },
-  scanSubtitle: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: "rgba(255,255,255,0.85)" },
-  bannerLogoutBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: RADIUS.pill,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    border: "1px solid rgba(255,255,255,0.35)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 },
-  statCard: { display: "flex", flexDirection: "column", padding: 16 },
-  statIcon: { marginBottom: 8 },
-  statLabel: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted },
-  statValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.text, marginTop: 2 },
-  statSub: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, marginTop: 4 },
-  twoCol: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, alignItems: "start" },
-  panelCard: { display: "flex", flexDirection: "column", padding: 18 },
-  panelHeaderRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 },
-  panelTitle: { display: "block", fontFamily: FONTS.displaySemibold, fontWeight: 700, fontSize: 15, color: COLORS.text },
-  panelSubtitle: { display: "block", fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
-  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textFaint, textAlign: "center", padding: "16px 0" },
-  chartRow: { display: "flex", flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 8, height: 130, marginBottom: 4 },
-  barCol: { display: "flex", flexDirection: "column", alignItems: "center", flex: 1, height: "100%", justifyContent: "flex-end", gap: 4 },
-  barValue: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 10, color: COLORS.textMuted },
-  barTrack: { width: "100%", flex: 1, display: "flex", alignItems: "flex-end", maxWidth: 28 },
-  barFill: { width: "100%", borderRadius: 6, minHeight: 4 },
-  barLabel: { fontFamily: FONTS.body, fontSize: 10, color: COLORS.textFaint, marginTop: 2 },
-  chartFooterRow: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingTop: 10,
-    marginTop: 10,
-    borderTop: `1px solid ${COLORS.borderSoft}`,
-  },
-  chartFooterLabel: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted },
-  chartFooterValue: { fontFamily: FONTS.bodySemibold, fontWeight: 700, fontSize: 13, color: COLORS.text },
-  attentionRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: "10px 0",
-    borderTop: `1px solid ${COLORS.borderSoft}`,
-  },
-  attentionName: {
-    display: "block",
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 600,
-    fontSize: 13,
-    color: COLORS.text,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  attentionMeta: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-  attentionBtn: { borderRadius: RADIUS.sm, padding: "7px 12px", flexShrink: 0 },
-  attentionBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#fff", whiteSpace: "nowrap" },
-  viewAllRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTop: `1px solid ${COLORS.borderSoft}`,
-    width: "100%",
-  },
-  viewAllText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary },
-};

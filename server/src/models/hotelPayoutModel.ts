@@ -105,9 +105,10 @@ async function inTx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
 export async function claimPendingOrdersForPayout(
   hotelId: string,
   transferReference: string,
-  initiatedByAdminId: string,
+  initiatedByAdminId: string | null,
   provider: "paystack" | "cyzora",
-  limits: PayoutLimits
+  limits: PayoutLimits,
+  minTotalKes?: number
 ): Promise<HotelPayoutRow | null> {
   return inTx(async (client) => {
     const hotel = await client.query("SELECT id FROM hotels WHERE id = $1 FOR UPDATE", [hotelId]);
@@ -128,6 +129,14 @@ export async function claimPendingOrdersForPayout(
     const totalNum = Number(total);
     if (!Number.isFinite(totalNum) || totalNum <= 0) {
       // Nothing payable (e.g. 100% commission orders) — leave orders unclaimed.
+      return null;
+    }
+    // Business threshold (automated payouts): evaluated HERE, under the
+    // hotel row lock and over the exact SQL NUMERIC total, so two
+    // concurrent evaluations can never both see "below" then both pay.
+    // Below the threshold nothing is claimed: the earnings simply stay
+    // unpaid (payout_id IS NULL) and keep accumulating.
+    if (minTotalKes !== undefined && totalNum < minTotalKes) {
       return null;
     }
 
@@ -325,10 +334,103 @@ export async function listPayoutsForHotel(hotelId: string): Promise<HotelPayoutR
   return result.rows;
 }
 
-export async function listAllPayouts(): Promise<(HotelPayoutRow & { hotel_name: string })[]> {
-  const result = await pool.query<HotelPayoutRow & { hotel_name: string }>(
-    `SELECT p.*, h.name AS hotel_name FROM hotel_payouts p JOIN hotels h ON h.id = p.hotel_id
-     ORDER BY p.created_at DESC LIMIT 100`
+export type AdminPayoutRow = HotelPayoutRow & {
+  hotel_name: string;
+  automated: boolean; // created by the automatic trigger (no initiating admin)
+  needs_attention: boolean; // unknown, stuck 'processing' past the stale window, or failed
+};
+
+export async function listAllPayouts(staleProcessingMinutes = 120): Promise<AdminPayoutRow[]> {
+  const result = await pool.query<AdminPayoutRow>(
+    `SELECT p.*, h.name AS hotel_name,
+            (p.initiated_by_admin_id IS NULL) AS automated,
+            (p.status = 'unknown'
+             OR (p.status = 'failed' AND p.updated_at > now() - interval '7 days')
+             OR (p.status = 'processing' AND COALESCE(p.submitted_at, p.created_at) < now() - make_interval(mins => $1::int))) AS needs_attention
+       FROM hotel_payouts p JOIN hotels h ON h.id = p.hotel_id
+      ORDER BY p.created_at DESC LIMIT 100`,
+    [Math.ceil(staleProcessingMinutes)]
+  );
+  return result.rows;
+}
+
+export interface UnpaidBalance {
+  total: string; // exact NUMERIC as text, 2dp
+  orderCount: number;
+}
+
+/** Redeemed-but-unclaimed earnings for a hotel — the authoritative "payable balance" (SUM of orders.hotel_amount where payout_id IS NULL). */
+export async function getUnpaidBalance(hotelId: string): Promise<UnpaidBalance> {
+  const r = await pool.query<{ total: string; n: string }>(
+    `SELECT COALESCE(SUM(hotel_amount), 0)::numeric(12,2)::text AS total, COUNT(*)::text AS n
+       FROM orders WHERE hotel_id = $1 AND redeemed = true AND payout_id IS NULL`,
+    [hotelId]
+  );
+  return { total: r.rows[0].total, orderCount: Number(r.rows[0].n) };
+}
+
+/** Hotels whose unpaid balance is already at/above the threshold — the sweep's work list. */
+export async function listHotelIdsAtOrAboveThreshold(minKes: number, limit: number): Promise<string[]> {
+  const r = await pool.query<{ hotel_id: string }>(
+    `SELECT hotel_id FROM orders WHERE redeemed = true AND payout_id IS NULL
+      GROUP BY hotel_id HAVING SUM(hotel_amount) >= $1::numeric
+      ORDER BY SUM(hotel_amount) DESC LIMIT $2`,
+    [minKes, limit]
+  );
+  return r.rows.map((x) => x.hotel_id);
+}
+
+/**
+ * Why AUTOMATIC payout is paused for this hotel (null = free to go).
+ * Uses only existing columns. Manual admin payout ignores this.
+ *  - another payout is pending/review/approved/unknown: an uncertain or
+ *    unsent payout must be resolved before another is initiated.
+ *    ('processing' does not block: its funds are already reserved by
+ *    that payout; newer earnings are distinct funds.)
+ *  - the last N payouts all failed, or the latest failed recently:
+ *    no unbounded automatic retrying.
+ */
+export async function autoPayoutBlockReason(hotelId: string, maxFailures: number, cooldownMinutes: number): Promise<string | null> {
+  const open = await pool.query<{ status: string }>(
+    "SELECT status FROM hotel_payouts WHERE hotel_id = $1 AND status IN ('pending','review','approved','unknown') LIMIT 1",
+    [hotelId]
+  );
+  if (open.rows[0]) return `payout_${open.rows[0].status}`;
+  const recent = await pool.query<{ status: string; recent: boolean }>(
+    `SELECT status, (updated_at > now() - make_interval(mins => $2::int)) AS recent
+       FROM hotel_payouts WHERE hotel_id = $1 AND status IN ('failed','successful')
+      ORDER BY created_at DESC LIMIT $3`,
+    [hotelId, Math.ceil(cooldownMinutes), Math.ceil(maxFailures)]
+  );
+  let consecutive = 0;
+  for (const row of recent.rows) {
+    if (row.status !== "failed") break;
+    consecutive++;
+  }
+  if (consecutive >= maxFailures) return "repeated_failures";
+  if (recent.rows[0]?.status === "failed" && recent.rows[0].recent) return "failure_cooldown";
+  return null;
+}
+
+/**
+ * Payouts left in 'pending' (claimed, never sent — e.g. the process died
+ * between claim and send). 'pending' means NO provider call was made
+ * (markSubmitting flips to 'unknown' BEFORE the call), so sending is
+ * safe. Leased + SKIP LOCKED like claimForReconciliation.
+ */
+export async function claimStalePending(limit: number, olderThanMinutes: number): Promise<HotelPayoutRow[]> {
+  const result = await pool.query<HotelPayoutRow>(
+    `UPDATE hotel_payouts SET reconcile_claimed_until = now() + interval '10 minutes'
+      WHERE id IN (
+        SELECT id FROM hotel_payouts
+         WHERE status = 'pending'
+           AND created_at < now() - make_interval(mins => $2::int)
+           AND (reconcile_claimed_until IS NULL OR reconcile_claimed_until < now())
+         ORDER BY created_at
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED)
+      RETURNING *`,
+    [limit, Math.ceil(olderThanMinutes)]
   );
   return result.rows;
 }

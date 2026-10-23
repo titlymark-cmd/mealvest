@@ -1,182 +1,290 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { ShoppingBag } from "lucide-react";
-import { Card } from "../../components/Card";
-import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { QrCode, ShoppingBag, SearchX, User } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { useWindowSize } from "../../hooks/useWindowSize";
-import { HOTEL_MOBILE_BREAKPOINT } from "../../components/hotel/HotelSidebar";
-import { timeAgo, formatKsh } from "../../components/shared/format";
-import { fetchHotelOrders, markOrderReady, HotelOrder } from "../../services/hotelStaffApi";
+import { timeAgo } from "../../components/shared/format";
+import { Modal } from "../../components/ui/Modal";
+import { SkeletonRegion, SkeletonList } from "../../components/ui/Skeleton";
+import {
+  Banner,
+  Chips,
+  EmptyState,
+  PageHeader,
+  Panel,
+  SearchBox,
+  StatusPill,
+  ORDER_STATUS,
+  formatDateTime,
+  itemsSummary,
+  orderCode,
+  useNotice,
+  whole,
+} from "../../components/hotel/hd";
+import { fetchHotelDashboard, fetchHotelOrders, markOrderReady, HotelOrder } from "../../services/hotelStaffApi";
 
-// "Preparing" is the friendlier label for the real 'paid' status (paid,
-// not yet marked ready) — there's no distinct backend "preparing" state,
-// this is just a cosmetic relabel of a real one, not a fabricated status.
-const TABS = [
+const REFRESH_MS = 30_000;
+const BACKEND_LIST_CAP = 100; // getOrdersForHotel returns at most the latest 100
+
+// "Preparing" is the friendlier label for the real 'paid' status; there is no separate backend state.
+const FILTERS = [
   { value: "", label: "All" },
   { value: "paid", label: "Preparing" },
   { value: "ready", label: "Ready" },
   { value: "redeemed", label: "Redeemed" },
 ];
 
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  pending_payment: { label: "pending payment", color: COLORS.textFaint },
-  paid: { label: "preparing", color: COLORS.warning },
-  ready: { label: "ready", color: COLORS.accent },
-  redeemed: { label: "redeemed", color: COLORS.success },
-  cancelled: { label: "cancelled", color: COLORS.textFaint },
-  refunded: { label: "refunded", color: COLORS.textFaint },
+const EMPTY_COPY: Record<string, { title: string; text: string }> = {
+  "": { title: "No orders yet", text: "Orders appear here as soon as students pay for a meal at your hotel." },
+  paid: { title: "Nothing to prepare", text: "New paid orders show up here so you can start on them." },
+  ready: { title: "No meals waiting for pickup", text: "Orders you mark as ready wait here until the student collects them." },
+  redeemed: { title: "No redeemed orders yet", text: "Meals appear here once a student's QR code has been scanned." },
 };
 
-function itemsSummary(items: HotelOrder["items"]): string {
-  if (!Array.isArray(items) || items.length === 0) return "No items";
-  return items.map((it) => `${it.quantity}× ${it.name}`).join(", ");
-}
+// The only states that move forward on the hotel's side: paid -> ready -> (QR scan) redeemed.
+const PROGRESS = ["Paid", "Ready", "Redeemed"];
+const PROGRESS_INDEX: Record<string, number> = { paid: 0, ready: 1, redeemed: 2 };
 
 export default function HotelOwnerOrdersScreen() {
   const { authFetch } = useAuth();
-  const { width } = useWindowSize();
-  const isMobile = width < HOTEL_MOBILE_BREAKPOINT;
+  const { notice, notify } = useNotice();
+
+  const [filter, setFilter] = useState("");
+  const [query, setQuery] = useState("");
   const [orders, setOrders] = useState<HotelOrder[]>([]);
+  const [preparingCount, setPreparingCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState("");
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<HotelOrder | null>(null);
+  const requestId = useRef(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchHotelOrders(authFetch, tab || undefined);
-      setOrders(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load orders.");
-    } finally {
-      setLoading(false);
-    }
-  }, [authFetch, tab]);
+  const load = useCallback(
+    async (silent = false) => {
+      const mine = ++requestId.current;
+      if (!silent) setLoading(true);
+      try {
+        const [list, dash] = await Promise.all([
+          fetchHotelOrders(authFetch, filter || undefined),
+          fetchHotelDashboard(authFetch).catch(() => null), // only feeds the "Preparing" badge
+        ]);
+        if (mine !== requestId.current) return; // a newer request (tab change) superseded this one
+        setOrders(list);
+        if (dash) setPreparingCount(Number(dash.stats.pending_orders));
+        setError(null);
+        setSelected((cur) => (cur ? list.find((o) => o.id === cur.id) ?? cur : cur));
+      } catch (err) {
+        if (mine !== requestId.current) return;
+        if (!silent) setError(err instanceof Error ? err.message : "Could not load orders.");
+      } finally {
+        if (mine === requestId.current) setLoading(false);
+      }
+    },
+    [authFetch, filter]
+  );
 
   useEffect(() => {
     load();
+    const id = window.setInterval(() => {
+      if (!document.hidden) load(true);
+    }, REFRESH_MS);
+    return () => window.clearInterval(id);
   }, [load]);
 
-  const handleMarkReady = async (orderId: string) => {
-    setUpdatingId(orderId);
+  const handleMarkReady = async (order: HotelOrder) => {
+    setBusyId(order.id);
     try {
-      await markOrderReady(authFetch, orderId);
-      await load();
+      await markOrderReady(authFetch, order.id);
+      notify(`${orderCode(order.id)} is ready for pickup.`);
+      setSelected(null);
+      await load(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update this order.");
+      notify(err instanceof Error ? err.message : "Could not update this order.", "bad");
     } finally {
-      setUpdatingId(null);
+      setBusyId(null);
     }
   };
 
-  return (
-    <div style={styles.container}>
-      <h1 style={styles.title}>Orders</h1>
-      <p style={styles.subtitle}>Live order status and handoff.</p>
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        orderCode(o.id).toLowerCase().includes(q) ||
+        (o.student_name ?? "").toLowerCase().includes(q) ||
+        itemsSummary(o.items).toLowerCase().includes(q)
+    );
+  }, [orders, query]);
 
-      <div style={styles.tabRow}>
-        {TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            style={{ ...styles.tab, ...(tab === t.value ? styles.tabActive : null) }}
-          >
-            <span style={{ ...styles.tabText, ...(tab === t.value ? styles.tabTextActive : null) }}>{t.label}</span>
-          </button>
-        ))}
+  const options = FILTERS.map((f) => ({
+    ...f,
+    count: f.value === "paid" && preparingCount !== null ? preparingCount : undefined,
+  }));
+
+  return (
+    <div className="hd-page mv-page">
+      <PageHeader
+        eyebrow="Counter"
+        title="Orders"
+        subtitle="Prepare paid orders, then scan the student's QR code to hand a meal over."
+        actions={
+          <Link to="/hotel-owner/scanner" className="hd-btn hd-btn-primary">
+            <QrCode size={18} aria-hidden="true" /> Scan QR
+          </Link>
+        }
+      />
+
+      <div className="hd-toolbar">
+        <Chips label="Filter orders by status" options={options} value={filter} onChange={setFilter} />
+        <SearchBox label="Search orders" placeholder="Search by student, meal or order code" value={query} onChange={setQuery} />
       </div>
 
-      {error && <p style={styles.errorText}>{error}</p>}
+      {error && (
+        <Banner tone="bad" title="Couldn't load orders" action={<button className="hd-btn hd-btn-dark hd-btn-sm" onClick={() => load()}>Try again</button>}>
+          {error}
+        </Banner>
+      )}
 
       {loading ? (
-        <div style={styles.center}>
-          <Spinner size="large" color={COLORS.primary} />
-        </div>
-      ) : orders.length === 0 ? (
-        <Card style={styles.emptyCard}>
-          <ShoppingBag size={22} color={COLORS.textFaint} />
-          <p style={styles.emptyText}>No orders here yet.</p>
-        </Card>
+        <SkeletonRegion label="orders">
+          <SkeletonList rows={4} thumb="none" />
+        </SkeletonRegion>
+      ) : visible.length === 0 ? (
+        query.trim() ? (
+          <EmptyState icon={<SearchX size={22} />} title="No matching orders">
+            Nothing in this list matches “{query.trim()}”. Try a different name, meal or order code.
+          </EmptyState>
+        ) : (
+          <EmptyState icon={<ShoppingBag size={22} />} title={EMPTY_COPY[filter].title}>
+            {EMPTY_COPY[filter].text}
+          </EmptyState>
+        )
       ) : (
-        <div style={{ ...styles.grid, gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)" }}>
-          {orders.map((o) => {
-            const meta = STATUS_META[o.status] || { label: o.status, color: COLORS.textFaint };
-            return (
-              <Card key={o.id} style={styles.orderCard}>
-                <div style={styles.orderHeader}>
-                  <p style={styles.itemsText}>{itemsSummary(o.items)}</p>
-                  <span style={{ ...styles.statusBadge, backgroundColor: meta.color }}>{meta.label}</span>
-                </div>
-
-                <div style={styles.orderFooter}>
-                  <span style={styles.amount}>{formatKsh(o.amount)}</span>
-                  <span style={styles.date}>{timeAgo(o.created_at)}</span>
-                </div>
-
-                {o.status === "paid" && (
-                  <button
-                    onClick={() => handleMarkReady(o.id)}
-                    disabled={updatingId === o.id}
-                    style={styles.readyBtn}
-                  >
-                    <span style={styles.readyBtnText}>{updatingId === o.id ? "Updating…" : "Mark as Ready"}</span>
-                  </button>
-                )}
-                {o.status === "ready" && <p style={styles.hintText}>Redeem this at the QR scanner when the student arrives.</p>}
-              </Card>
-            );
-          })}
-        </div>
+        <>
+          <ul className="hd-order-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {visible.map((o) => {
+              const meta = ORDER_STATUS[o.status] ?? { label: o.status, tone: "muted" as const };
+              return (
+                <li key={o.id}>
+                  <Panel as="article" className="hd-order" aria-label={`Order ${orderCode(o.id)}`}>
+                    <div className="hd-order-top">
+                      <div style={{ minWidth: 0 }}>
+                        <span className="hd-order-code">{orderCode(o.id)}</span>
+                        <div className="hd-row-meta" style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
+                          <User size={13} aria-hidden="true" />
+                          {o.student_name || "Student"} · {timeAgo(o.created_at)}
+                        </div>
+                      </div>
+                      <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+                    </div>
+                    <div className="hd-order-items">{itemsSummary(o.items)}</div>
+                    <div className="hd-order-foot">
+                      <span className="hd-amount">{whole(o.amount)}</span>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button className="hd-btn hd-btn-quiet hd-btn-sm" onClick={() => setSelected(o)}>
+                          Details
+                        </button>
+                        {o.status === "paid" && (
+                          <button className="hd-btn hd-btn-primary hd-btn-sm" disabled={busyId === o.id} onClick={() => handleMarkReady(o)}>
+                            {busyId === o.id ? "Saving…" : "Mark ready"}
+                          </button>
+                        )}
+                        {o.status === "ready" && (
+                          <Link to="/hotel-owner/scanner" className="hd-btn hd-btn-dark hd-btn-sm">
+                            <QrCode size={15} aria-hidden="true" /> Scan to redeem
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </Panel>
+                </li>
+              );
+            })}
+          </ul>
+          {orders.length >= BACKEND_LIST_CAP && !query && <p className="hd-muted-note">Showing the latest {BACKEND_LIST_CAP} orders.</p>}
+        </>
       )}
+
+      <Modal
+        open={!!selected}
+        title={selected ? `Order ${orderCode(selected.id)}` : "Order"}
+        onClose={() => setSelected(null)}
+        actions={
+          selected && (
+            <>
+              {selected.status === "paid" && (
+                <button className="hd-btn hd-btn-primary" disabled={busyId === selected.id} onClick={() => handleMarkReady(selected)}>
+                  {busyId === selected.id ? "Saving…" : "Mark ready for pickup"}
+                </button>
+              )}
+              {selected.status === "ready" && (
+                <Link to="/hotel-owner/scanner" className="hd-btn hd-btn-primary">
+                  <QrCode size={18} aria-hidden="true" /> Scan QR to redeem
+                </Link>
+              )}
+              <button className="hd-btn hd-btn-quiet" onClick={() => setSelected(null)}>
+                Close
+              </button>
+            </>
+          )
+        }
+      >
+        {selected && <OrderDetail order={selected} />}
+      </Modal>
+
+      {notice}
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: { flex: 1, minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, display: "flex", flexDirection: "column" },
-  center: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 60 },
-  title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 22, color: COLORS.textOnDark, margin: 0 },
-  subtitle: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 16 },
-  tabRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
-  tab: { backgroundColor: "rgba(252,244,234,0.08)", borderRadius: RADIUS.pill, padding: "8px 16px" },
-  tabActive: { background: `linear-gradient(90deg, ${GRADIENT[0]}, ${GRADIENT[1]})` },
-  tabText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.textOnDarkMuted },
-  tabTextActive: { color: "#fff" },
-  errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, marginBottom: 12 },
-  emptyCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 40 },
-  emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textFaint, margin: 0 },
-  grid: { display: "grid", gap: 14, paddingBottom: 24 },
-  orderCard: { display: "flex", flexDirection: "column", padding: 14, gap: 8, minWidth: 0 },
-  orderHeader: { display: "flex", flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
-  itemsText: {
-    flex: 1,
-    margin: 0,
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 600,
-    fontSize: 13,
-    color: COLORS.text,
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-  },
-  statusBadge: {
-    borderRadius: RADIUS.pill,
-    padding: "4px 8px",
-    fontFamily: FONTS.bodySemibold,
-    fontWeight: 600,
-    fontSize: 9,
-    color: "#fff",
-    textTransform: "capitalize",
-    flexShrink: 0,
-    whiteSpace: "nowrap",
-  },
-  orderFooter: { display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  amount: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 14, color: COLORS.text },
-  date: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint },
-  readyBtn: { backgroundColor: COLORS.bgDeep, borderRadius: RADIUS.sm, padding: "9px 12px", marginTop: 2 },
-  readyBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: "#fff", textAlign: "center", display: "block" },
-  hintText: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textFaint, margin: "2px 0 0 0", fontStyle: "italic" },
-};
+function OrderDetail({ order }: { order: HotelOrder }) {
+  const meta = ORDER_STATUS[order.status] ?? { label: order.status, tone: "muted" as const };
+  const idx = PROGRESS_INDEX[order.status];
+  const hasProgress = idx !== undefined;
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+        {order.student_name && <span style={{ fontSize: 13, fontWeight: 700, color: "#2c1610" }}>{order.student_name}</span>}
+      </div>
+
+      {hasProgress && (
+        <ol className="hd-steps" aria-label="Order progress">
+          {PROGRESS.map((label, i) => (
+            <li key={label} data-done={order.status === "redeemed" || i < idx} data-current={order.status !== "redeemed" && i === idx}>
+              {label}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <ul className="hd-detail-list" aria-label="Items">
+        {order.items.map((it, i) => (
+          <li className="hd-detail-line" key={`${it.name}-${i}`}>
+            <span>
+              {it.quantity}× {it.name}
+            </span>
+            {typeof it.unitPrice === "number" && <span>{whole(it.unitPrice * it.quantity)}</span>}
+          </li>
+        ))}
+        <li className="hd-detail-line" style={{ borderTop: "1px solid #ecdcc8", paddingTop: 10, fontWeight: 800 }}>
+          <span>Order total</span>
+          <span style={{ color: "#c93a22" }}>{whole(order.amount)}</span>
+        </li>
+      </ul>
+
+      <dl className="hd-kv" style={{ marginTop: 16 }}>
+        <div>
+          <dt>Placed</dt>
+          <dd>{formatDateTime(order.created_at)}</dd>
+        </div>
+        {order.redeemed_at && (
+          <div>
+            <dt>Redeemed</dt>
+            <dd>{formatDateTime(order.redeemed_at)}</dd>
+          </div>
+        )}
+      </dl>
+    </div>
+  );
+}

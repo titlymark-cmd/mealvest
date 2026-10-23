@@ -60,6 +60,22 @@ function notifyFinal(row: model.HotelPayoutRow | null): void {
  *     can only ever be reconciled under the SAME reference.
  */
 export async function triggerPayout(hotelId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
+  return initiatePayout(hotelId, adminUserId, effectiveThresholdKes());
+}
+
+/**
+ * Minimum accumulated balance before ANY payout (automatic or manual) is
+ * created: the business threshold, never below the active provider's own
+ * documented floor (Cyzora: KSh 30), so a mis-set env var cannot make us
+ * send amounts the provider will refuse.
+ */
+export function effectiveThresholdKes(): number {
+  const providerFloor = activePayoutProvider() === "cyzora" ? cyzoraPayouts.CYZORA_PAYOUT_MIN_CENTS / 100 : 0;
+  return Math.max(env.autoPayoutThresholdKes, providerFloor);
+}
+
+/** Shared by the manual trigger (adminUserId set) and the automatic trigger (null = system). */
+async function initiatePayout(hotelId: string, adminUserId: string | null, thresholdKes: number): Promise<model.HotelPayoutRow> {
   const provider = activePayoutProvider();
   if (!isPayoutConfigured()) {
     throw new ApiError(503, "PAYOUT_NOT_CONFIGURED", `${provider === "cyzora" ? "Cyzora" : "Paystack"} is not configured on this server yet.`);
@@ -80,14 +96,81 @@ export async function triggerPayout(hotelId: string, adminUserId: string): Promi
   if (provider === "cyzora") cyzoraPayouts.buildCyzoraDestination(hotel.payment_details as any);
 
   const reference = generatePayoutReference();
-  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider, limits());
+  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider, limits(), thresholdKes);
   if (!claimed) {
+    const bal = await model.getUnpaidBalance(hotelId);
+    if (bal.orderCount > 0 && Number(bal.total) > 0 && Number(bal.total) < thresholdKes) {
+      throw new ApiError(
+        409,
+        "BELOW_PAYOUT_THRESHOLD",
+        `This hotel's unpaid balance (KSh ${bal.total}) is below the KSh ${thresholdKes} payout threshold; it keeps accumulating.`
+      );
+    }
     throw new ApiError(404, "NOTHING_TO_PAY_OUT", "This hotel has no redeemed orders awaiting payout right now.");
   }
   if (claimed.status === "review") {
     return claimed; // held for an admin decision — nothing is sent
   }
   return submitPayout(claimed.id);
+}
+
+export type AutoPayoutOutcome =
+  | { action: "disabled" }
+  | { action: "skipped"; reason: string; balance?: string }
+  | { action: "below_threshold"; balance: string; threshold: number }
+  | { action: "none" }
+  | { action: "initiated"; payout: model.HotelPayoutRow };
+
+/**
+ * Automatic payout evaluation for ONE hotel — called (in the background)
+ * after a QR redemption commits, and by the reconciliation sweep.
+ *
+ * It never throws and never pays anything it has not first claimed:
+ * the balance (SUM of redeemed, unclaimed orders.hotel_amount), the
+ * threshold test and the order claim all happen inside
+ * model.claimPendingOrdersForPayout's single transaction under the
+ * hotel row lock, so concurrent evaluations pay each order at most
+ * once. Everything before the claim is a cheap early-exit that moves
+ * no money. The payout carries the FULL accumulated balance — all
+ * previously unpaid earnings plus the new order — never just the
+ * latest order.
+ */
+export async function evaluateAutoPayout(hotelId: string): Promise<AutoPayoutOutcome> {
+  if (!env.autoPayoutsEnabled) return { action: "disabled" };
+  try {
+    if (!isPayoutConfigured()) return { action: "skipped", reason: "not_configured" };
+    const threshold = effectiveThresholdKes();
+
+    const bal = await model.getUnpaidBalance(hotelId);
+    if (Number(bal.total) < threshold) return { action: "below_threshold", balance: bal.total, threshold };
+
+    const blocked = await model.autoPayoutBlockReason(hotelId, env.autoPayoutMaxConsecutiveFailures, env.autoPayoutFailureCooldownMinutes);
+    if (blocked) return { action: "skipped", reason: blocked, balance: bal.total };
+
+    const payout = await initiatePayout(hotelId, null, threshold);
+    return { action: "initiated", payout };
+  } catch (err) {
+    // Settlement details missing/unsupported, or a concurrent evaluation
+    // already holds an unsent payout (409). Nothing was claimed or sent.
+    const code = err instanceof ApiError ? err.code : "ERROR";
+    if (code === "NOTHING_TO_PAY_OUT" || code === "BELOW_PAYOUT_THRESHOLD") return { action: "none" };
+    if (code !== "PAYOUT_ALREADY_PENDING") {
+      console.warn("[hotelPayoutService.evaluateAutoPayout] not initiated", { hotelId, code, message: (err as Error).message });
+    }
+    return { action: "skipped", reason: code };
+  }
+}
+
+/** Bounded sweep: hotels already at/above the threshold that no trigger has paid (crashed background task, feature enabled later, cooldown elapsed). Idempotent. */
+export async function sweepAutoPayouts(limit = 10): Promise<{ examined: number; initiated: number }> {
+  const out = { examined: 0, initiated: 0 };
+  if (!env.autoPayoutsEnabled) return out;
+  for (const hotelId of await model.listHotelIdsAtOrAboveThreshold(effectiveThresholdKes(), limit)) {
+    out.examined++;
+    const r = await evaluateAutoPayout(hotelId);
+    if (r.action === "initiated") out.initiated++;
+  }
+  return out;
 }
 
 /**
@@ -216,10 +299,30 @@ export async function applyCyzoraPayoutWebhook(
     console.warn("[hotelPayoutService.applyCyzoraPayoutWebhook] No hotel_payouts row for Cyzora payout id:", cyzoraPayoutId);
     return null;
   }
-  if (payout.status !== "processing" && payout.status !== "unknown") return payout; // final already, or never sent
+  if (payout.status !== "processing" && payout.status !== "unknown") {
+    // Final already (duplicate/late event) or never sent: idempotent no-op — a final status is never reverted.
+    if ((payout.status === "successful" && eventName === "payout.failed") || (payout.status === "failed" && eventName === "payout.paid")) {
+      console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] CONFLICTING event for a finalized payout — needs manual review", {
+        event: eventName,
+        payoutId: payout.id,
+        currentStatus: payout.status,
+      });
+    }
+    return payout;
+  }
 
   const finalStatus = eventName === "payout.paid" ? "successful" : eventName === "payout.failed" ? "failed" : null;
-  if (!finalStatus) return payout;
+  if (!finalStatus) {
+    // Not a final event we recognise. This used to be silent, which
+    // would leave the payout in 'processing' indefinitely if Cyzora's
+    // real final event is named differently. Make it loud (no secrets).
+    console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] UNRECOGNISED payout event — payout left unchanged", {
+      event: eventName,
+      payoutId: payout.id,
+      currentStatus: payout.status,
+    });
+    return payout;
+  }
 
   const result = await model.transitionToFinal(payout.id, finalStatus, ["processing", "unknown"], {
     failureReason: finalStatus === "failed" ? "Cyzora reported payout.failed" : null,

@@ -348,9 +348,10 @@ async function webhook(event, { secret, signature, contentType = "application/js
   const trigBank = await api("/api/admin/payouts/trigger", { method: "POST", token: adminToken, body: { hotelId: hotelBank.id } });
   check("bank hotel -> 400 PAYOUT_METHOD_NOT_SUPPORTED, orders not claimed", trigBank.status === 400 && trigBank.data.error.code === "PAYOUT_METHOD_NOT_SUPPORTED" && (await q("SELECT count(*)::int AS n FROM orders WHERE hotel_id=$1 AND payout_id IS NOT NULL", [hotelBank.id]))[0].n === 0, JSON.stringify(trigBank.data));
   const trigTiny = await api("/api/admin/payouts/trigger", { method: "POST", token: adminToken, body: { hotelId: hotelTiny.id } });
-  const tinyRow = trigTiny.data.payout;
-  const tinyReleased = (await q("SELECT count(*)::int AS n FROM orders WHERE hotel_id=$1 AND payout_id IS NULL", [hotelTiny.id]))[0].n;
-  check("below KES 30 -> payout row failed with reason, orders released, no Cyzora call", trigTiny.status === 201 && tinyRow.status === "failed" && /KSh 30/.test(tinyRow.failure_reason || "") && tinyReleased === 1 && (await mockRequests((r) => r.method === "POST" && r.path === "/payouts")).length === 1, JSON.stringify({ st: tinyRow?.status, reason: tinyRow?.failure_reason, released: tinyReleased }));
+  const tinyClaimed = (await q("SELECT count(*)::int AS n FROM orders WHERE hotel_id=$1 AND payout_id IS NOT NULL", [hotelTiny.id]))[0].n;
+  const tinyRows = (await q("SELECT count(*)::int AS n FROM hotel_payouts WHERE hotel_id=$1", [hotelTiny.id]))[0].n;
+  // Since the KSh 40 payout threshold (AUTO_PAYOUT_THRESHOLD_KES) a below-threshold balance is refused BEFORE anything is claimed: 409, no payout row, earnings stay payable, no Cyzora call.
+  check("below KSh 40 threshold -> 409 BELOW_PAYOUT_THRESHOLD, nothing claimed, no payout row, no Cyzora call", trigTiny.status === 409 && trigTiny.data.error.code === "BELOW_PAYOUT_THRESHOLD" && tinyClaimed === 0 && tinyRows === 0 && (await mockRequests((r) => r.method === "POST" && r.path === "/payouts")).length === 1, JSON.stringify({ st: trigTiny.status, code: trigTiny.data?.error?.code, claimed: tinyClaimed, rows: tinyRows }));
 
   const refreshNoop = await api(`/api/admin/payouts/${payout1.id}/refresh`, { method: "POST", token: adminToken });
   check("refresh on a Cyzora payout -> returns row unchanged (webhook-finalized)", refreshNoop.status === 200 && refreshNoop.data.payout.status === "processing");

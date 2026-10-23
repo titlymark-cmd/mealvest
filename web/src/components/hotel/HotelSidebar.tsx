@@ -1,164 +1,109 @@
-import React from "react";
-import { NavLink } from "react-router-dom";
-import { TrendingUp, ShoppingBag, UtensilsCrossed, Users, User, LogOut } from "lucide-react";
-import { COLORS, FONTS, RADIUS } from "../../styles/theme";
+import React, { useState } from "react";
+import { NavLink, Link, useLocation } from "react-router-dom";
+import { TrendingUp, ShoppingBag, UtensilsCrossed, Users, User, LogOut, QrCode, Landmark, Ellipsis } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
+import { Modal } from "../ui/Modal";
 import { SIDEBAR_WIDTH, SIDEBAR_MOBILE_BREAKPOINT } from "../layout/sidebarConfig";
 import logo from "../../assets/mealvest-logo.png";
-
-const NAV_ITEMS = [
-  { to: "/hotel-owner/home", label: "Overview", icon: TrendingUp, end: true },
-  { to: "/hotel-owner/orders", label: "Orders", icon: ShoppingBag },
-  { to: "/hotel-owner/menu", label: "MenuBoard", icon: UtensilsCrossed },
-  { to: "/hotel-owner/students", label: "Students", icon: Users },
-  { to: "/hotel-owner/profile", label: "Profile", icon: User },
-];
+import "../../styles/hotel.css";
 
 export const HOTEL_MOBILE_BREAKPOINT = SIDEBAR_MOBILE_BREAKPOINT;
 export const HOTEL_SIDEBAR_WIDTH = SIDEBAR_WIDTH;
 
+const SCANNER = "/hotel-owner/scanner";
+
+// Desktop shows everything. On a phone the bar keeps the four daily destinations plus Scan;
+// the rest live in "More" so every target stays a comfortable size.
+const DESKTOP_ITEMS = [
+  { to: "/hotel-owner/home", label: "Overview", icon: TrendingUp },
+  { to: "/hotel-owner/orders", label: "Orders", icon: ShoppingBag },
+  { to: "/hotel-owner/menu", label: "Menu", icon: UtensilsCrossed },
+  { to: "/hotel-owner/earnings", label: "Earnings", icon: Landmark },
+  { to: "/hotel-owner/students", label: "Students", icon: Users },
+  { to: "/hotel-owner/profile", label: "Profile", icon: User },
+];
+
+const MORE_ITEMS = DESKTOP_ITEMS.filter((i) => ["Earnings", "Students", "Profile"].includes(i.label));
+
 export function HotelSidebar() {
   const { logout } = useAuth();
   const { width } = useWindowSize();
+  const { pathname } = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
   const isMobile = width < HOTEL_MOBILE_BREAKPOINT;
 
   if (isMobile) {
-    // No "Log out" tab here — 5 nav items is already the practical
-    // limit for a phone-width bar (same call made for the admin
-    // dashboard). Logout instead lives on the Overview banner.
+    const moreActive = MORE_ITEMS.some((i) => pathname.startsWith(i.to));
     return (
-      <nav style={mobileStyles.bar}>
-        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            style={({ isActive }) => ({
-              ...mobileStyles.item,
-              ...(isActive ? mobileStyles.itemActive : null),
-            })}
-          >
-            <Icon size={18} color={COLORS.textOnDark} />
-            <span style={mobileStyles.label}>{label}</span>
+      <>
+        <nav className="hd-tabbar" aria-label="Hotel navigation">
+          <NavLink to="/hotel-owner/home" className="hd-tab">
+            <TrendingUp size={18} aria-hidden="true" />
+            Home
           </NavLink>
-        ))}
-      </nav>
+          <NavLink to="/hotel-owner/orders" className="hd-tab">
+            <ShoppingBag size={18} aria-hidden="true" />
+            Orders
+          </NavLink>
+          <Link to={SCANNER} className="hd-tab hd-tab-scan" aria-label="Scan QR code">
+            <QrCode size={24} aria-hidden="true" />
+          </Link>
+          <NavLink to="/hotel-owner/menu" className="hd-tab">
+            <UtensilsCrossed size={18} aria-hidden="true" />
+            Menu
+          </NavLink>
+          <button type="button" className="hd-tab" data-active={moreActive} aria-haspopup="dialog" onClick={() => setMoreOpen(true)}>
+            <Ellipsis size={18} aria-hidden="true" />
+            More
+          </button>
+        </nav>
+
+        <Modal open={moreOpen} title="More" onClose={() => setMoreOpen(false)}>
+          <ul className="hd-more-list">
+            {MORE_ITEMS.map(({ to, label, icon: Icon }) => (
+              <li key={to}>
+                <NavLink to={to} onClick={() => setMoreOpen(false)}>
+                  <Icon size={20} aria-hidden="true" /> {label}
+                </NavLink>
+              </li>
+            ))}
+            <li>
+              <button type="button" className="hd-more-out" onClick={() => logout()}>
+                <LogOut size={20} aria-hidden="true" /> Log out
+              </button>
+            </li>
+          </ul>
+        </Modal>
+      </>
     );
   }
 
   return (
-    <div style={styles.sidebar}>
-      <div style={styles.brandRow}>
-        <img src={logo} alt="" style={styles.logo} />
-        <span style={styles.brandText}>MEALVEST</span>
+    <aside className="hd-side" style={{ width: HOTEL_SIDEBAR_WIDTH }}>
+      <div className="hd-side-brand">
+        <img src={logo} alt="" />
+        <b>MEALVEST</b>
       </div>
-      <span style={styles.tagline}>Hotel dashboard</span>
+      <span className="hd-side-tag">Hotel dashboard</span>
+      <Link to={SCANNER} className="hd-btn hd-btn-primary hd-side-scan">
+        <QrCode size={18} aria-hidden="true" /> Scan QR
+      </Link>
 
-      <nav style={styles.nav}>
-        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            style={({ isActive }) => ({
-              ...styles.navItem,
-              ...(isActive ? styles.navItemActive : null),
-            })}
-          >
-            <Icon size={17} color={COLORS.textOnDark} />
-            <span style={styles.navLabel}>{label}</span>
+      <nav className="hd-nav" aria-label="Hotel navigation">
+        {DESKTOP_ITEMS.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to}>
+            <Icon size={17} aria-hidden="true" />
+            {label}
           </NavLink>
         ))}
       </nav>
 
-      <button onClick={() => logout()} style={styles.logoutRow}>
-        <LogOut size={16} color={COLORS.danger} />
-        <span style={styles.logoutText}>Log out</span>
-      </button>
-    </div>
+      <nav className="hd-nav" style={{ flex: "none" }} aria-label="Account">
+        <button type="button" className="hd-side-out" onClick={() => logout()}>
+          <LogOut size={16} aria-hidden="true" /> Log out
+        </button>
+      </nav>
+    </aside>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  sidebar: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    width: HOTEL_SIDEBAR_WIDTH,
-    height: "100vh",
-    zIndex: 40,
-    backgroundColor: COLORS.bgDeep,
-    borderRight: "1px solid var(--mv-hairline)",
-    boxShadow: "8px 0 24px rgba(0,0,0,0.35)",
-    display: "flex",
-    flexDirection: "column",
-    padding: 20,
-  },
-  brandRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10 },
-  logo: { width: 36, height: 36, borderRadius: RADIUS.sm, objectFit: "cover" },
-  brandText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.textOnDark, letterSpacing: 0.5 },
-  tagline: {
-    display: "block",
-    fontFamily: FONTS.body,
-    fontSize: 12,
-    color: COLORS.textOnDarkMuted,
-    marginTop: 8,
-    marginBottom: 20,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  nav: { display: "flex", flexDirection: "column", gap: 4, flex: 1 },
-  navItem: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: "10px 12px",
-    borderRadius: RADIUS.sm,
-    textDecoration: "none",
-  },
-  navItemActive: {
-    backgroundColor: "var(--mv-espresso)",
-    boxShadow: "var(--neu-dark-pressed)",
-  },
-  navLabel: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.textOnDark },
-  logoutRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, padding: "10px 12px", marginTop: "auto" },
-  logoutText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger },
-};
-
-const mobileStyles: Record<string, React.CSSProperties> = {
-  bar: {
-    position: "fixed",
-    left: 14,
-    right: 14,
-    bottom: "calc(14px + var(--safe-bottom))",
-    zIndex: 50,
-    backgroundColor: "var(--mv-surface-dark)",
-    border: "1px solid var(--mv-hairline)",
-    borderRadius: 999,
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-evenly",
-    padding: "8px 6px",
-    boxShadow: "var(--neu-dark-raised)",
-    overflowX: "auto",
-  },
-  item: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 3,
-    padding: "6px 10px",
-    borderRadius: 12,
-    textDecoration: "none",
-    flexShrink: 0,
-  },
-  itemActive: {
-    backgroundColor: "var(--mv-espresso)",
-    boxShadow: "var(--neu-dark-pressed)",
-  },
-  label: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 10, color: COLORS.textOnDark },
-};
