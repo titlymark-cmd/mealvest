@@ -25,6 +25,13 @@ export function Modal({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
+  // Callers usually pass an inline `() => ...` for onClose, which is a new
+  // function on every render. Keeping it in a ref lets the effect below run
+  // only when the dialog opens or closes. Depending on onClose directly made
+  // the effect re-run on every keystroke in a form inside the dialog, which
+  // re-focused the first control and pulled the cursor out of the field.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -34,7 +41,7 @@ export function Modal({
       Array.from(panel?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, [tabindex]:not([tabindex="-1"])') ?? []);
     (focusables()[0] ?? panel)?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
       if (e.key === "Tab") {
         const f = focusables();
         if (!f.length) return;
@@ -54,11 +61,11 @@ export function Modal({
       document.removeEventListener("keydown", onKey);
       (opener.current as HTMLElement | null)?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return createPortal(
-    <div className="mv-modal-backdrop" style={styles.backdrop} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="mv-modal-backdrop" style={styles.backdrop} onMouseDown={(e) => e.target === e.currentTarget && onCloseRef.current()}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="mv-modal-panel" style={styles.panel}>
         {icon && <div style={styles.icon}>{icon}</div>}
         <h2 style={styles.title}>{title}</h2>
