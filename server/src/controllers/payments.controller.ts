@@ -37,7 +37,7 @@ export function activePaymentProvider(): "paystack" | "cyzora" {
   return env.paymentProviderDefault === "cyzora" ? "cyzora" : "paystack";
 }
 
-const MIN_AMOUNT = 50;
+const MIN_AMOUNT = 500;
 const MAX_AMOUNT = 50000;
 
 // Meal Boost is a small top-up to an already-active plan, not a new
@@ -536,7 +536,9 @@ export async function cyzoraWebhook(req: Request, res: Response) {
 
   try {
     if (eventName.startsWith("payout.")) {
-      const payoutId = resource?.id;
+      // Cyzora's payout.paid / payout.failed body is flat and names the payout
+      // `payout_id` (docs.cyzora.co.ke, Webhooks); older shapes used `id`.
+      const payoutId = resource?.id ?? resource?.payout_id ?? event?.payout_id;
       if (!payoutId) return webhookResponse(res, 400, { error: "payout event had no id" });
       const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId));
       if (!applied) return webhookResponse(res, 404, { error: "no matching payout yet" });
