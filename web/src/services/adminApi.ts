@@ -163,6 +163,27 @@ export async function fetchHotelDetail(authFetch: AuthFetch, hotelId: string): P
   return parseOrError(res, "Could not load this hotel's details.");
 }
 
+export interface PaymentVerification {
+  id: string;
+  name: string;
+  payment_method: string | null;
+  payment_details: Record<string, unknown> | null;
+  payment_verification_status: "pending" | "verified" | "rejected" | "requires_correction";
+  payment_verified_at: string | null;
+}
+
+export async function fetchPaymentVerification(authFetch: AuthFetch, hotelId: string): Promise<PaymentVerification> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}/payment-verification`);
+  const data = await parseOrError<{ verification: PaymentVerification }>(res, "Could not load payout verification.");
+  return data.verification;
+}
+
+export async function verifyHotelPaymentDetails(authFetch: AuthFetch, hotelId: string): Promise<PaymentVerification> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}/payment-verification/verify`, { method: "PATCH" });
+  const data = await parseOrError<{ verification: PaymentVerification }>(res, "Could not verify the payout details.");
+  return data.verification;
+}
+
 export interface StudentDetail {
   student: {
     id: string;

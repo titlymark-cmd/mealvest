@@ -38,6 +38,7 @@ import {
   approvePayout,
   cancelPayout,
 } from "../controllers/hotelPayouts.controller";
+import { getPaymentVerification, verifyPaymentDetails } from "../controllers/hotelVerification.controller";
 import { adminNotificationRateLimiter, financialActionRateLimiter } from "../middleware/rateLimit";
 
 export const adminRouter = Router();
@@ -58,6 +59,8 @@ adminRouter.delete("/hotels/:hotelId", deleteHotel);
 adminRouter.patch("/hotels/:hotelId/suspend", suspendHotel);
 adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
+adminRouter.get("/hotels/:hotelId/payment-verification", getPaymentVerification);
+adminRouter.patch("/hotels/:hotelId/payment-verification/verify", financialActionRateLimiter, verifyPaymentDetails);
 adminRouter.get("/orders", listAllOrders);
 adminRouter.get("/withdrawals", listWithdrawals);
 adminRouter.patch("/withdrawals/:withdrawalId", financialActionRateLimiter, updateWithdrawalStatus);

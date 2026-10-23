@@ -1,10 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { X, Trash2, AlertTriangle } from "lucide-react";
+import { X, Trash2, AlertTriangle, ShieldCheck } from "lucide-react";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { Spinner } from "../Spinner";
 import { formatKsh } from "./adminFormat";
-import { fetchHotelDetail, deleteHotel, HotelDetail } from "../../services/adminApi";
+import {
+  fetchHotelDetail,
+  deleteHotel,
+  HotelDetail,
+  fetchPaymentVerification,
+  verifyHotelPaymentDetails,
+  PaymentVerification,
+} from "../../services/adminApi";
 
 function fmtDate(v: string | null): string {
   if (!v) return "—";
@@ -17,6 +24,13 @@ const STATUS_LABEL: Record<string, string> = {
   pending_verification: "Pending review",
   suspended: "Suspended",
   expired: "Expired",
+};
+
+const VERIFICATION_LABEL: Record<string, string> = {
+  pending: "Pending verification",
+  verified: "Verified",
+  rejected: "Rejected",
+  requires_correction: "Needs correction",
 };
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -42,6 +56,8 @@ export function HotelDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [verification, setVerification] = useState<PaymentVerification | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -52,6 +68,30 @@ export function HotelDetailModal({
       active = false;
     };
   }, [authFetch, hotelId]);
+
+  useEffect(() => {
+    let active = true;
+    fetchPaymentVerification(authFetch, hotelId)
+      .then((v) => active && setVerification(v))
+      .catch(() => {
+        /* the rest of the profile still works without this section */
+      });
+    return () => {
+      active = false;
+    };
+  }, [authFetch, hotelId]);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setError(null);
+    try {
+      setVerification(await verifyHotelPaymentDetails(authFetch, hotelId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not verify the payout details.");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleRemove = async () => {
     setRemoving(true);
@@ -116,6 +156,34 @@ export function HotelDetailModal({
               <Row label="Loyalty incentive" value={`${h.loyalty_incentive_percent}%`} />
               <Row label="Contract" value={`${fmtDate(h.contract_start_date)} → ${fmtDate(h.contract_end_date)}`} />
               <Row label="Terms accepted" value={h.terms_accepted ? fmtDate(h.terms_accepted_at) : "No"} />
+
+              {verification && (
+                <>
+                  <span style={{ ...styles.sectionLabel, marginTop: 18 }}>Payout verification</span>
+                  <Row
+                    label="Status"
+                    value={VERIFICATION_LABEL[verification.payment_verification_status] || verification.payment_verification_status}
+                  />
+                  {verification.payment_details &&
+                    Object.entries(verification.payment_details)
+                      .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
+                      .map(([k, v]) => (
+                        <Row
+                          key={k}
+                          label={k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").toLowerCase()}
+                          value={String(v)}
+                        />
+                      ))}
+                  {verification.payment_verification_status === "verified" ? (
+                    <Row label="Verified on" value={fmtDate(verification.payment_verified_at)} />
+                  ) : (
+                    <button style={styles.verifyBtn} onClick={handleVerify} disabled={verifying}>
+                      <ShieldCheck size={14} color="#fff" />
+                      <span style={styles.removeText}>{verifying ? "Verifying…" : "Verify payout details"}</span>
+                    </button>
+                  )}
+                </>
+              )}
 
               <span style={{ ...styles.sectionLabel, marginTop: 18 }}>Activity</span>
               <Row label="Total orders" value={data.stats.total_orders} />
@@ -254,6 +322,20 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: COLORS.danger,
     borderRadius: RADIUS.sm,
     padding: "11px 12px",
+    border: "none",
+    cursor: "pointer",
+  },
+  verifyBtn: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    width: "100%",
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.sm,
+    padding: "11px 12px",
+    marginTop: 10,
     border: "none",
     cursor: "pointer",
   },
