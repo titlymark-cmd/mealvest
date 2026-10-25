@@ -6,6 +6,7 @@ import * as transferService from "./paystackTransferService";
 import * as cyzoraPayouts from "./cyzoraPayoutService";
 import * as notificationEvents from "./notificationEvents";
 import { classifyProviderSendError } from "./payoutOutcome";
+import type { PayoutMode } from "../lib/hotelCommission";
 
 export type PayoutProviderName = "paystack" | "cyzora";
 
@@ -75,7 +76,12 @@ export function effectiveThresholdKes(): number {
 }
 
 /** Shared by the manual trigger (adminUserId set) and the automatic trigger (null = system). */
-async function initiatePayout(hotelId: string, adminUserId: string | null, thresholdKes: number): Promise<model.HotelPayoutRow> {
+async function initiatePayout(
+  hotelId: string,
+  adminUserId: string | null,
+  thresholdKes: number,
+  requiredMode?: PayoutMode
+): Promise<model.HotelPayoutRow> {
   const provider = activePayoutProvider();
   if (!isPayoutConfigured()) {
     throw new ApiError(503, "PAYOUT_NOT_CONFIGURED", `${provider === "cyzora" ? "Cyzora" : "Paystack"} is not configured on this server yet.`);
@@ -96,7 +102,7 @@ async function initiatePayout(hotelId: string, adminUserId: string | null, thres
   if (provider === "cyzora") cyzoraPayouts.buildCyzoraDestination(hotel.payment_details as any);
 
   const reference = generatePayoutReference();
-  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider, limits(), thresholdKes);
+  const claimed = await model.claimPendingOrdersForPayout(hotelId, reference, adminUserId, provider, limits(), thresholdKes, requiredMode);
   if (!claimed) {
     const bal = await model.getUnpaidBalance(hotelId);
     if (bal.orderCount > 0 && Number(bal.total) > 0 && Number(bal.total) < thresholdKes) {
@@ -137,6 +143,37 @@ export type AutoPayoutOutcome =
  */
 export async function evaluateAutoPayout(hotelId: string): Promise<AutoPayoutOutcome> {
   if (!env.autoPayoutsEnabled) return { action: "disabled" };
+  // Instant (order-triggered) evaluation only ever applies to INSTANT
+  // hotels. A daily hotel accumulates until its scheduled run, even when
+  // its balance is already >= the threshold. The mode is read from the
+  // database here AND re-checked under the hotel row lock at claim time.
+  return evaluateForMode(hotelId, "instant");
+}
+
+/**
+ * Scheduled evaluation for ONE DAILY hotel — called by dailyPayoutService
+ * at the hotel's configured time. Same balance/threshold/claim/send path
+ * as the instant trigger (so reservations, idempotency, failure caps and
+ * reconciliation are shared), but only for hotels in daily mode.
+ */
+export async function evaluateScheduledPayout(hotelId: string): Promise<AutoPayoutOutcome> {
+  if (!env.autoPayoutsEnabled) return { action: "disabled" };
+  return evaluateForMode(hotelId, "daily");
+}
+
+async function evaluateForMode(hotelId: string, mode: PayoutMode): Promise<AutoPayoutOutcome> {
+  try {
+    const actual = await model.getHotelPayoutMode(hotelId);
+    if (actual === null) return { action: "skipped", reason: "hotel_not_found" };
+    if (actual !== mode) return { action: "skipped", reason: mode === "instant" ? "daily_mode" : "not_daily_mode" };
+  } catch (err) {
+    console.warn("[hotelPayoutService.evaluateForMode] could not read payout mode", { hotelId, message: (err as Error).message });
+    return { action: "skipped", reason: "ERROR" };
+  }
+  return evaluateBalanceAndInitiate(hotelId, mode);
+}
+
+async function evaluateBalanceAndInitiate(hotelId: string, mode: PayoutMode): Promise<AutoPayoutOutcome> {
   try {
     if (!isPayoutConfigured()) return { action: "skipped", reason: "not_configured" };
     const threshold = effectiveThresholdKes();
@@ -147,7 +184,7 @@ export async function evaluateAutoPayout(hotelId: string): Promise<AutoPayoutOut
     const blocked = await model.autoPayoutBlockReason(hotelId, env.autoPayoutMaxConsecutiveFailures, env.autoPayoutFailureCooldownMinutes);
     if (blocked) return { action: "skipped", reason: blocked, balance: bal.total };
 
-    const payout = await initiatePayout(hotelId, null, threshold);
+    const payout = await initiatePayout(hotelId, null, threshold, mode);
     return { action: "initiated", payout };
   } catch (err) {
     // Settlement details missing/unsupported, or a concurrent evaluation
@@ -161,7 +198,7 @@ export async function evaluateAutoPayout(hotelId: string): Promise<AutoPayoutOut
   }
 }
 
-/** Bounded sweep: hotels already at/above the threshold that no trigger has paid (crashed background task, feature enabled later, cooldown elapsed). Idempotent. */
+/** Bounded sweep for INSTANT hotels (daily hotels are never swept — they are paid only by their scheduled run): hotels already at/above the threshold that no trigger has paid (crashed background task, feature enabled later, cooldown elapsed). Idempotent. */
 export async function sweepAutoPayouts(limit = 10): Promise<{ examined: number; initiated: number }> {
   const out = { examined: 0, initiated: 0 };
   if (!env.autoPayoutsEnabled) return out;

@@ -10,6 +10,8 @@ import { imageUrlSchema } from "../schemas/hotelLocationSchema";
 import { toHotelOrderView } from "../lib/hotelOrderView";
 import { env } from "../config/env";
 import { getUnpaidBalance, autoPayoutBlockReason } from "../models/hotelPayoutModel";
+import { effectiveCommissionSql } from "../lib/hotelCommission";
+import { zone as businessTimezone } from "../lib/businessTime";
 
 /** Upper bound for a single menu item (M9) — far above any real meal, well inside NUMERIC(10,2). */
 const MAX_MENU_PRICE = 10_000;
@@ -98,7 +100,9 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
         // excluded: kra_pin, business_registration_number, contact_id_number,
         // commission, paystack_recipient_code, application/review internals.
         `SELECT id, name, status, location, address, settlement_schedule, contract_start_date, contract_end_date,
-                ${isAdminView ? "commission_percent," : ""} registration_fee, payment_method, payment_details,
+                ${isAdminView ? `${effectiveCommissionSql("hotels")}::numeric(5,2) AS commission_percent, (commission_override_percent IS NOT NULL) AS commission_is_override,` : ""}
+                payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time,
+                registration_fee, payment_method, payment_details,
                 payment_verification_status,
                 image_url, description, latitude, longitude, helpline, opening_hours, closing_hours, days_open, services,
                 business_type, county, town, landmark, contact_phone, contact_email, whatsapp_number
@@ -228,7 +232,7 @@ export async function listHotelStudents(req: AuthedRequest, res: Response, next:
 export async function getHotelPayouts(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const hotelId = await resolveHotelId(req);
-    const [unpaid, blockReason, totals, history] = await Promise.all([
+    const [unpaid, blockReason, totals, history, modeRow] = await Promise.all([
       // The same authoritative "payable balance" the payout engine itself uses.
       getUnpaidBalance(hotelId),
       env.autoPayoutsEnabled
@@ -246,6 +250,9 @@ export async function getHotelPayouts(req: AuthedRequest, res: Response, next: N
          FROM hotel_payouts WHERE hotel_id = $1 ORDER BY created_at DESC LIMIT 50`,
         [hotelId]
       ),
+      // The hotel's own payout schedule (mode + time). Never the commission:
+      // like the dashboard, nothing here lets a hotel back out MEALVEST's rate.
+      pool.query("SELECT payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time FROM hotels WHERE id = $1", [hotelId]),
     ]);
     // The engine's internal block reasons are collapsed to three hotel-safe categories.
     const autoHold =
@@ -264,6 +271,9 @@ export async function getHotelPayouts(req: AuthedRequest, res: Response, next: N
         auto_enabled: env.autoPayoutsEnabled,
         threshold: String(env.autoPayoutThresholdKes),
         auto_hold: autoHold,
+        payout_mode: modeRow.rows[0]?.payout_mode ?? "instant",
+        payout_time: modeRow.rows[0]?.payout_time ?? null,
+        payout_timezone: businessTimezone(),
       },
       payouts: history.rows,
     });

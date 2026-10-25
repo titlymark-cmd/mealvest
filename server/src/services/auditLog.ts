@@ -33,6 +33,8 @@ const METADATA_ALLOWLIST = new Set([
   "note",
   "payoutReference",
   "commissionPercent",
+  "mode",
+  "payoutTime",
   "loyaltyIncentivePercent",
   "title",
   "audience",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { settlementMethodSchema } from "./settlementMethodSchema";
+import { payoutConfigSchema } from "./payoutModeSchema";
 
 // Simple, non-aggressive password rule per the spec: length only.
 // Max length (M5/L6): bcrypt only uses the first 72 BYTES of its input
@@ -86,6 +87,14 @@ export const registerHotelSchema = z.object({
   // method (M-Pesa Till) for MVP1, but the schema still accepts any
   // of the 5 — nothing here was trimmed from the backend's side.
   settlement: settlementMethodSchema,
+
+  // Payout mode (instant | daily + daily payout time). Optional so older
+  // clients keep working: omitted = instant, the pre-existing behaviour.
+  // There is deliberately NO commission field here — the backend derives
+  // the rate from the mode (src/lib/hotelCommission.ts); a registrant can
+  // never choose it. (.strict() inside payoutConfigSchema rejects any
+  // extra key such as commissionPercent.)
+  payout: payoutConfigSchema.optional(),
 
   // Commercial plan — optional. Omitting it assigns the lowest-fee
   // active plan automatically (see authService.registerHotel), so a

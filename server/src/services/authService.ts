@@ -196,6 +196,7 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
          owner_contact_name, contact_position, contact_id_number, preferred_contact_method,
          payment_method, payment_details,
          commercial_plan_id, registration_fee, commission_percent, settlement_schedule,
+         payout_mode, payout_time,
          application_status, application_submitted_at, payment_verification_status
        )
        VALUES (
@@ -206,6 +207,7 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
          $19, $20, $21, $22,
          $23, $24,
          $25, $26, $27, $28,
+         $29, $30,
          'submitted', now(), 'pending'
        )
        RETURNING *`,
@@ -238,6 +240,8 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
         plan.onboarding_fee,
         plan.commission_percent,
         plan.settlement_schedule,
+        input.payout?.mode ?? "instant",
+        input.payout?.mode === "daily" ? input.payout.payoutTime : null,
       ]
     );
     const hotel = hotelResult.rows[0];

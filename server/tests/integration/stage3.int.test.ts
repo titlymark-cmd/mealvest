@@ -64,8 +64,8 @@ async function makeUser(role: "student" | "mealvest_admin" | "hotel_owner" = "st
 async function makeHotel() {
   seq++;
   const [h] = await q(
-    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent)
-     VALUES ($1, 'active', 'send_money', $2, 10) RETURNING id`,
+    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent, commission_override_percent)
+     VALUES ($1, 'active', 'send_money', $2, 10, 10) RETURNING id`,
     [`S3 Hotel ${seq}`, JSON.stringify({ method: "send_money", phoneNumber: "0700000001", accountHolderName: "Owner" })]
   );
   return h.id as string;

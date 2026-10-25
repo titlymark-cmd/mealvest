@@ -5,6 +5,7 @@ import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
 import * as notificationEvents from "./notificationEvents";
 import * as hotelPayoutService from "./hotelPayoutService";
 import { runInBackground } from "../lib/background";
+import { effectiveCommissionSql, splitOrderAmount } from "../lib/hotelCommission";
 
 export interface CartLine {
   itemId: string;
@@ -212,7 +213,8 @@ export async function payOrderFromBudget(orderId: string, userId: string) {
  *   - payment status check (must be 'paid')
  *   - double-redemption check (must not already be 'redeemed')
  *   - commission calculation, frozen onto the order at this exact
- *     moment using the hotel's CURRENT commission_percent
+ *     moment using the hotel's CURRENT effective commission (admin
+ *     override, else the payout-mode default; lib/hotelCommission.ts)
  *   - the state flip, via SELECT...FOR UPDATE so two hotel devices
  *     scanning the same QR in true parallel can't both win.
  */
@@ -233,7 +235,12 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
       throw new ApiError(403, "FORBIDDEN", "This meal belongs to a different hotel.");
     }
 
-    const hotelResult = await client.query("SELECT status, commission_percent FROM hotels WHERE id = $1", [hotelId]);
+    // The effective rate comes from the single authoritative derivation
+    // (override, else the payout-mode default) — see lib/hotelCommission.ts.
+    const hotelResult = await client.query(
+      `SELECT status, ${effectiveCommissionSql("hotels")} AS commission_percent FROM hotels WHERE id = $1`,
+      [hotelId]
+    );
     const hotel = hotelResult.rows[0];
     if (!hotel || hotel.status !== "active") {
       throw new ApiError(403, "HOTEL_SUSPENDED", "This hotel account is not currently active.");
@@ -249,8 +256,7 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
 
     const commissionPercent = Number(hotel.commission_percent);
     const amount = Number(order.amount);
-    const commissionAmount = Math.round(amount * (commissionPercent / 100) * 100) / 100;
-    const hotelAmount = Math.round((amount - commissionAmount) * 100) / 100;
+    const { commissionAmount, hotelAmount } = splitOrderAmount(amount, commissionPercent);
 
     const updated = await client.query(
       `UPDATE orders SET status = 'redeemed', redeemed = TRUE, redeemed_at = now(),

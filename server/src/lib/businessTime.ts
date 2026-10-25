@@ -22,7 +22,7 @@ export function isValidTimeZone(tz: string): boolean {
   }
 }
 
-function zone(): string {
+export function zone(): string {
   const tz = process.env.BUSINESS_TIMEZONE || DEFAULT_BUSINESS_TIMEZONE;
   return isValidTimeZone(tz) ? tz : DEFAULT_BUSINESS_TIMEZONE;
 }
@@ -63,4 +63,12 @@ export function daysBetweenDates(a: string, b: string): number {
 export function addDays(date: string, n: number): string {
   const t = Date.parse(`${date}T00:00:00Z`) + n * 24 * 60 * 60 * 1000;
   return new Date(t).toISOString().slice(0, 10);
+}
+
+/** The wall-clock time ("HH:MM", 24h) of instant `at` in the business timezone. */
+export function businessTimeOfDay(at: Date = new Date(), timeZone: string = zone()): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
+  const hh = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const mm = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${hh === "24" ? "00" : hh}:${mm}`;
 }

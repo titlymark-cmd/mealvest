@@ -117,20 +117,20 @@ async function webhook(event, { secret, signature, contentType = "application/js
   const userA = regA.data.user.id;
 
   const hotelSend = (await q(
-    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent)
-     VALUES ('E2E Send Money Hotel', 'active', 'send_money', '{"method":"send_money","phoneNumber":"0700000001","accountHolderName":"Owner"}', 10) RETURNING id`
+    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent, commission_override_percent)
+     VALUES ('E2E Send Money Hotel', 'active', 'send_money', '{"method":"send_money","phoneNumber":"0700000001","accountHolderName":"Owner"}', 10, 10) RETURNING id`
   ))[0];
   const hotelBank = (await q(
-    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent)
-     VALUES ('E2E Bank Hotel', 'active', 'bank', '{"method":"bank","bankName":"KCB","accountName":"X","accountNumber":"1"}', 10) RETURNING id`
+    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent, commission_override_percent)
+     VALUES ('E2E Bank Hotel', 'active', 'bank', '{"method":"bank","bankName":"KCB","accountName":"X","accountNumber":"1"}', 10, 10) RETURNING id`
   ))[0];
   const hotelTiny = (await q(
-    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent)
-     VALUES ('E2E Tiny Hotel', 'active', 'mpesa_till', '{"method":"mpesa_till","tillNumber":"123456","tillName":"Tiny","registeredPhoneNumber":"0700000001"}', 10) RETURNING id`
+    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent, commission_override_percent)
+     VALUES ('E2E Tiny Hotel', 'active', 'mpesa_till', '{"method":"mpesa_till","tillNumber":"123456","tillName":"Tiny","registeredPhoneNumber":"0700000001"}', 10, 10) RETURNING id`
   ))[0];
   const hotelFail = (await q(
-    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent)
-     VALUES ('E2E Paybill Hotel', 'active', 'paybill', '{"method":"paybill","paybillNumber":"400200","accountNumber":"ACC-1","paybillBusinessName":"PB","registeredPhoneNumber":"0700000001"}', 10) RETURNING id`
+    `INSERT INTO hotels (name, status, payment_method, payment_details, commission_percent, commission_override_percent)
+     VALUES ('E2E Paybill Hotel', 'active', 'paybill', '{"method":"paybill","paybillNumber":"400200","accountNumber":"ACC-1","paybillBusinessName":"PB","registeredPhoneNumber":"0700000001"}', 10, 10) RETURNING id`
   ))[0];
   const seedOrder = (hotelId, amount, hotelAmount) =>
     q(

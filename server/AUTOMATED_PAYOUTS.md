@@ -33,3 +33,28 @@ No migration required. Everything reuses migration 038/046/049 columns and const
 - Cyzora's official docs could not be retrieved in this environment. The event names `payout.paid`/`payout.failed`, the `status` vocabulary, the payload shape, and "Idempotency-Key replay returns the original payout" come from the existing integration, which its own README says was built from an integration brief and not fully confirmed. Nothing was invented or changed there.
 - No documented per-payout read endpoint is used. A `processing` Cyzora payout is finalised ONLY by a signed webhook. If a webhook is missed, the payout stays `processing`; it is now flagged `needs_attention` after `PAYOUT_STALE_PROCESSING_MINUTES` and unrecognised payout events are logged at error level, but it is not auto-resolved.
 - The dashboard frontend was not supplied; no frontend change was made.
+
+---
+
+# Payout modes: Instant and Daily (migration 051)
+
+Every hotel has a persistent `payout_mode` (`instant` | `daily`) and, for daily, a `payout_time` (wall clock, `HH:MM`, interpreted in `BUSINESS_TIMEZONE`, default `Africa/Nairobi`, UTC+3 with no DST). The backend is authoritative; the mode is re-checked under the hotel row lock at the moment funds are reserved.
+
+| | Instant | Daily |
+|---|---|---|
+| Trigger | after each QR redemption (unchanged) + the reconcile sweep | the scheduled run at the hotel's time only |
+| Threshold | KSh 40, full unpaid balance | KSh 40, full unpaid balance, evaluated once per day |
+| Below threshold | accumulates | accumulates and carries to the next scheduled evaluation; the hotel stays Daily |
+| Default commission | 15% | 10% |
+
+Commission: `commission_override_percent` (NULL = none). Effective rate = override, else the default for the mode (`src/lib/hotelCommission.ts`, the only place the defaults live). Applied once at redemption and frozen on the order; changing a rate or mode never touches past orders. Overrides are 0-30% (DB CHECK + API validation), settable only by admins (`PATCH /api/admin/hotels/:id/commission`; `null` clears). Mode/time changes are admin-only (`PATCH /api/admin/hotels/:id/payout-settings`) and never change an override. The legacy `hotels.commission_percent` column is no longer read.
+
+Existing hotels: migration sets `payout_mode='instant'` and copies each hotel's current `commission_percent` into `commission_override_percent`, so nobody's rate changes silently. To move a hotel to the new 15% default, clear its override from the admin screen (blank commission).
+
+## Daily scheduler (REQUIRED external trigger)
+
+`GET /api/cron/daily-payouts` with `Authorization: Bearer $CRON_SECRET`. Each call evaluates the daily hotels whose time has passed today and have not been settled today (`hotel_daily_payout_runs`, one row per hotel per Nairobi day). **It must be invoked every 5-15 minutes.** The app runs on Vercel serverless: nothing in the process can fire it, and Vercel Hobby cron is limited to once a day, which is not enough (a hotel at 21:00 would be paid whenever the daily call happens to land). Use Vercel Pro cron (`*/10 * * * *`) or any external scheduler (cron-job.org, GitHub Actions `schedule`, Cloudflare Cron Trigger) calling that URL. Payout lateness = the scheduler interval. The endpoint is idempotent, safe to run concurrently, and gated by `AUTO_PAYOUTS_ENABLED`.
+
+Safety: the date key only limits how often a hotel is re-evaluated. Duplicate payment is prevented by the unchanged mechanisms: order claim under the hotel row lock (`orders.payout_id`), one-unsent-payout-per-hotel index, per-payout reference/Idempotency-Key, and reconciliation of `unknown` outcomes. An open/unknown payout makes the hotel `skipped` (retried every 15 min, max 4 attempts/day), never re-sent. A failed payout releases its orders (existing behaviour) and respects the existing failure cooldown / 3-failure cap; a daily hotel never falls back to instant payout. Orders redeemed after a reservation are not part of it.
+
+Monitoring: failed/unknown payouts appear in the admin payouts list (`needs_attention`); each scheduled evaluation is recorded in `hotel_daily_payout_runs` (status `initiated | below_threshold | nothing | skipped | error`, with detail). A run that exhausts its attempts logs `[dailyPayoutService] ... needs attention`.

@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/errorHandler";
 import * as model from "../models/notificationModel";
 import * as notificationEvents from "../services/notificationEvents";
 import { runReconciliation } from "../services/reconciliationService";
+import { runDailyPayouts } from "../services/dailyPayoutService";
 import { businessDate } from "../lib/businessTime";
 
 /**
@@ -65,6 +66,22 @@ export async function runReconcile(req: Request, res: Response, next: NextFuncti
     requireCronSecret(req);
     const summary = await runReconciliation();
     res.json(summary);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/cron/daily-payouts — evaluates every DAILY-payout hotel whose
+ * configured Africa/Nairobi time has arrived (see dailyPayoutService.ts).
+ * Must be invoked frequently (every 5-15 minutes) by a scheduler; Vercel
+ * Hobby cron (daily at most) is NOT sufficient — see AUTOMATED_PAYOUTS.md.
+ * Idempotent and safe to run concurrently or repeatedly.
+ */
+export async function runDailyPayoutsCron(req: Request, res: Response, next: NextFunction) {
+  try {
+    requireCronSecret(req);
+    res.json(await runDailyPayouts());
   } catch (err) {
     next(err);
   }

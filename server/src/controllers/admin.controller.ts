@@ -9,6 +9,13 @@ import { hashPassword } from "../lib/password";
 import { normalizeKenyanPhone } from "../lib/phone";
 import { pinSchema } from "../schemas/authSchemas";
 import { settlementMethodSchema } from "../schemas/settlementMethodSchema";
+import { payoutConfigSchema, formatPayoutTime } from "../schemas/payoutModeSchema";
+import {
+  effectiveCommissionSql,
+  effectiveCommissionPercent,
+  MIN_COMMISSION_OVERRIDE_PERCENT,
+  MAX_COMMISSION_OVERRIDE_PERCENT,
+} from "../lib/hotelCommission";
 
 const TERMS_VERSION = "2026-01-mealvest-hotel-partnership-v1";
 
@@ -59,6 +66,19 @@ export async function getAdminOverview(_req: AuthedRequest, res: Response, next:
 // PIN, settlement method) reuses the exact same shared schemas as the
 // public flow so the two forms collect the same real data.
 // -----------------------------------------------------------------
+const COMMISSION_OVERRIDE_RANGE_MESSAGE = `Commission must be between ${MIN_COMMISSION_OVERRIDE_PERCENT}% and ${MAX_COMMISSION_OVERRIDE_PERCENT}%.`;
+const commissionOverrideSchema = z
+  .number({ invalid_type_error: "Commission must be a number." })
+  .min(MIN_COMMISSION_OVERRIDE_PERCENT, COMMISSION_OVERRIDE_RANGE_MESSAGE)
+  .max(MAX_COMMISSION_OVERRIDE_PERCENT, COMMISSION_OVERRIDE_RANGE_MESSAGE)
+  .refine((n) => Math.round(n * 100) / 100 === n, "Commission can have at most 2 decimal places.");
+
+/** Columns every admin hotel read returns for payout/commission state (effective rate computed in ONE place). */
+const HOTEL_PAYOUT_COLUMNS = `${effectiveCommissionSql("hotels")}::numeric(5,2) AS commission_percent,
+              commission_override_percent,
+              (commission_override_percent IS NOT NULL) AS commission_is_override,
+              payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time`;
+
 const createHotelSchema = z.object({
   name: z.string().trim().min(1).max(120),
   phone: z.string().min(9),
@@ -75,7 +95,10 @@ const createHotelSchema = z.object({
   pin: pinSchema,
   payment: settlementMethodSchema,
   registrationFee: z.number().min(0).max(10000),
-  commissionPercent: z.number().min(0).max(10),
+  // Optional: omitted = no override (the payout-mode default applies);
+  // present = an explicit administrator override.
+  commissionPercent: commissionOverrideSchema.optional(),
+  payout: payoutConfigSchema.optional(),
   loyaltyIncentivePercent: z.number().min(0).max(100).optional().default(0),
   termsAccepted: z.literal(true, {
     errorMap: () => ({ message: "Hotel terms & conditions must be accepted to complete registration." }),
@@ -88,8 +111,8 @@ const createHotelSchema = z.object({
  * commission (per spec section 7's intent) — this is not enforced
  * mechanically (the two are independently admin-configured, since
  * the exact tradeoff curve is a business decision, not a formula),
- * but the max commission (10%) and max fee (10,000) are both hard
- * DB-level CHECK constraints (migration 019), so neither can be
+ * but the commission override range (0-30%, migration 051) and max fee
+ * (10,000) are both hard DB-level CHECK constraints, so neither can be
  * bypassed regardless of what this endpoint does.
  */
 export async function createHotel(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -114,9 +137,10 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
     const hotelResult = await client.query(
       `INSERT INTO hotels
          (name, location, address, business_type, contact_phone, contact_email, owner_contact_name, admin_username,
-          payment_method, payment_details, registration_fee, commission_percent, loyalty_incentive_percent,
-          terms_accepted, terms_accepted_at, terms_version, contract_start_date, contract_end_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,now(),$14,$15,$16,'active')
+          payment_method, payment_details, registration_fee, commission_override_percent, loyalty_incentive_percent,
+          terms_accepted, terms_accepted_at, terms_version, contract_start_date, contract_end_date, status,
+          payout_mode, payout_time)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,now(),$14,$15,$16,'active',$17,$18)
        RETURNING *`,
       [
         d.name,
@@ -130,11 +154,13 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
         d.payment.method,
         JSON.stringify(d.payment),
         d.registrationFee,
-        d.commissionPercent,
+        d.commissionPercent ?? null,
         d.loyaltyIncentivePercent,
         TERMS_VERSION,
         startDate.toISOString().slice(0, 10),
         endDate.toISOString().slice(0, 10),
+        d.payout?.mode ?? "instant",
+        d.payout?.mode === "daily" ? d.payout.payoutTime : null,
       ]
     );
     const hotel = hotelResult.rows[0];
@@ -157,6 +183,9 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
 
     // Never echo the password hash back, even to the admin who just set it.
     delete hotel.payment_details_raw;
+    // The legacy commission_percent column is no longer authoritative; report the effective rate.
+    hotel.commission_percent = effectiveCommissionPercent(hotel.payout_mode, hotel.commission_override_percent);
+    hotel.payout_time = formatPayoutTime(hotel.payout_time);
     res.status(201).json({ hotel, loginUsername: d.adminUsername, loginEmail: d.email });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -198,11 +227,17 @@ export async function reactivateHotel(req: AuthedRequest, res: Response, next: N
   }
 }
 
-const updateCommissionSchema = z.object({
-  registrationFee: z.number().min(0).max(10000).optional(),
-  commissionPercent: z.number().min(0).max(10).optional(),
-  loyaltyIncentivePercent: z.number().min(0).max(100).optional(),
-});
+// commissionPercent: a number sets an explicit override; null CLEARS the
+// override (back to the payout-mode default); omitted leaves it untouched.
+// Only this admin-guarded route can write it — hotels have no endpoint
+// that accepts a commission value.
+const updateCommissionSchema = z
+  .object({
+    registrationFee: z.number().min(0).max(10000).optional(),
+    commissionPercent: commissionOverrideSchema.nullable().optional(),
+    loyaltyIncentivePercent: z.number().min(0).max(100).optional(),
+  })
+  .strict();
 
 export async function updateHotelCommission(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -211,15 +246,47 @@ export async function updateHotelCommission(req: AuthedRequest, res: Response, n
     if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
     const d = parsed.data;
 
+    // Only orders redeemed AFTER this change use the new rate: the rate
+    // is frozen onto each order at redemption (orders.commission_amount).
     const result = await pool.query(
       `UPDATE hotels SET
          registration_fee = COALESCE($1, registration_fee),
-         commission_percent = COALESCE($2, commission_percent),
+         commission_override_percent = CASE WHEN $5::boolean THEN $2::numeric ELSE commission_override_percent END,
          loyalty_incentive_percent = COALESCE($3, loyalty_incentive_percent),
          updated_at = now()
        WHERE id = $4
-       RETURNING id, name, registration_fee, commission_percent, loyalty_incentive_percent`,
-      [d.registrationFee, d.commissionPercent, d.loyaltyIncentivePercent, hotelId]
+       RETURNING id, name, registration_fee, loyalty_incentive_percent, ${HOTEL_PAYOUT_COLUMNS}`,
+      [d.registrationFee, d.commissionPercent ?? null, d.loyaltyIncentivePercent, hotelId, d.commissionPercent !== undefined]
+    );
+    if (result.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+    res.json({ hotel: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/admin/hotels/:hotelId/payout-settings — change a hotel's payout
+ * mode / daily time. Admin-only (hotels cannot change their own mode after
+ * registration). Deliberately does NOT touch commission_override_percent
+ * (an explicit override survives any mode change) nor any order/payout row:
+ * unpaid earnings stay unpaid and are simply paid under the new mode's
+ * rules; funds already reserved by a payout stay with that payout.
+ * The UPDATE takes the hotel row lock the payout claim also uses, so it
+ * serialises with an in-flight reservation.
+ */
+export async function updateHotelPayoutSettings(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const { hotelId } = req.params;
+    const parsed = payoutConfigSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid payout settings.");
+    const d = parsed.data;
+
+    const result = await pool.query(
+      `UPDATE hotels SET payout_mode = $1, payout_time = $2::time, updated_at = now()
+       WHERE id = $3
+       RETURNING id, name, ${HOTEL_PAYOUT_COLUMNS}`,
+      [d.mode, d.payoutTime, hotelId]
     );
     if (result.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
     res.json({ hotel: result.rows[0] });
@@ -232,7 +299,7 @@ export async function listHotels(_req: AuthedRequest, res: Response, next: NextF
   try {
     const result = await pool.query(
       `SELECT id, name, location, status, contract_start_date, contract_end_date,
-              registration_fee, commission_percent, loyalty_incentive_percent, payment_method,
+              registration_fee, ${HOTEL_PAYOUT_COLUMNS}, loyalty_incentive_percent, payment_method,
               image_url, created_at
        FROM hotels ORDER BY created_at DESC`
     );
@@ -683,7 +750,7 @@ export async function getHotelDetail(req: AuthedRequest, res: Response, next: Ne
       `SELECT id, name, location, address, business_type, status,
               contact_phone, contact_email, owner_contact_name, admin_username,
               payment_method, payment_details,
-              registration_fee, commission_percent, loyalty_incentive_percent,
+              registration_fee, ${HOTEL_PAYOUT_COLUMNS}, loyalty_incentive_percent,
               terms_accepted, terms_accepted_at, terms_version,
               contract_start_date, contract_end_date, image_url, created_at, updated_at
        FROM hotels WHERE id = $1`,

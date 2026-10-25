@@ -1,6 +1,7 @@
 import { PoolClient } from "pg";
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
+import type { PayoutMode } from "../lib/hotelCommission";
 
 export type PayoutStatus =
   | "pending"
@@ -39,17 +40,20 @@ export interface HotelPendingBalance {
   payment_details: Record<string, unknown> | null;
   pending_amount: string;
   pending_order_count: string;
+  payout_mode: PayoutMode;
+  payout_time: string | null; // "HH:MM" business-timezone wall clock (daily mode)
 }
 
 /** Every hotel with at least one redeemed-but-unpaid order, and how much it's owed — the admin payout screen's main list. */
 export async function listHotelsWithPendingBalance(): Promise<HotelPendingBalance[]> {
   const result = await pool.query<HotelPendingBalance>(
     `SELECT h.id AS hotel_id, h.name AS hotel_name, h.payment_method, h.payment_details,
+            h.payout_mode, to_char(h.payout_time, 'HH24:MI') AS payout_time,
             COALESCE(SUM(o.hotel_amount), 0) AS pending_amount,
             COUNT(o.id) AS pending_order_count
      FROM hotels h
      JOIN orders o ON o.hotel_id = h.id AND o.redeemed = true AND o.payout_id IS NULL
-     GROUP BY h.id, h.name, h.payment_method, h.payment_details
+     GROUP BY h.id, h.name, h.payment_method, h.payment_details, h.payout_mode, h.payout_time
      HAVING COALESCE(SUM(o.hotel_amount), 0) > 0
      ORDER BY pending_amount DESC`
   );
@@ -108,11 +112,21 @@ export async function claimPendingOrdersForPayout(
   initiatedByAdminId: string | null,
   provider: "paystack" | "cyzora",
   limits: PayoutLimits,
-  minTotalKes?: number
+  minTotalKes?: number,
+  requiredMode?: PayoutMode
 ): Promise<HotelPayoutRow | null> {
   return inTx(async (client) => {
-    const hotel = await client.query("SELECT id FROM hotels WHERE id = $1 FOR UPDATE", [hotelId]);
+    const hotel = await client.query<{ id: string; payout_mode: PayoutMode }>(
+      "SELECT id, payout_mode FROM hotels WHERE id = $1 FOR UPDATE",
+      [hotelId]
+    );
     if (hotel.rows.length === 0) return null;
+    // Automatic callers name the mode they act for; the hotel's CURRENT
+    // mode is re-read here under the row lock, so an instant trigger can
+    // never reserve a daily hotel's earnings (or vice versa) even if the
+    // mode changed after the caller looked. Manual admin payouts pass no
+    // mode: an explicit, audited operational action.
+    if (requiredMode !== undefined && hotel.rows[0].payout_mode !== requiredMode) return null;
 
     const ordersResult = await client.query<{ id: string }>(
       "SELECT id FROM orders WHERE hotel_id = $1 AND redeemed = true AND payout_id IS NULL FOR UPDATE",
@@ -336,13 +350,14 @@ export async function listPayoutsForHotel(hotelId: string): Promise<HotelPayoutR
 
 export type AdminPayoutRow = HotelPayoutRow & {
   hotel_name: string;
+  hotel_payout_mode: PayoutMode;
   automated: boolean; // created by the automatic trigger (no initiating admin)
   needs_attention: boolean; // unknown, stuck 'processing' past the stale window, or failed
 };
 
 export async function listAllPayouts(staleProcessingMinutes = 120): Promise<AdminPayoutRow[]> {
   const result = await pool.query<AdminPayoutRow>(
-    `SELECT p.*, h.name AS hotel_name,
+    `SELECT p.*, h.name AS hotel_name, h.payout_mode AS hotel_payout_mode,
             (p.initiated_by_admin_id IS NULL) AS automated,
             (p.status = 'unknown'
              OR (p.status = 'failed' AND p.updated_at > now() - interval '7 days')
@@ -369,12 +384,17 @@ export async function getUnpaidBalance(hotelId: string): Promise<UnpaidBalance> 
   return { total: r.rows[0].total, orderCount: Number(r.rows[0].n) };
 }
 
-/** Hotels whose unpaid balance is already at/above the threshold — the sweep's work list. */
+/**
+ * INSTANT hotels whose unpaid balance is already at/above the threshold —
+ * the sweep's work list. Daily hotels are excluded on purpose: they are
+ * paid only by their scheduled run, never by the catch-all sweep.
+ */
 export async function listHotelIdsAtOrAboveThreshold(minKes: number, limit: number): Promise<string[]> {
   const r = await pool.query<{ hotel_id: string }>(
-    `SELECT hotel_id FROM orders WHERE redeemed = true AND payout_id IS NULL
-      GROUP BY hotel_id HAVING SUM(hotel_amount) >= $1::numeric
-      ORDER BY SUM(hotel_amount) DESC LIMIT $2`,
+    `SELECT o.hotel_id FROM orders o JOIN hotels h ON h.id = o.hotel_id
+      WHERE o.redeemed = true AND o.payout_id IS NULL AND h.payout_mode = 'instant'
+      GROUP BY o.hotel_id HAVING SUM(o.hotel_amount) >= $1::numeric
+      ORDER BY SUM(o.hotel_amount) DESC LIMIT $2`,
     [minKes, limit]
   );
   return r.rows.map((x) => x.hotel_id);
@@ -433,4 +453,87 @@ export async function claimStalePending(limit: number, olderThanMinutes: number)
     [limit, Math.ceil(olderThanMinutes)]
   );
   return result.rows;
+}
+
+/** The hotel's authoritative payout mode, or null when the hotel does not exist. */
+export async function getHotelPayoutMode(hotelId: string): Promise<PayoutMode | null> {
+  const r = await pool.query<{ payout_mode: PayoutMode }>("SELECT payout_mode FROM hotels WHERE id = $1", [hotelId]);
+  return r.rows[0]?.payout_mode ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Daily payout scheduling (migration 051: hotel_daily_payout_runs)
+// ---------------------------------------------------------------------------
+
+export type DailyRunStatus = "claimed" | "initiated" | "below_threshold" | "nothing" | "skipped" | "error";
+
+export interface DailyRunClaim {
+  id: string;
+  hotel_id: string;
+  run_date: string;
+  attempts: number;
+}
+
+/** Hotels in daily mode whose configured time has arrived today and that still need (another) evaluation. */
+export async function listDailyHotelsDue(localDate: string, localTime: string, limit: number): Promise<{ hotel_id: string; payout_time: string }[]> {
+  const r = await pool.query<{ hotel_id: string; payout_time: string }>(
+    `SELECT h.id AS hotel_id, h.payout_time::text AS payout_time
+       FROM hotels h
+       LEFT JOIN hotel_daily_payout_runs r ON r.hotel_id = h.id AND r.run_date = $1::date
+      WHERE h.payout_mode = 'daily' AND h.payout_time IS NOT NULL AND h.payout_time <= $2::time
+        AND (r.id IS NULL OR r.status IN ('claimed', 'skipped', 'error'))
+      ORDER BY h.payout_time, h.id
+      LIMIT $3`,
+    [localDate, localTime, limit]
+  );
+  return r.rows;
+}
+
+/**
+ * Claims today's evaluation of one hotel. Exactly one of any number of
+ * concurrent callers gets a row back:
+ *   - first evaluation of the day: INSERT wins;
+ *   - a 'claimed' row whose lease expired (the previous run died): re-claimed;
+ *   - a 'skipped'/'error' row older than the retry spacing and under the
+ *     attempt cap: retried.
+ * 'initiated', 'below_threshold' and 'nothing' are final for the day.
+ * This only prevents re-EVALUATING; it is not what prevents double
+ * payment — the order claim under the hotel row lock is.
+ */
+export async function claimDailyRun(
+  hotelId: string,
+  localDate: string,
+  scheduledTime: string,
+  opts: { maxAttempts: number; retryAfterMinutes: number; leaseMinutes: number }
+): Promise<DailyRunClaim | null> {
+  const r = await pool.query<DailyRunClaim>(
+    `INSERT INTO hotel_daily_payout_runs AS runs (hotel_id, run_date, scheduled_time, status, attempts, claimed_until)
+     VALUES ($1, $2::date, $3::time, 'claimed', 1, now() + make_interval(mins => $4::int))
+     ON CONFLICT (hotel_id, run_date) DO UPDATE
+        SET status = 'claimed', attempts = runs.attempts + 1, scheduled_time = EXCLUDED.scheduled_time,
+            claimed_until = now() + make_interval(mins => $4::int)
+      WHERE runs.attempts < $5::int
+        AND ((runs.status = 'claimed' AND runs.claimed_until < now())
+          OR (runs.status IN ('skipped', 'error') AND runs.updated_at < now() - make_interval(mins => $6::int)))
+     RETURNING runs.id, runs.hotel_id, runs.run_date::text AS run_date, runs.attempts`,
+    [hotelId, localDate, scheduledTime, Math.ceil(opts.leaseMinutes), Math.ceil(opts.maxAttempts), Math.ceil(opts.retryAfterMinutes)]
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function finishDailyRun(runId: string, status: Exclude<DailyRunStatus, "claimed">, detail: string | null, payoutId: string | null): Promise<void> {
+  await pool.query(
+    `UPDATE hotel_daily_payout_runs SET status = $2, detail = $3, payout_id = COALESCE($4::uuid, payout_id), claimed_until = NULL
+      WHERE id = $1`,
+    [runId, status, detail ? detail.slice(0, 300) : null, payoutId]
+  );
+}
+
+/** Today's scheduled-evaluation record for a hotel (admin/hotel visibility), or null. */
+export async function getDailyRun(hotelId: string, localDate: string): Promise<{ status: DailyRunStatus; detail: string | null; payout_id: string | null } | null> {
+  const r = await pool.query(
+    "SELECT status, detail, payout_id FROM hotel_daily_payout_runs WHERE hotel_id = $1 AND run_date = $2::date",
+    [hotelId, localDate]
+  );
+  return r.rows[0] ?? null;
 }

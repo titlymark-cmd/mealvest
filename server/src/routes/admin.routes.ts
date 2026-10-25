@@ -7,6 +7,7 @@ import {
   suspendHotel,
   reactivateHotel,
   updateHotelCommission,
+  updateHotelPayoutSettings,
   listHotels,
   listAllOrders,
   listWithdrawals,
@@ -59,6 +60,7 @@ adminRouter.delete("/hotels/:hotelId", deleteHotel);
 adminRouter.patch("/hotels/:hotelId/suspend", suspendHotel);
 adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
 adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
+adminRouter.patch("/hotels/:hotelId/payout-settings", updateHotelPayoutSettings);
 adminRouter.get("/hotels/:hotelId/payment-verification", getPaymentVerification);
 adminRouter.patch("/hotels/:hotelId/payment-verification/verify", financialActionRateLimiter, verifyPaymentDetails);
 adminRouter.get("/orders", listAllOrders);
