@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { formatPayoutTime12 } from "../../utils/payoutMode";
 import { Wallet, Send, RefreshCw, Check, X } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
@@ -215,7 +216,9 @@ export default function AdminPayoutsScreen() {
                 <span style={styles.rowTitle}>{h.hotel_name}</span>
                 <span style={styles.rowSub}>
                   {h.pending_order_count} redeemed order{h.pending_order_count === "1" ? "" : "s"} awaiting payout
-                  {h.below_threshold && thresholdKes !== null && ` — accumulating; pays automatically at KSh ${thresholdKes.toLocaleString()}`}
+                  {h.payout_mode === "daily" && ` — Daily payout at ${formatPayoutTime12(h.payout_time)} EAT`}
+                  {h.payout_mode === "daily" && h.below_threshold && thresholdKes !== null && ` — below KSh ${thresholdKes.toLocaleString()}, carries forward`}
+                  {h.payout_mode !== "daily" && h.below_threshold && thresholdKes !== null && ` — accumulating; pays automatically at KSh ${thresholdKes.toLocaleString()}`}
                   {!h.below_threshold && h.auto_payout_blocked_reason && ` — automatic payout paused: ${BLOCKED_REASON[h.auto_payout_blocked_reason] ?? h.auto_payout_blocked_reason}`}
                   {!supported && " — settlement method needs manual payout"}
                 </span>

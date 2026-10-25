@@ -35,6 +35,7 @@ import {
   validate,
 } from "./profile/profileModel";
 import "./profile/hotelProfile.css";
+import { payoutScheduleLabel } from "../../utils/payoutMode";
 
 /** Folds the PATCH response (the 10 columns it returns) back into the loaded hotel record. */
 function mergeUpdate(hotel: HotelRecord, u: HotelLocationUpdate): HotelRecord {
@@ -450,7 +451,7 @@ export default function HotelProfileScreen() {
                     <ReadRow label="Registration fee">{formatKsh(hotel.registration_fee)}</ReadRow>
                     <MaybeRow label="Contract starts" value={formatDate(hotel.contract_start_date)} />
                     <MaybeRow label="Contract ends" value={formatDate(hotel.contract_end_date)} />
-                    <MaybeRow label="Settlement" value={hotel.settlement_schedule} />
+                    <MaybeRow label="Payout schedule" value={payoutScheduleLabel(hotel)} />
                   </dl>
                 </section>
 

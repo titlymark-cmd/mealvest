@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { timeAgo } from "../../components/shared/format";
+import { payoutScheduleLabel } from "../../utils/payoutMode";
 import { SkeletonRegion, SkeletonStats, SkeletonChart, SkeletonList } from "../../components/ui/Skeleton";
 import {
   Banner,
@@ -255,7 +256,7 @@ export default function HotelOwnerOverviewScreen() {
           icon={<TrendingUp size={17} color="#c93a22" />}
           label="Total earned"
           value={whole(stats.net_earnings)}
-          sub={hotel.settlement_schedule ? `Settles ${hotel.settlement_schedule}` : undefined}
+          sub={hotel.payout_mode || hotel.settlement_schedule ? `Payout: ${payoutScheduleLabel(hotel)}` : undefined}
         />
       </section>
 

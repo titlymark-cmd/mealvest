@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ShieldCheck, Store, UserRound, Landmark, KeyRound, ListChecks, Trash2 } from "lucide-react";
+import { ShieldCheck, Store, UserRound, Landmark, KeyRound, ListChecks, Trash2, Zap, CalendarClock, Check } from "lucide-react";
 import { COLORS, FONTS, NEU, RADIUS } from "../styles/theme";
 import { useAuth } from "../context/AuthContext";
 import { ApiError, SettlementInput } from "../services/authApi";
@@ -10,9 +10,11 @@ import { Chip } from "../components/ui/Chip";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { Errors, hasErrors, validators } from "../utils/validators";
 import { clearDraft, loadDraft, saveDraft } from "../utils/formDraft";
+import { DEFAULT_COMMISSION_PERCENT, MIN_PAYOUT_KES, PAYOUT_TIMEZONE_LABEL, PayoutMode, formatPayoutTime12, isValidPayoutTime, payoutConfigPayload } from "../utils/payoutMode";
 
 const DRAFT_KEY = "mealvest_draft_hotel_v1";
-const STEPS = ["Before you start", "Your business", "Owner & contact", "How you get paid", "Secure your account", "Review"];
+const STEPS = ["Before you start", "Your business", "Owner & contact", "How you get paid", "Payout schedule", "Secure your account", "Review"];
+const LAST_STEP = STEPS.length;
 
 const BUSINESS_TYPES = [
   { value: "hotel", label: "Hotel" },
@@ -67,6 +69,8 @@ interface DraftData {
   email: string;
   phoneNumber: string;
   method: Method;
+  payoutMode?: PayoutMode;
+  payoutTime?: string;
 }
 
 /**
@@ -92,6 +96,8 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
   const [phoneNumber, setPhoneNumber] = useState(d?.phoneNumber ?? "");
   const [method, setMethod] = useState<Method>(d?.method ?? "mpesa_till");
   const [payout, setPayout] = useState<Record<string, string>>({});
+  const [payoutMode, setPayoutMode] = useState<PayoutMode>(d?.payoutMode === "daily" ? "daily" : "instant");
+  const [payoutTime, setPayoutTime] = useState(isValidPayoutTime(d?.payoutTime) ? (d?.payoutTime as string) : "");
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
   const [showErrors, setShowErrors] = useState(false);
@@ -101,9 +107,9 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
 
   useEffect(() => {
     if (hotelName || contactFullName || email || phoneNumber) {
-      saveDraft<DraftData>(DRAFT_KEY, step, { hotelName, businessType, location, contactFullName, email, phoneNumber, method });
+      saveDraft<DraftData>(DRAFT_KEY, step, { hotelName, businessType, location, contactFullName, email, phoneNumber, method, payoutMode, payoutTime });
     }
-  }, [hotelName, businessType, location, contactFullName, email, phoneNumber, method, step]);
+  }, [hotelName, businessType, location, contactFullName, email, phoneNumber, method, payoutMode, payoutTime, step]);
 
   const methodDef = METHODS.find((m) => m.value === method)!;
   const pv = (k: string) => payout[`${method}.${k}`] ?? "";
@@ -123,6 +129,9 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
         return out;
       }
       case 5:
+        // Daily needs a valid time; Instant needs nothing (and sends nothing).
+        return payoutMode === "daily" ? { payoutTime: isValidPayoutTime(payoutTime) ? null : "Choose the time your daily payout should run." } : {};
+      case 6:
         return { password: validators.password(password), pin: validators.pin(pin) };
       default:
         return {};
@@ -154,14 +163,15 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
   };
 
   const next = async () => {
-    if (step < 6) {
+    if (step < LAST_STEP) {
       if (hasErrors(errors)) return setShowErrors(true);
       return go(step + 1, "fwd");
     }
+    if (loading) return; // a retry can never fire a second registration while one is in flight
     setError(null);
     setLoading(true);
     try {
-      await registerHotel({ email: email.trim(), phoneNumber, password, pin, hotelName, businessType, location, contactFullName, settlement: buildSettlement() });
+      await registerHotel({ email: email.trim(), phoneNumber, password, pin, hotelName, businessType, location, contactFullName, settlement: buildSettlement(), payout: payoutConfigPayload(payoutMode, payoutTime) });
       clearDraft(DRAFT_KEY);
     } catch (err) {
       // Everything entered is kept in state, so they can fix and retry.
@@ -179,6 +189,7 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
     "Tell us about your business",
     "Who should we contact?",
     "How do you get paid?",
+    "When do you want to be paid?",
     "Secure your account",
     "Review and submit",
   ];
@@ -187,6 +198,7 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
     "This is how students will find and recognise you.",
     "The owner or authorised person who manages this account.",
     "Choose where MEALVEST should send your payouts.",
+    "Pick how often your earnings are paid out to the account above.",
     "You'll use these to sign in and unlock the app.",
     "Check everything below. You can edit any section before submitting.",
   ];
@@ -201,9 +213,9 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
       intro={intros[step - 1]}
       onBack={step > 1 ? () => go(step - 1, "back") : undefined}
       onNext={next}
-      nextLabel={step === 1 ? (resumed ? "Continue where I left off" : "Start registration") : step === 6 ? "Submit registration" : "Continue"}
+      nextLabel={step === 1 ? (resumed ? "Continue where I left off" : "Start registration") : step === LAST_STEP ? "Submit registration" : "Continue"}
       nextLoading={loading}
-      nextArrow={step !== 6}
+      nextArrow={step !== LAST_STEP}
       error={error}
     >
       {step === 1 && (
@@ -223,6 +235,8 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
                   setEmail("");
                   setPhoneNumber("");
                   setMethod("mpesa_till");
+                  setPayoutMode("instant");
+                  setPayoutTime("");
                   setResumed(false);
                 }}
               >
@@ -310,12 +324,53 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
 
       {step === 5 && (
         <>
+          <div role="radiogroup" aria-label="Payout mode" style={styles.options}>
+            <PayoutOption
+              selected={payoutMode === "instant"}
+              onSelect={() => setPayoutMode("instant")}
+              icon={Zap}
+              title="Instant Payout"
+              description={`Get paid automatically after each eligible order. Earnings below KSh ${MIN_PAYOUT_KES} accumulate until your balance reaches the minimum payout threshold.`}
+              points={["Automatic payouts after eligible orders", `KSh ${MIN_PAYOUT_KES} minimum payout threshold`, `Default MEALVEST commission: ${DEFAULT_COMMISSION_PERCENT.instant}%`]}
+            />
+            <PayoutOption
+              selected={payoutMode === "daily"}
+              onSelect={() => setPayoutMode("daily")}
+              icon={CalendarClock}
+              title="Daily Payout"
+              description={`Your earnings accumulate throughout the day and are automatically paid out at your chosen time, provided your eligible balance reaches KSh ${MIN_PAYOUT_KES}.`}
+              points={["One scheduled payout evaluation per day", `KSh ${MIN_PAYOUT_KES} minimum payout threshold`, `Default MEALVEST commission: ${DEFAULT_COMMISSION_PERCENT.daily}%`]}
+            />
+          </div>
+          {payoutMode === "daily" && (
+            <div style={{ marginTop: 18 }}>
+              <Field
+                label={`Daily payout time (${PAYOUT_TIMEZONE_LABEL})`}
+                value={payoutTime}
+                onChange={setPayoutTime}
+                error={e("payoutTime")}
+                type="time"
+                autoComplete="off"
+                hint={
+                  isValidPayoutTime(payoutTime)
+                    ? `Your payout will be evaluated every day at ${formatPayoutTime12(payoutTime)}. If your balance is below KSh ${MIN_PAYOUT_KES} then, it stays accumulated and is checked again at the next scheduled time.`
+                    : `Choose when your payout should be evaluated each day. A balance below KSh ${MIN_PAYOUT_KES} stays accumulated until a later scheduled time.`
+                }
+              />
+            </div>
+          )}
+          <p style={styles.help}>The commission shown is the default for each option. MEALVEST may agree a different rate with your business; it is never set from this form.</p>
+        </>
+      )}
+
+      {step === 6 && (
+        <>
           <PasswordField label="Password" value={password} onChange={setPassword} error={e("password")} autoComplete="new-password" hint="At least 8 characters." />
           <PasswordField label="4-digit PIN" noun="PIN" value={pin} onChange={(v) => setPin(v.replace(/[^0-9]/g, "").slice(0, 4))} error={e("pin")} inputMode="numeric" autoComplete="off" maxLength={4} hint="Used to quickly unlock the app later without retyping your password." />
         </>
       )}
 
-      {step === 6 && (
+      {step === 7 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {[
             { title: "Business", icon: Store, goto: 2, rows: [["Name", hotelName], ["Type", BUSINESS_TYPES.find((t) => t.value === businessType)?.label ?? businessType], ["Area", location || "Not provided"]] },
@@ -329,7 +384,13 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
                 ...methodDef.fields.filter((f) => pv(f.key)).map((f) => [f.label.replace(" (optional)", ""), f.key.toLowerCase().includes("number") && !f.phone ? mask(pv(f.key)) : pv(f.key)]),
               ],
             },
-            { title: "Sign-in", icon: ListChecks, goto: 5, rows: [["Password", "•".repeat(Math.min(password.length, 12))], ["PIN", "••••"]] },
+            {
+              title: "Payout schedule",
+              icon: CalendarClock,
+              goto: 5,
+              rows: payoutMode === "daily" ? [["Mode", "Daily Payout"], ["Time", `${formatPayoutTime12(payoutTime)} · ${PAYOUT_TIMEZONE_LABEL}`]] : [["Mode", "Instant Payout"]],
+            },
+            { title: "Sign-in", icon: ListChecks, goto: 6, rows: [["Password", "•".repeat(Math.min(password.length, 12))], ["PIN", "••••"]] },
           ].map(({ title, icon: Icon, goto, rows }) => (
             <section key={title} style={styles.review} aria-label={title}>
               <header style={styles.reviewHead}>
@@ -366,7 +427,54 @@ export function HotelSignupWizard({ onSwitchToLogin }: { onSwitchToLogin: () => 
   );
 }
 
+function PayoutOption({
+  selected,
+  onSelect,
+  icon: Icon,
+  title,
+  description,
+  points,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  icon: React.ComponentType<{ size?: number; color?: string; "aria-hidden"?: boolean }>;
+  title: string;
+  description: string;
+  points: string[];
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      style={{ ...styles.option, backgroundColor: selected ? "#1D1511" : NEU.surfaceDark, boxShadow: selected ? NEU.darkPressed : NEU.darkRaisedSm, border: `1.5px solid ${selected ? COLORS.primary : "var(--mv-hairline)"}` }}
+    >
+      <span style={styles.optionHead}>
+        <span style={styles.itemIcon}>
+          <Icon size={18} color={COLORS.accent} aria-hidden />
+        </span>
+        <span style={{ ...styles.itemTitle, flex: 1, fontSize: 15 }}>{title}</span>
+        {selected && <Check size={18} color={COLORS.accent} aria-hidden />}
+      </span>
+      <span style={styles.itemDesc}>{description}</span>
+      <ul style={styles.points}>
+        {points.map((p) => (
+          <li key={p} style={styles.point}>
+            {p}
+          </li>
+        ))}
+      </ul>
+    </button>
+  );
+}
+
 const styles: Record<string, React.CSSProperties> = {
+  options: { display: "flex", flexDirection: "column", gap: 14 },
+  option: { display: "flex", flexDirection: "column", gap: 10, width: "100%", minHeight: 44, textAlign: "left", padding: 16, borderRadius: RADIUS.md, cursor: "pointer" },
+  optionHead: { display: "flex", alignItems: "center", gap: 12 },
+  points: { margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 },
+  point: { fontFamily: FONTS.body, fontSize: 12, lineHeight: "17px", color: COLORS.textOnDark },
   resume: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 14, marginBottom: 16, borderRadius: RADIUS.md, backgroundColor: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.35)", fontFamily: FONTS.body, fontSize: 13, lineHeight: "19px", color: COLORS.textOnDark },
   clear: { minHeight: 44, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.accent },
   checklist: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 12 },

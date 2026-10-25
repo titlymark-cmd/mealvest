@@ -19,6 +19,9 @@ export interface HotelPendingBalance {
   below_threshold?: boolean;
   /** Why AUTOMATIC payout is paused for this hotel (e.g. payout_unknown, failure_cooldown, repeated_failures), or null. */
   auto_payout_blocked_reason?: string | null;
+  /** The hotel's authoritative payout mode and (daily) time, "HH:MM" EAT. */
+  payout_mode?: "instant" | "daily";
+  payout_time?: string | null;
 }
 
 export interface PendingPayoutsOverview {

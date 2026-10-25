@@ -34,7 +34,14 @@ export interface AdminHotel {
   location: string | null;
   status: "pending_verification" | "active" | "suspended" | "expired";
   registration_fee: string;
+  /** EFFECTIVE rate: the admin override if set, else the payout-mode default (15% instant / 10% daily). */
   commission_percent: string;
+  commission_override_percent?: string | null;
+  /** True only for an explicit administrator override. */
+  commission_is_override?: boolean;
+  payout_mode?: "instant" | "daily";
+  /** "HH:MM" East Africa Time; daily mode only. */
+  payout_time?: string | null;
   loyalty_incentive_percent: string;
   payment_method: string | null;
   image_url: string | null;
@@ -81,7 +88,9 @@ export interface CreateHotelInput {
   pin: string;
   payment: SettlementInput;
   registrationFee: number;
-  commissionPercent: number;
+  /** Omit to use the payout-mode default; present = explicit override (0-30). */
+  commissionPercent?: number;
+  payout?: { mode: "instant" | "daily"; payoutTime?: string };
   termsAccepted: true;
 }
 
@@ -98,7 +107,8 @@ export async function createHotel(authFetch: AuthFetch, input: CreateHotelInput)
 export async function updateHotelCommission(
   authFetch: AuthFetch,
   hotelId: string,
-  commissionPercent: number
+  /** A number sets an explicit override; null clears it (back to the mode default). */
+  commissionPercent: number | null
 ): Promise<AdminHotel> {
   const res = await authFetch(`/api/admin/hotels/${hotelId}/commission`, {
     method: "PATCH",
@@ -106,6 +116,20 @@ export async function updateHotelCommission(
     body: JSON.stringify({ commissionPercent }),
   });
   const data = await parseOrError<{ hotel: AdminHotel }>(res, "Could not update commission.");
+  return data.hotel;
+}
+
+export async function updateHotelPayoutSettings(
+  authFetch: AuthFetch,
+  hotelId: string,
+  config: { mode: "instant" | "daily"; payoutTime?: string }
+): Promise<AdminHotel> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}/payout-settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  const data = await parseOrError<{ hotel: AdminHotel }>(res, "Could not update payout settings.");
   return data.hotel;
 }
 
@@ -142,6 +166,9 @@ export interface HotelDetail {
     payment_details: Record<string, unknown> | null;
     registration_fee: string;
     commission_percent: string;
+    commission_is_override?: boolean;
+    payout_mode?: "instant" | "daily";
+    payout_time?: string | null;
     loyalty_incentive_percent: string;
     terms_accepted: boolean;
     terms_accepted_at: string | null;

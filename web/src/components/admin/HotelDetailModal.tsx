@@ -4,6 +4,7 @@ import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { Spinner } from "../Spinner";
 import { formatKsh } from "./adminFormat";
+import { formatPayoutTime12 } from "../../utils/payoutMode";
 import {
   fetchHotelDetail,
   deleteHotel,
@@ -152,7 +153,8 @@ export function HotelDetailModal({
               <span style={{ ...styles.sectionLabel, marginTop: 18 }}>Commercial</span>
               <Row label="Settlement method" value={<span style={{ textTransform: "capitalize" }}>{(h.payment_method || "—").replace(/_/g, " ")}</span>} />
               <Row label="Registration fee" value={formatKsh(h.registration_fee)} />
-              <Row label="Commission" value={`${h.commission_percent}%`} />
+              <Row label="Payout mode" value={h.payout_mode === "daily" ? `Daily at ${formatPayoutTime12(h.payout_time)} (EAT)` : "Instant"} />
+              <Row label="Commission" value={`${h.commission_percent}% · ${h.commission_is_override ? "admin override" : "default"}`} />
               <Row label="Loyalty incentive" value={`${h.loyalty_incentive_percent}%`} />
               <Row label="Contract" value={`${fmtDate(h.contract_start_date)} → ${fmtDate(h.contract_end_date)}`} />
               <Row label="Terms accepted" value={h.terms_accepted ? fmtDate(h.terms_accepted_at) : "No"} />

@@ -22,6 +22,9 @@ export interface HotelDashboard {
     location: string | null;
     address: string | null;
     settlement_schedule: string | null;
+    /** Authoritative payout mode/time from the server (absent on an older server). */
+    payout_mode?: "instant" | "daily";
+    payout_time?: string | null;
     registration_fee: string;
     payment_method: string | null;
     image_url: string | null;
@@ -319,6 +322,10 @@ export interface HotelEarnings {
     threshold: string;
     /** Why the next automatic payout is waiting — hotel-safe categories only. */
     auto_hold: "payout_in_progress" | "failed_recently" | "needs_support" | null;
+    payout_mode?: "instant" | "daily";
+    /** "HH:MM", East Africa Time; daily mode only. */
+    payout_time?: string | null;
+    payout_timezone?: string;
   };
   payouts: HotelPayoutRecord[];
 }

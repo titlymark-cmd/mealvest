@@ -149,6 +149,26 @@ describe("Earnings screen", () => {
     expect(await screen.findByText(/once they reach KSh 40\. KSh 25 to go/)).toBeInTheDocument();
   });
 
+  it("daily mode: shows the payout time, says earnings accumulate, and does not promise an instant payout", async () => {
+    mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "daily", payout_time: "21:00", pending_amount: "115.00" }));
+    expect(await screen.findByText(/checked for payout at 9:00 PM \(East Africa Time\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Daily at 9:00 PM \(EAT\)/)).toBeInTheDocument();
+    expect(screen.getByText(/will be sent at that time/)).toBeInTheDocument();
+    expect(screen.queryByText(/once they reach/)).not.toBeInTheDocument();
+  });
+
+  it("daily mode below the minimum: carries forward, not labelled as paid", async () => {
+    mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "daily", payout_time: "21:00" }));
+    expect(await screen.findByText(/stays here and is checked again the next day/)).toBeInTheDocument();
+    expect(screen.queryByText("Paid")).not.toBeInTheDocument();
+  });
+
+  it("instant mode still shows the existing accumulation note", async () => {
+    mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "instant" }));
+    expect(await screen.findByText(/once they reach KSh 40\. KSh 25 to go/)).toBeInTheDocument();
+    expect(screen.getByText(/Instant — after each eligible order/)).toBeInTheDocument();
+  });
+
   it("makes no automatic-payout promise when the feature is switched off", async () => {
     mount(<HotelOwnerEarningsScreen />, earningsMock({ auto_enabled: false }));
     await screen.findByText("KSh 15");

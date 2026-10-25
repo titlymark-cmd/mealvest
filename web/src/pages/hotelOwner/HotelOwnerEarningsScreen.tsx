@@ -26,6 +26,7 @@ import {
   HotelEarnings,
   HotelOrder,
 } from "../../services/hotelStaffApi";
+import { formatPayoutTime12, payoutScheduleLabel } from "../../utils/payoutMode";
 
 export default function HotelOwnerEarningsScreen() {
   const { authFetch } = useAuth();
@@ -105,7 +106,7 @@ export default function HotelOwnerEarningsScreen() {
           <dl className="hd-kv" style={{ margin: 0, color: "var(--mv-cream)" }}>
             <div>
               <dt style={{ color: "rgba(252,244,234,.7)" }}>Settlement</dt>
-              <dd>{hotel.settlement_schedule || "—"}</dd>
+              <dd>{payoutScheduleLabel({ payout_mode: summary.payout_mode ?? hotel.payout_mode, payout_time: summary.payout_time ?? hotel.payout_time, settlement_schedule: hotel.settlement_schedule })}</dd>
             </div>
             <div>
               <dt style={{ color: "rgba(252,244,234,.7)" }}>Paid to</dt>
@@ -113,7 +114,7 @@ export default function HotelOwnerEarningsScreen() {
             </div>
           </dl>
         </div>
-        {summary.auto_enabled && <AutoPayoutNote summary={summary} pendingAmount={pendingAmount} />}
+        {summary.auto_enabled && (summary.payout_mode === "daily" ? <DailyPayoutNote summary={summary} pendingAmount={pendingAmount} /> : <AutoPayoutNote summary={summary} pendingAmount={pendingAmount} />)}
         {verificationMeta && (
           <div style={{ marginTop: 14 }}>
             <StatusPill tone={verificationMeta.tone} onDark>
@@ -195,6 +196,27 @@ const HOLD_MESSAGE: Record<string, string> = {
   failed_recently: "Your last payout didn't go through. MEALVEST will retry shortly.",
   needs_support: "Automatic payouts are paused after repeated failures. Please contact MEALVEST support.",
 };
+
+/** Daily mode: balance accumulates all day and is evaluated once, at the hotel's own time. Never labelled as paid. */
+function DailyPayoutNote({ summary, pendingAmount }: { summary: HotelEarnings["summary"]; pendingAmount: number }) {
+  const threshold = Number(summary.threshold);
+  const reached = pendingAmount >= threshold;
+  return (
+    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+      <p className="hd-sub" style={{ margin: 0 }}>
+        {`Your earnings build up through the day and are checked for payout at ${formatPayoutTime12(summary.payout_time)} (East Africa Time). `}
+        {reached
+          ? `Your balance has reached the ${whole(threshold)} minimum, so it will be sent at that time.`
+          : `If your balance is still below ${whole(threshold)} then, it stays here and is checked again the next day.`}
+      </p>
+      {summary.auto_hold && (
+        <p className="hd-sub" style={{ margin: 0, color: "#ffd68a", fontWeight: 600 }}>
+          {HOLD_MESSAGE[summary.auto_hold]}
+        </p>
+      )}
+    </div>
+  );
+}
 
 /** Explains the automatic-payout rule using the server's real threshold and state. */
 function AutoPayoutNote({ summary, pendingAmount }: { summary: HotelEarnings["summary"]; pendingAmount: number }) {
