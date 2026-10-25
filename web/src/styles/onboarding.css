@@ -1,0 +1,981 @@
+/* ============================================================
+   MEALVEST — student onboarding: hotels -> hotel details -> plan setup
+   ------------------------------------------------------------
+   Builds ONLY on tokens from neu.css and the .sv-* primitives in
+   student.css (receipt rows, amount plate, presets, inputs, notes,
+   toasts, medal). No new colours and no new shadow recipes:
+     raised cream  = the thing you can open / act on (hotel, menu item)
+     inset espresso= recessed controls (search, tabs track, inputs)
+     tomato        = the one primary action per screen
+   Prefix: .ob-
+   ============================================================ */
+
+.ob-bg {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 100%;
+  background: var(--mv-espresso);
+  color: var(--mv-cream);
+}
+.ob-wrap {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 20px calc(32px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 1024px) {
+  .ob-wrap {
+    padding-left: 32px;
+    padding-right: 32px;
+    gap: 26px;
+  }
+}
+/* visually hidden, still read by screen readers */
+.ob-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.ob-rise {
+  animation: ob-rise var(--mv-dur-slow) var(--mv-ease) both;
+}
+@keyframes ob-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- Header + search (hotel list) ---------- */
+.ob-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ob-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 760px) {
+  .ob-toolbar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ob-toolbar .sv-search {
+    flex: 0 1 460px;
+  }
+}
+.ob-count {
+  font-size: 13px;
+  color: var(--sv-muted);
+}
+
+/* ---------- Hotel cards ---------- */
+.ob-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 4px 4px 12px; /* room for raised shadows */
+  margin: 0;
+  list-style: none;
+}
+@media (min-width: 620px) {
+  .ob-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1000px) {
+  .ob-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.ob-hotel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 26px;
+  background: var(--mv-cream);
+  color: var(--mv-coffee);
+  box-shadow: var(--neu-cream-raised);
+  transition: transform var(--mv-dur-base) var(--mv-ease), box-shadow var(--mv-dur-base) var(--mv-ease);
+}
+@media (hover: hover) {
+  .ob-hotel:hover {
+    transform: translateY(-3px);
+  }
+}
+.ob-hotel[data-selected="true"] {
+  box-shadow: var(--neu-cream-raised), 0 0 0 3px var(--mv-orange);
+}
+.ob-hotel-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  text-align: left;
+  border-radius: 26px 26px 0 0;
+  color: inherit;
+}
+.ob-hotel-main:focus-visible,
+.ob-maplink:focus-visible {
+  box-shadow: inset 0 0 0 3px var(--mv-amber);
+}
+.ob-hotel-main:not(:disabled):active {
+  transform: none; /* the card itself presses via data-pressed; avoid a double squash */
+}
+.ob-media,
+.ob-hotel-name {
+  display: block;
+}
+.ob-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 26px 26px 0 0;
+  background: var(--mv-peach);
+}
+.ob-media img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.ob-media-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a4416;
+  background: var(--mv-peach);
+  box-shadow: var(--neu-cream-inset);
+}
+.ob-flag {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+}
+.ob-flag svg {
+  color: var(--mv-amber);
+}
+.ob-hotel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px 14px;
+}
+.ob-hotel-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--mv-coffee);
+  overflow-wrap: anywhere;
+}
+.ob-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #6b625c;
+  min-width: 0;
+}
+.ob-meta svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ob-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ob-clamp {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b625c;
+}
+.ob-hotel-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 4px;
+  min-height: 44px;
+  padding-right: 4px;
+  padding-left: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #b83420; /* dangerText token: >= 4.5:1 on cream */
+}
+.ob-hotel-cta i {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(160deg, var(--mv-orange) -40%, var(--mv-tomato) 55%);
+  box-shadow: var(--neu-action);
+}
+.ob-maplink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 18px;
+  border-top: 1px dashed rgba(176, 136, 98, 0.4);
+  border-radius: 0 0 26px 26px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8a4416;
+}
+.ob-maplink:hover {
+  text-decoration: underline;
+}
+
+/* Rating chip (cream surface) */
+.ob-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #6b625c;
+}
+.ob-rating b {
+  color: var(--mv-coffee);
+  font-weight: 700;
+}
+.ob-rating svg {
+  color: var(--mv-amber);
+  fill: var(--mv-amber);
+}
+.ob-rating[data-surface="dark"] {
+  color: var(--sv-muted);
+}
+.ob-rating[data-surface="dark"] b {
+  color: var(--mv-cream);
+}
+
+/* Skeleton cards while hotels load */
+.ob-skel-card {
+  min-height: 330px;
+  border-radius: 26px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.ob-skel-card > .mv-skel:first-child {
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+.ob-skel-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+.ob-skel-lines .mv-skel {
+  height: 14px;
+  border-radius: 8px;
+}
+
+/* ---------- Hotel details ---------- */
+.ob-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px 0 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  align-self: flex-start;
+}
+.ob-back:not(:disabled):active {
+  box-shadow: var(--neu-dark-pressed);
+}
+.ob-hero {
+  position: relative;
+  border-radius: 28px;
+  overflow: hidden;
+  height: clamp(170px, 32vw, 300px);
+  background: var(--mv-peach);
+  box-shadow: var(--neu-dark-raised);
+}
+.ob-hero img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.ob-hero .ob-media-fallback {
+  border-radius: 0;
+}
+.ob-title {
+  margin: 0;
+  font-size: clamp(24px, 5.5vw, 36px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.ob-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ob-pillrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--sv-muted);
+}
+.ob-pillrow > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ob-pillrow svg {
+  flex-shrink: 0;
+  color: var(--mv-amber);
+}
+
+/* Tabs: inset track, raised active thumb (same recipe as .sv-seg) */
+.ob-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+}
+@media (min-width: 640px) {
+  .ob-tabs {
+    display: inline-grid;
+    grid-auto-columns: minmax(130px, auto);
+    align-self: flex-start;
+  }
+}
+.ob-tab {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--sv-muted);
+}
+.ob-tab[aria-selected="true"] {
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark-2);
+  box-shadow: var(--neu-dark-raised-sm);
+}
+.ob-tab[aria-selected="true"] svg {
+  color: var(--mv-amber);
+}
+.ob-tab .ob-n {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+  background: rgba(255, 225, 199, 0.12);
+  color: var(--mv-cream);
+}
+@media (max-width: 380px) {
+  .ob-tab {
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+  .ob-tab svg {
+    display: none;
+  }
+}
+.ob-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  animation: ob-fade var(--mv-dur-base) var(--mv-ease) both;
+}
+.ob-panel:focus-visible {
+  box-shadow: none;
+  outline: 2px solid var(--mv-amber);
+  outline-offset: 6px;
+  border-radius: 12px;
+}
+@keyframes ob-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Category chips */
+.ob-chips {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 4px 10px;
+  margin: 0 -4px;
+  scrollbar-width: none;
+}
+.ob-chips::-webkit-scrollbar {
+  display: none;
+}
+.ob-chip {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark-2);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+}
+.ob-chip:not(:disabled):active {
+  box-shadow: var(--neu-dark-pressed);
+}
+.ob-chip[aria-pressed="true"] {
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-pressed);
+  color: var(--mv-amber);
+  border-color: rgba(245, 166, 35, 0.45);
+}
+
+/* Menu */
+.ob-seclabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.ob-seclabel svg {
+  color: var(--mv-amber);
+}
+.ob-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ob-menu-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 2px 4px 6px;
+}
+@media (min-width: 720px) {
+  .ob-menu-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1040px) {
+  .ob-menu-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.ob-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  min-width: 0;
+  border-radius: 22px;
+  background: var(--mv-cream);
+  color: var(--mv-coffee);
+  box-shadow: var(--neu-cream-raised-sm);
+}
+.ob-item-top {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.ob-item-media {
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--mv-peach);
+  box-shadow: var(--neu-cream-inset);
+}
+.ob-item-media img,
+.ob-item-media .ob-item-fallback {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a4416;
+}
+.ob-item-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ob-item-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.ob-item-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #6b625c;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.ob-item-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: #f4e8d8;
+  box-shadow: var(--neu-cream-inset);
+}
+.ob-price {
+  font-size: 17px;
+  font-weight: 800;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ob-request {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark-2);
+  box-shadow: var(--neu-dark-raised-sm);
+}
+.ob-request:not(:disabled):active {
+  box-shadow: var(--neu-dark-pressed);
+}
+
+/* Info tab */
+.ob-facts {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 720px) {
+  .ob-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ob-fact {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px;
+  min-width: 0;
+  border-radius: 20px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+}
+.ob-fact-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mv-amber);
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+}
+.ob-fact dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sv-muted);
+}
+.ob-fact dd {
+  margin: 2px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.ob-fact a {
+  color: var(--mv-orange);
+  text-decoration: underline;
+}
+.ob-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.ob-tag {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+}
+.ob-about {
+  margin: 0;
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: var(--mv-cream);
+  color: var(--mv-coffee);
+  box-shadow: var(--neu-cream-raised-sm);
+  font-size: 14.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+/* Continue button: plain block at the end of the page (not fixed, no container) */
+.ob-continue {
+  margin-top: auto;
+  padding-top: 8px;
+}
+@media (min-width: 720px) {
+  .ob-continue {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .ob-continue > * {
+    width: 100%;
+    max-width: 380px;
+  }
+}
+
+/* ---------- Plan setup ---------- */
+.ob-plan {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+@media (min-width: 980px) {
+  .ob-plan {
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 32px;
+  }
+  /* Inputs stay put while the summary / terms / pay column scrolls past.
+     If the window is shorter than the inputs, they scroll inside their own
+     box until everything has been in view, then stay fixed. The negative
+     margin + padding keep raised shadows and focus rings from being clipped. */
+  .ob-plan-inputs {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: -8px;
+    padding: 8px;
+    scrollbar-width: thin;
+  }
+}
+.ob-col {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.ob-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ob-hint {
+  margin: 8px 0 0 6px;
+  font-size: 12.5px;
+  color: var(--sv-muted); /* --sv-faint measures 4.39:1 here, under the 4.5:1 AA minimum for small text */
+}
+.ob-field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--sv-bad);
+}
+.ob-field-error svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.sv-input[data-invalid="true"],
+.sv-amountplate[data-invalid="true"] {
+  border-color: var(--sv-bad);
+}
+.sv-amountplate[data-invalid="true"] {
+  box-shadow: var(--neu-cream-inset), 0 0 0 2px var(--sv-bad);
+}
+.ob-suffix {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sv-muted);
+}
+.ob-chosen {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.ob-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 26px;
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised);
+  border: 1px solid var(--mv-hairline);
+}
+.ob-summary h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.ob-credit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: #f4e8d8;
+  box-shadow: var(--neu-cream-inset);
+  color: var(--mv-coffee);
+}
+.ob-credit span:first-child {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b625c;
+}
+.ob-credit strong {
+  font-size: clamp(28px, 8vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.ob-credit em {
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b625c;
+}
+
+.ob-terms-card {
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: var(--mv-peach);
+  color: var(--mv-coffee);
+  box-shadow: var(--neu-cream-raised-sm);
+}
+.ob-terms-card h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a4416;
+}
+.ob-terms-card ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.ob-terms-card a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8a4416;
+  text-decoration: underline;
+}
+
+/* Accessible neumorphic checkbox: a REAL <input type="checkbox"> + <label>.
+   The input is visually hidden but stays focusable; every visual state is
+   driven by :checked / :focus-visible / :disabled / [aria-invalid] on it. */
+.ob-check {
+  position: relative;
+}
+.ob-check-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.ob-check-label {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  min-height: 56px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  cursor: pointer;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--mv-cream);
+  background: var(--mv-surface-dark);
+  box-shadow: var(--neu-dark-raised-sm);
+  border: 1px solid var(--mv-hairline);
+  transition: box-shadow var(--mv-dur-base) var(--mv-ease), background-color var(--mv-dur-base) ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ob-check-box {
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(252, 244, 234, 0.55); /* >= 3:1 against the row, so an empty box is findable */
+  flex-shrink: 0;
+  margin-top: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-inset);
+  color: transparent;
+  transition: background var(--mv-dur-base) ease, color var(--mv-dur-fast) ease;
+}
+.ob-check-input:checked + .ob-check-label {
+  background: var(--mv-espresso);
+  box-shadow: var(--neu-dark-pressed);
+}
+.ob-check-input:checked + .ob-check-label .ob-check-box {
+  background: linear-gradient(160deg, var(--mv-orange) -40%, var(--mv-tomato) 55%);
+  box-shadow: var(--neu-action);
+  border-color: transparent;
+  color: #fff;
+}
+.ob-check-input:focus-visible + .ob-check-label {
+  box-shadow: var(--neu-dark-raised-sm), var(--mv-focus);
+}
+.ob-check-input:checked:focus-visible + .ob-check-label {
+  box-shadow: var(--neu-dark-pressed), var(--mv-focus);
+}
+.ob-check-input[aria-invalid="true"] + .ob-check-label {
+  border-color: var(--sv-bad);
+  box-shadow: var(--neu-dark-raised-sm), 0 0 0 2px var(--sv-bad);
+}
+.ob-check-input:disabled + .ob-check-label {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+@media (hover: hover) {
+  .ob-check-input:not(:disabled) + .ob-check-label:hover {
+    filter: brightness(1.06);
+  }
+}
+
+/* ---------- Reviews (restyle of the existing component) ---------- */
+.ob-reviews-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--sv-muted);
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .ob-rise,
+  .ob-panel {
+    animation: none;
+  }
+  .ob-hotel,
+  .ob-check-label,
+  .ob-check-box {
+    transition: none;
+  }
+  .ob-hotel:hover {
+    transform: none;
+  }
+}

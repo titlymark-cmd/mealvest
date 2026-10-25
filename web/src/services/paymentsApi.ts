@@ -22,6 +22,10 @@ export interface PaymentConfig {
   provider: PaymentProviderName;
   hostedCheckoutAvailable: boolean;
   testMode: boolean;
+  /** Plan-setup limits the server enforces. Absent on older servers. */
+  limits?: { minAmount: number; maxAmount: number; minDays: number; maxDays: number };
+  /** Current savings-withdrawal fee (admin-configurable). Absent on older servers or if the setting could not be read. */
+  withdrawalFeePercent?: number;
 }
 
 /** Which provider the server routes NEW payments to, and whether a hosted checkout page exists for it (Cyzora only). */

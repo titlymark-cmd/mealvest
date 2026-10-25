@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "crypto";
 import { generatePaymentReference } from "../src/services/paymentService";
 import { PaystackPaymentProvider } from "../src/services/paystackProvider";
-import { initializeSchema } from "../src/controllers/payments.controller";
+import { initializeSchema, planLimits } from "../src/controllers/payments.controller";
 
 /**
  * Deliberately scoped to logic that doesn't need a live Paystack call
@@ -110,5 +110,19 @@ describe("initializeSchema validation boundaries", () => {
   test("rejects more than 90 days", () => {
     const result = initializeSchema.safeParse({ amount: 5000, numberOfDays: 91, phone: "0712345678", email: "a@b.com" });
     assert.equal(result.success, false);
+  });
+});
+
+describe("planLimits (exposed via GET /api/payments/config)", () => {
+  const base = { phone: "0712345678", email: "a@b.co", termsAccepted: true as const };
+
+  test("matches exactly what initializeSchema enforces", () => {
+    const l = planLimits();
+    assert.equal(initializeSchema.safeParse({ ...base, amount: l.minAmount, numberOfDays: l.minDays }).success, true);
+    assert.equal(initializeSchema.safeParse({ ...base, amount: l.maxAmount, numberOfDays: l.maxDays }).success, true);
+    assert.equal(initializeSchema.safeParse({ ...base, amount: l.minAmount - 1, numberOfDays: 30 }).success, false);
+    assert.equal(initializeSchema.safeParse({ ...base, amount: l.maxAmount + 1, numberOfDays: 30 }).success, false);
+    assert.equal(initializeSchema.safeParse({ ...base, amount: 5000, numberOfDays: l.maxDays + 1 }).success, false);
+    assert.equal(initializeSchema.safeParse({ ...base, amount: 5000, numberOfDays: l.minDays - 1 }).success, false);
   });
 });

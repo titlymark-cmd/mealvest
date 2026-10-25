@@ -22,7 +22,7 @@ import {
   PendingTransactionLookup,
 } from "../services/paymentService";
 import { verifyTransactionRow } from "../services/paymentVerification";
-import { getActiveBudget } from "../services/budgetService";
+import { getActiveBudget, getWithdrawalFeePercent } from "../services/budgetService";
 import { getPayoutByReference } from "../models/hotelPayoutModel";
 import { verifyPayout, applyCyzoraPayoutWebhook } from "../services/hotelPayoutService";
 import { pool } from "../config/db";
@@ -39,6 +39,16 @@ export function activePaymentProvider(): "paystack" | "cyzora" {
 
 const MIN_AMOUNT = 500;
 const MAX_AMOUNT = 50000;
+const MAX_PLAN_DAYS = 90;
+
+/**
+ * The plan-setup limits enforced by initializeSchema, exposed read-only via
+ * GET /api/payments/config so the student UI validates against the same
+ * numbers instead of keeping its own copy.
+ */
+export function planLimits() {
+  return { minAmount: MIN_AMOUNT, maxAmount: MAX_AMOUNT, minDays: 1, maxDays: MAX_PLAN_DAYS };
+}
 
 // Meal Boost is a small top-up to an already-active plan, not a new
 // plan purchase — same currency, deliberately lower floor than a
@@ -57,7 +67,7 @@ const MAX_BOOST_AMOUNT = 20000;
 // against a sane range rather than looked up from a catalog.
 export const initializeSchema = z.object({
   amount: z.number().min(MIN_AMOUNT, `Minimum plan amount is KSh ${MIN_AMOUNT}.`).max(MAX_AMOUNT, `Maximum plan amount is KSh ${MAX_AMOUNT}.`),
-  numberOfDays: z.number().int().min(1).max(90),
+  numberOfDays: z.number().int().min(1).max(MAX_PLAN_DAYS),
   phone: z.string().min(9),
   email: z.string().email(),
   hotelId: z.string().uuid().optional().nullable(),
@@ -458,10 +468,20 @@ export async function initializeCyzoraCheckout(req: AuthedRequest, res: Response
 /** GET /api/payments/config — lets the payment screen know which provider is active and whether hosted checkout exists for it. */
 export async function getPaymentConfig(_req: AuthedRequest, res: Response) {
   const provider = activePaymentProvider();
+  // Additive fields (existing keys unchanged). The fee is best-effort: if the
+  // settings read fails the field is simply omitted and the client falls back.
+  let withdrawalFeePercent: number | undefined;
+  try {
+    withdrawalFeePercent = await getWithdrawalFeePercent(pool);
+  } catch {
+    withdrawalFeePercent = undefined;
+  }
   res.json({
     provider,
     hostedCheckoutAvailable: provider === "cyzora" && isCyzoraConfigured(),
     testMode: provider === "cyzora" ? isCyzoraTestMode() : env.paystackSecretKey.startsWith("sk_test_"),
+    limits: planLimits(),
+    ...(withdrawalFeePercent !== undefined ? { withdrawalFeePercent } : {}),
   });
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Star, MessageSquare } from "lucide-react";
+import { Star, MessageSquare, RefreshCw } from "lucide-react";
 import { Card } from "../Card";
 import { Spinner } from "../Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
@@ -19,7 +19,12 @@ export function Stars({ value, size = 14, onChange }: { value: number; size?: nu
   const [hover, setHover] = useState<number | null>(null);
   const shown = hover ?? value;
   return (
-    <div style={{ display: "flex", flexDirection: "row", gap: onChange ? 4 : 2 }} onMouseLeave={() => setHover(null)}>
+    <div
+      style={{ display: "flex", flexDirection: "row", gap: onChange ? 4 : 2 }}
+      onMouseLeave={() => setHover(null)}
+      role={onChange ? "group" : "img"}
+      aria-label={onChange ? "Your rating" : `${Number(value).toFixed(1)} out of 5 stars`}
+    >
       {[1, 2, 3, 4, 5].map((n) => {
         const filled = n <= Math.round(shown);
         const star = (
@@ -30,15 +35,16 @@ export function Stars({ value, size = 14, onChange }: { value: number; size?: nu
             strokeWidth={filled ? 1.5 : 1.75}
           />
         );
-        if (!onChange) return <span key={n}>{star}</span>;
+        if (!onChange) return <span key={n} aria-hidden="true">{star}</span>;
         return (
           <button
             key={n}
             type="button"
             aria-label={`${n} star${n === 1 ? "" : "s"}`}
+            aria-pressed={n === value}
             onClick={() => onChange(n)}
             onMouseEnter={() => setHover(n)}
-            style={{ padding: 2 }}
+            style={{ padding: 8 }}
           >
             {star}
           </button>
@@ -167,6 +173,25 @@ export function HotelReviews({ hotelId, hotelName }: { hotelId: string; hotelNam
         </div>
       )}
 
+      {!loading && !summary && error && (
+        <Card style={styles.summaryCard}>
+          <p style={{ ...styles.error, marginTop: 0 }} role="alert">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              load();
+            }}
+            style={styles.smallBtn}
+          >
+            <RefreshCw size={14} color={COLORS.primary} aria-hidden="true" />
+            <span style={styles.smallBtnText}>Try again</span>
+          </button>
+        </Card>
+      )}
+
       {!loading && summary && (
         <Card style={styles.summaryCard}>
           <div style={styles.summaryTop}>
@@ -222,6 +247,7 @@ export function HotelReviews({ hotelId, hotelName }: { hotelId: string; hotelNam
               <Stars value={rating} size={24} onChange={setRating} />
               <textarea
                 style={styles.textarea}
+                aria-label="Your review (optional)"
                 placeholder="What was the food and service like? (optional, 500 characters max)"
                 value={comment}
                 maxLength={500}
@@ -257,6 +283,11 @@ export function HotelReviews({ hotelId, hotelName }: { hotelId: string; hotelNam
               <span style={styles.reviewDate}>{when(r.updated_at)}</span>
             </Card>
           ))}
+          {summary && summary.count > reviews.length && (
+            <p className="ob-reviews-note">
+              Showing the latest {reviews.length} of {summary.count} reviews.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -282,8 +313,8 @@ const styles: Record<string, React.CSSProperties> = {
   mineLabel: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.text, marginBottom: 4 },
   mineComment: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, margin: "6px 0 0 0", lineHeight: "18px" },
   mineActions: { display: "flex", flexDirection: "row", gap: 6 },
-  smallBtn: { padding: "6px 10px", borderRadius: RADIUS.pill, border: `1px solid ${COLORS.borderSoft}` },
-  smallBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.textMuted },
+  smallBtn: { minHeight: 44, padding: "0 16px", display: "inline-flex", alignItems: "center", gap: 6, borderRadius: RADIUS.pill, border: `1px solid ${COLORS.borderSoft}` },
+  smallBtnText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12.5, color: COLORS.textMuted },
   form: { display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${COLORS.borderSoft}`, paddingTop: 10 },
   textarea: {
     width: "100%",

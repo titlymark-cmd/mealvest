@@ -1,38 +1,52 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, Check, Smartphone } from "lucide-react";
-import { Card } from "../../components/Card";
+import { ArrowLeft, CalendarDays, Check, CircleAlert, ExternalLink, Info, ShieldCheck, Smartphone, Store, TriangleAlert } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
-import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
+import { TermsCheckbox } from "../../components/student/TermsCheckbox";
 import { useAuth } from "../../context/AuthContext";
-import { initializePayment, initializeCheckoutPayment, getPaymentConfig } from "../../services/paymentsApi";
+import { initializePayment, initializeCheckoutPayment, getPaymentConfig, PaymentConfig } from "../../services/paymentsApi";
 import { usePaymentStatusPoll } from "../../hooks/usePaymentStatusPoll";
+import { computeDailyAllowance, PLAN_FIELD_ORDER, PlanField, validatePlan } from "../../utils/planSetup";
+import "../../styles/onboarding.css";
 
 const PRESETS = [2000, 3000, 5000, 12000, 15000];
+const DAY_PRESETS = [7, 14, 30, 60];
+// Used only until GET /api/payments/config reports the live figure (or when an older server omits it).
+const FALLBACK_FEE_NOTE = "less the MEALVEST withdrawal fee";
 
-const DISCLAIMER_TEXT =
-  "Before you continue, please understand:\n\n" +
-  "• Money committed to your Mealvest plan is intended for meals during the selected plan period.\n" +
-  "• Committed funds are not immediately withdrawable or refundable before the plan period ends, except where a supported cancellation policy applies.\n" +
-  "• Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over to the next day. Whatever is still unspent when your plan ends becomes savings you can withdraw to M-Pesa, less a 10% MEALVEST fee.\n" +
-  "• Please review your amount, days, and hotel before confirming.";
+/**
+ * Same four statements as before (wording unchanged); only the fee figure is
+ * now read from the server instead of being typed in, so it can't drift when
+ * the admin changes the withdrawal fee.
+ */
+function termsPoints(feePercent: number | undefined): string[] {
+  const fee = feePercent === undefined ? FALLBACK_FEE_NOTE : `less a ${feePercent}% MEALVEST fee`;
+  return [
+    "Money committed to your Mealvest plan is intended for meals during the selected plan period.",
+    "Committed funds are not immediately withdrawable or refundable before the plan period ends, except where a supported cancellation policy applies.",
+    `Unused daily meal balance isn't spent automatically — each day, you'll be asked to carry it over to the next day. Whatever is still unspent when your plan ends becomes savings you can withdraw to M-Pesa, ${fee}.`,
+    "Please review your amount, days, and hotel before confirming.",
+  ];
+}
 
 type Stage = "form" | "awaiting_stk" | "success" | "error";
 
+const fmt = (n: number) => n.toLocaleString("en-KE", { maximumFractionDigits: 2 });
+
 /**
- * Real Paystack flow, matching exactly what the backend actually
- * enforces:
- *   1. initializePayment() — requires termsAccepted:true, or the
- *      backend rejects the request before Paystack is ever contacted.
- *      Triggers an M-Pesa STK push straight to the student's phone
- *      (paystackProvider.ts's /charge call) — there's no checkout
- *      page to visit.
- *   2. This screen polls verifyPayment() in place (usePaymentStatusPoll,
- *      same logic PaymentCallbackScreen used to run after a redirect)
- *      until Paystack confirms — nothing in this screen can mark a
- *      payment successful on its own; the poll is just watching for
- *      the backend's own activatePaymentIfNeeded to have run.
+ * Onboarding stage 3: set up the plan and pay.
+ *
+ * Business flow unchanged:
+ *   1. initializePayment() — requires termsAccepted:true or the backend
+ *      rejects the request before the provider is contacted. Triggers an
+ *      M-Pesa STK push straight to the student's phone.
+ *   2. This screen polls verifyPayment() in place (usePaymentStatusPoll)
+ *      until the provider confirms — nothing here can mark a payment
+ *      successful on its own; the poll only watches for the backend's own
+ *      activatePaymentIfNeeded to have run.
+ * What changed: presentation, field-level validation aligned with the
+ * server's real limits, an accessible terms checkbox, and a submit guard.
  */
 export default function BudgetOnboardingScreen() {
   const location = useLocation();
@@ -42,32 +56,48 @@ export default function BudgetOnboardingScreen() {
   const poll = usePaymentStatusPoll(authFetch);
 
   const [amount, setAmount] = useState("5000");
-  const [amountFocused, setAmountFocused] = useState(false);
   const [days, setDays] = useState("30");
   const [phone, setPhone] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
-  const [error, setError] = useState<string | null>(null);
+  const [attempted, setAttempted] = useState(false); // show field errors only after a submit attempt
+  const [error, setError] = useState<string | null>(null); // server / payment-level problem
   const [displayText, setDisplayText] = useState<string | null>(null);
+  const [config, setConfig] = useState<PaymentConfig | null>(null);
+  const [openingCheckout, setOpeningCheckout] = useState(false);
+  const [paying, setPaying] = useState<{ amount: number; phone: string } | null>(null);
+  const submitLock = useRef(false); // synchronous guard: state updates are async, a fast double-tap is not
+
   // Hosted checkout is a Cyzora-only alternative to the STK push; the
   // server says whether it exists for the active provider so this
   // screen never shows a dead button on a Paystack deployment.
-  const [hostedCheckoutAvailable, setHostedCheckoutAvailable] = useState(false);
-  const [openingCheckout, setOpeningCheckout] = useState(false);
+  const hostedCheckoutAvailable = Boolean(config?.hostedCheckoutAvailable);
+  const providerLabel = config?.provider === "cyzora" ? "Cyzora" : "Paystack";
 
   useEffect(() => {
     let cancelled = false;
     getPaymentConfig(authFetch)
       .then((cfg) => {
-        if (!cancelled) setHostedCheckoutAvailable(Boolean(cfg.hostedCheckoutAvailable));
+        if (!cancelled) setConfig(cfg);
       })
       .catch(() => {
-        /* optional capability — stay on the STK-only form */
+        /* optional capability — stay on the STK-only form with basic validation */
       });
     return () => {
       cancelled = true;
     };
   }, [authFetch]);
+
+  // The app scrolls inside one shared container, so arriving from a long page
+  // would otherwise land mid-way down this one. Start at the top.
+  useEffect(() => {
+    document.getElementById("root")?.scrollTo?.({ top: 0 });
+    window.scrollTo?.(0, 0);
+  }, []);
+
+  // Don't keep polling for a payment after the student leaves this screen.
+  const { stop: stopPolling } = poll;
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
   useEffect(() => {
     if (poll.status === "success") {
@@ -80,50 +110,42 @@ export default function BudgetOnboardingScreen() {
     if (poll.status === "failed") {
       setError("Payment failed or was cancelled. You have not been charged.");
       setStage("error");
+      submitLock.current = false;
     } else if (poll.status === "timeout") {
       setError(
-        "We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once Paystack confirms."
+        `We haven't received confirmation yet. If you completed the payment, check back on your dashboard shortly — it will update automatically once ${providerLabel} confirms.`
       );
       setStage("error");
+      submitLock.current = false;
     } else if (poll.status === "error") {
       setError(poll.error || "Could not check payment status.");
       setStage("error");
+      submitLock.current = false;
     }
-  }, [poll.status, poll.error, navigate, hotelName]);
+  }, [poll.status, poll.error, navigate, hotelName, providerLabel]);
 
-  const dailyAllowance = (() => {
-    const a = Number(amount);
-    const d = Number(days);
-    if (!a || !d) return null;
-    return Math.round((a / d) * 100) / 100;
-  })();
+  const limits = config?.limits ?? null;
+  const validation = useMemo(
+    () => validatePlan({ amount, days, phone, termsAccepted, email: user?.email, limits }),
+    [amount, days, phone, termsAccepted, user?.email, limits]
+  );
+  // Never present a figure for a plan that can't actually be bought (e.g. below the minimum).
+  const planNumbersOk = !validation.errors.amount && !validation.errors.days;
+  const dailyAllowance = planNumbersOk ? computeDailyAllowance(Number(amount), Number(days)) : null;
+  const fieldError = (f: PlanField) => (attempted ? validation.errors[f] : undefined);
+  const busy = stage === "awaiting_stk" || openingCheckout;
+  const dayPresets = DAY_PRESETS.filter((d) => !limits || (d >= limits.minDays && d <= limits.maxDays));
 
-  const validateForm = (): { totalAmount: number; numberOfDays: number; email: string } | null => {
+  /** Returns validated values, or reveals the problems and moves focus to the first one. */
+  const validateForm = () => {
     setError(null);
-    const totalAmount = Number(amount);
-    const numberOfDays = Number(days);
-
-    if (!totalAmount || totalAmount <= 0) {
-      setError("Enter an amount greater than zero.");
-      return null;
-    }
-    if (!numberOfDays || numberOfDays <= 0) {
-      setError("Enter at least 1 day.");
-      return null;
-    }
-    if (phone.replace(/\D/g, "").length < 9) {
-      setError("Enter a valid phone number for M-Pesa.");
-      return null;
-    }
-    if (!termsAccepted) {
-      setError("Please accept the Mealvest payment terms to continue.");
-      return null;
-    }
-    if (!user?.email) {
-      setError("Your account has no email on file — please contact support.");
-      return null;
-    }
-    return { totalAmount, numberOfDays, email: user.email };
+    setAttempted(true);
+    if (validation.values) return validation.values;
+    const first = PLAN_FIELD_ORDER.find((f) => validation.errors[f]);
+    const ids: Partial<Record<PlanField, string>> = { amount: "plan-amount", days: "plan-days", phone: "plan-phone", terms: "plan-terms" };
+    if (first && ids[first]) document.getElementById(ids[first]!)?.focus();
+    if (first === "email") setError(validation.errors.email || null);
+    return null;
   };
 
   /**
@@ -134,36 +156,42 @@ export default function BudgetOnboardingScreen() {
    * redirect itself is treated as proof of payment.
    */
   const startHostedCheckout = async () => {
+    if (submitLock.current) return;
     const form = validateForm();
     if (!form) return;
+    submitLock.current = true;
     setOpeningCheckout(true);
     try {
       const { checkoutUrl } = await initializeCheckoutPayment(authFetch, {
         amount: form.totalAmount,
         numberOfDays: form.numberOfDays,
-        phone: phone.trim(),
+        phone: form.phone,
         email: form.email,
         hotelId: hotelId ?? null,
         termsAccepted: true,
       });
       window.location.assign(checkoutUrl);
     } catch (err) {
+      submitLock.current = false;
       setOpeningCheckout(false);
       setError(err instanceof Error ? err.message : "Could not open the checkout page. Please try again.");
     }
   };
 
   const startPayment = async () => {
+    if (submitLock.current) return; // ignore a second tap while a request is in flight
     const form = validateForm();
     if (!form) return;
+    submitLock.current = true;
     const { totalAmount, numberOfDays } = form;
 
+    setPaying({ amount: totalAmount, phone: form.phone });
     setStage("awaiting_stk");
     try {
       const { reference, displayText: dt } = await initializePayment(authFetch, {
         amount: totalAmount,
         numberOfDays,
-        phone: phone.trim(),
+        phone: form.phone,
         email: form.email,
         hotelId: hotelId ?? null,
         termsAccepted: true,
@@ -173,224 +201,304 @@ export default function BudgetOnboardingScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
       setStage("error");
+      submitLock.current = false;
     }
   };
 
+  const onSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      startPayment();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [amount, days, phone, termsAccepted, user?.email, limits, hotelId, authFetch]
+  );
+
   if (stage === "success") {
     return (
-      <div style={styles.center}>
-        <Check size={40} color={COLORS.success} />
-        <p style={styles.statusText}>Payment confirmed!</p>
-        <p style={styles.statusSubtext}>Taking you to your dashboard…</p>
+      <div className="sv-flow-bg">
+        <main className="sv-flow sv-flow--center" role="status">
+          <span className="sv-medal" data-tone="ok" aria-hidden="true">
+            <Check size={46} strokeWidth={3} />
+          </span>
+          <h1 className="sv-title" style={{ fontSize: 24 }}>
+            Payment confirmed!
+          </h1>
+          <p className="sv-lede" style={{ margin: 0 }}>
+            Taking you to your dashboard…
+          </p>
+        </main>
       </div>
     );
   }
 
   if (stage === "awaiting_stk") {
     return (
-      <div style={styles.center}>
-        <Smartphone size={40} color={COLORS.primary} />
-        <p style={styles.statusText}>Check your phone</p>
-        <p style={styles.statusSubtext}>{displayText}</p>
-        <div style={{ marginTop: 20 }}>
-          <Spinner color={COLORS.primary} />
-        </div>
+      <div className="sv-flow-bg">
+        <main className="sv-flow sv-flow--center" role="status" aria-live="polite">
+          <span className="sv-medal" data-pulse="true" aria-hidden="true">
+            <Smartphone size={42} />
+          </span>
+          <h1 className="sv-title" style={{ fontSize: 24 }}>
+            Check your phone
+          </h1>
+          <p className="sv-lede" style={{ margin: 0 }}>
+            {displayText ?? "Sending the M-Pesa prompt…"}
+          </p>
+          {paying && (
+            <div className="sv-receipt-rows" style={{ width: "100%", maxWidth: 360, marginTop: 8 }}>
+              <div className="sv-receipt-row">
+                <span>Amount</span>
+                <span>KSh {fmt(paying.amount)}</span>
+              </div>
+              <div className="sv-receipt-row">
+                <span>M-Pesa number</span>
+                <span>{paying.phone}</span>
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10, color: "var(--sv-muted)", fontSize: 13 }}>
+            <Spinner color="#F5A623" />
+            Waiting for M-Pesa to confirm…
+          </div>
+        </main>
       </div>
     );
   }
 
+  const feePercent = config?.withdrawalFeePercent;
+  const amountErr = fieldError("amount");
+  const daysErr = fieldError("days");
+  const phoneErr = fieldError("phone");
+  const termsErr = fieldError("terms");
+  const totalNumber = Number(amount);
+  const daysNumber = Number(days);
+  const rangeHint = limits ? `KSh ${fmt(limits.minAmount)} – ${fmt(limits.maxAmount)}` : null;
+
   return (
-    <div style={styles.container}>
-      <button onClick={() => navigate(-1)} style={styles.backRow}>
-        <ArrowLeft size={16} color={COLORS.primary} />
-        <span style={styles.backText}>Back</span>
-      </button>
+    <div className="ob-bg">
+      <div className="ob-wrap">
+        <button type="button" onClick={() => navigate(-1)} className="ob-back ob-rise">
+          <ArrowLeft size={18} aria-hidden="true" /> Back
+        </button>
 
-      <h1 style={styles.title}>Set up your plan</h1>
-      <p style={styles.subtitle}>
-        {hotelName ? `For ${hotelName}. ` : ""}
-        Tell us how much you have and how many days it should cover.
-      </p>
+        <header className="ob-rise">
+          <h1 className="sv-title">Set up your plan</h1>
+          <p className="sv-lede">
+            {hotelName ? `For ${hotelName}. ` : ""}
+            Tell us how much you have and how many days it should cover.
+          </p>
+        </header>
 
-      {selectedItemName && (
-        <Card style={styles.chosenCard}>
-          <span style={styles.chosenLabel}>You requested</span>
-          <span style={styles.chosenItem}>
-            {selectedItemName} — KSh {Number(selectedItemPrice).toLocaleString()}
-          </span>
-        </Card>
-      )}
+        <form className="ob-plan" onSubmit={onSubmit} noValidate>
+          {/* ------------------------- inputs ------------------------- */}
+          <div className="ob-col ob-plan-inputs">
+            {selectedItemName && (
+              <div className="sv-note">
+                <Info size={18} aria-hidden="true" />
+                <span>
+                  You requested <b>{selectedItemName}</b> — KSh {Number(selectedItemPrice).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {!hotelId && (
+              <div className="sv-note">
+                <Store size={18} aria-hidden="true" />
+                <span>
+                  No hotel is selected for this plan.{" "}
+                  <button type="button" className="sv-link" onClick={() => navigate("/student")} style={{ display: "inline", minHeight: 0, padding: 0 }}>
+                    Choose a hotel
+                  </button>
+                </span>
+              </div>
+            )}
 
-      <span style={styles.label}>How much do you have for food?</span>
-      <div
-        style={{
-          ...styles.amountRow,
-          borderColor: amountFocused ? "#ff8a3d" : COLORS.border,
-          boxShadow: amountFocused ? "0 0 0 3px rgba(245, 166, 35, 0.3)" : "none",
-        }}
-      >
-        <span style={styles.currencyPrefix}>KSh</span>
-        <input
-          className="mv-input-plain"
-          style={styles.amountInput}
-          inputMode="numeric"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          onFocus={() => setAmountFocused(true)}
-          onBlur={() => setAmountFocused(false)}
-        />
-      </div>
-      <div style={styles.pillRow}>
-        {PRESETS.map((v) => (
-          <button key={v} style={styles.presetPill} onClick={() => setAmount(String(v))}>
-            <span style={styles.presetPillText}>KSh {v.toLocaleString()}</span>
-          </button>
-        ))}
-      </div>
+            <section className="ob-section" aria-label="Amount">
+              <div className="sv-amountplate" data-invalid={amountErr ? "true" : undefined}>
+                <label htmlFor="plan-amount">How much do you have for food?</label>
+                <div className="sv-amountrow">
+                  <span>KSh</span>
+                  <input
+                    id="plan-amount"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, "").slice(0, 7))}
+                    aria-invalid={amountErr ? true : undefined}
+                    aria-describedby={amountErr ? "plan-amount-error" : rangeHint ? "plan-amount-hint" : undefined}
+                  />
+                </div>
+              </div>
+              <div className="sv-presets" role="group" aria-label="Quick amounts" style={{ marginTop: 12 }}>
+                {PRESETS.map((v) => (
+                  <button key={v} type="button" className="sv-preset" aria-pressed={totalNumber === v} onClick={() => setAmount(String(v))}>
+                    KSh {v.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+              {amountErr ? (
+                <p className="ob-field-error" id="plan-amount-error" role="alert">
+                  <CircleAlert size={16} aria-hidden="true" />
+                  {amountErr}
+                </p>
+              ) : (
+                rangeHint && (
+                  <p className="ob-hint" id="plan-amount-hint">
+                    You can start a plan with {rangeHint}.
+                  </p>
+                )
+              )}
+            </section>
 
-      <span style={{ ...styles.label, marginTop: 20 }}>How many days should this cover?</span>
-      <input style={styles.input} inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} />
+            <section className="ob-section" aria-label="Plan length">
+              <label className="sv-fieldlabel" htmlFor="plan-days">
+                How many days should this cover?
+              </label>
+              <div className="sv-input" data-invalid={daysErr ? "true" : undefined}>
+                <CalendarDays size={18} aria-hidden="true" />
+                <input
+                  id="plan-days"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={days}
+                  onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+                  aria-invalid={daysErr ? true : undefined}
+                  aria-describedby={daysErr ? "plan-days-error" : undefined}
+                />
+                <span className="ob-suffix" aria-hidden="true" style={{ paddingRight: 14 }}>
+                  days
+                </span>
+              </div>
+              <div className="sv-presets" role="group" aria-label="Quick plan lengths" style={{ marginTop: 12 }}>
+                {dayPresets.map((d) => (
+                  <button key={d} type="button" className="sv-preset" aria-pressed={daysNumber === d} onClick={() => setDays(String(d))}>
+                    {d} days
+                  </button>
+                ))}
+              </div>
+              {daysErr && (
+                <p className="ob-field-error" id="plan-days-error" role="alert">
+                  <CircleAlert size={16} aria-hidden="true" />
+                  {daysErr}
+                </p>
+              )}
+            </section>
 
-      <span style={{ ...styles.label, marginTop: 20 }}>M-Pesa phone number to pay with</span>
-      <input style={styles.input} type="tel" inputMode="tel" placeholder="07XX XXX XXX" value={phone} onChange={(e) => setPhone(e.target.value)} />
-
-      {dailyAllowance !== null && (
-        <div style={styles.summaryCard}>
-          <div style={styles.summaryHeader}>
-            <Sparkles size={14} color="#fff" />
-            <span style={styles.summaryLabel}>DAILY MEAL CREDIT</span>
+            <section className="ob-section" aria-label="Payment number">
+              <label className="sv-fieldlabel" htmlFor="plan-phone">
+                M-Pesa phone number to pay with
+              </label>
+              <div className="sv-input" data-invalid={phoneErr ? "true" : undefined}>
+                <Smartphone size={18} aria-hidden="true" />
+                <input
+                  id="plan-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="07XX XXX XXX"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  aria-invalid={phoneErr ? true : undefined}
+                  aria-describedby={phoneErr ? "plan-phone-error" : undefined}
+                />
+              </div>
+              {phoneErr && (
+                <p className="ob-field-error" id="plan-phone-error" role="alert">
+                  <CircleAlert size={16} aria-hidden="true" />
+                  {phoneErr}
+                </p>
+              )}
+            </section>
           </div>
-          <span style={styles.summaryValue}>KSh {dailyAllowance.toLocaleString()}/day</span>
-        </div>
-      )}
 
-      {error && <p style={styles.error}>{error}</p>}
-      {stage === "error" && (
-        <button onClick={() => navigate("/student/home")} style={{ ...styles.secondaryLinkBtn, alignSelf: "center" }}>
-          <span style={styles.secondaryLinkText}>Check my dashboard instead — a payment may still confirm</span>
-        </button>
-      )}
+          {/* ---------------- summary, terms, confirm ---------------- */}
+          <aside className="ob-col ob-plan-aside" aria-label="Plan summary and confirmation">
+            <div className="ob-summary">
+              <h2>Your plan</h2>
+              <div className="ob-credit" aria-live="polite">
+                <span>Daily meal credit</span>
+                <strong>{dailyAllowance !== null ? `KSh ${fmt(dailyAllowance)}/day` : "—"}</strong>
+                <em>{dailyAllowance !== null ? "Your meal budget for each day of the plan" : "Enter a valid amount and number of days"}</em>
+              </div>
+              <div className="sv-receipt-rows">
+                <div className="sv-receipt-row">
+                  <span>Hotel</span>
+                  <span>{hotelName || "Not selected"}</span>
+                </div>
+                <div className="sv-receipt-row">
+                  <span>Plan length</span>
+                  <span>{planNumbersOk && daysNumber > 0 ? `${daysNumber} ${daysNumber === 1 ? "day" : "days"}` : "—"}</span>
+                </div>
+                <div className="sv-receipt-row" data-strong="true">
+                  <span>You pay today</span>
+                  <span>{planNumbersOk && totalNumber > 0 ? `KSh ${fmt(totalNumber)}` : "—"}</span>
+                </div>
+              </div>
+              <p className="ob-hint" style={{ margin: 0 }}>
+                Your plan starts when M-Pesa confirms your payment and runs for the number of days above.
+              </p>
+            </div>
 
-      <Card style={styles.disclaimerCard}>
-        <span style={styles.disclaimerTitle}>IMPORTANT MEALVEST TERMS</span>
-        <p style={styles.disclaimerBody}>{DISCLAIMER_TEXT}</p>
-        <a href="/terms?section=payments" target="_blank" rel="noreferrer" style={styles.disclaimerLink}>
-          Read the full terms, payments &amp; savings policy
-        </a>
-      </Card>
+            <section className="ob-terms-card" aria-labelledby="plan-terms-title">
+              <h3 id="plan-terms-title">Important MEALVEST terms</h3>
+              <ul>
+                {termsPoints(feePercent).map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+              <a href="/terms?section=payments" target="_blank" rel="noopener noreferrer">
+                Read the full terms, payments &amp; savings policy <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            </section>
 
-      <button style={styles.checkboxRow} onClick={() => setTermsAccepted((v) => !v)}>
-        <div style={{ ...styles.checkbox, ...(termsAccepted ? styles.checkboxChecked : null) }}>
-          {termsAccepted && <Check size={13} color="#fff" strokeWidth={3} />}
-        </div>
-        <span style={styles.checkboxLabel}>I have read and understand the Mealvest payment and contract terms.</span>
-      </button>
+            <div>
+              <TermsCheckbox
+                id="plan-terms"
+                checked={termsAccepted}
+                onChange={setTermsAccepted}
+                disabled={busy}
+                invalid={Boolean(termsErr)}
+                describedBy={termsErr ? "plan-terms-error" : undefined}
+              >
+                I have read and understand the Mealvest payment and contract terms.
+              </TermsCheckbox>
+              {termsErr && (
+                <p className="ob-field-error" id="plan-terms-error" role="alert">
+                  <CircleAlert size={16} aria-hidden="true" />
+                  {termsErr}
+                </p>
+              )}
+            </div>
 
-      <PrimaryButton onPress={startPayment} disabled={!termsAccepted || openingCheckout} style={{ marginTop: 14 }}>
-        Pay with M-Pesa
-      </PrimaryButton>
+            {error && (
+              <div className="sv-toast" data-tone="bad" role="alert" style={{ alignItems: "flex-start" }}>
+                <TriangleAlert size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{error}</span>
+              </div>
+            )}
+            {stage === "error" && (
+              <button type="button" onClick={() => navigate("/student/home")} className="sv-link">
+                Check my dashboard instead — a payment may still confirm
+              </button>
+            )}
 
-      {hostedCheckoutAvailable && (
-        <button
-          onClick={startHostedCheckout}
-          disabled={!termsAccepted || openingCheckout}
-          style={{ ...styles.secondaryLinkBtn, alignSelf: "center", opacity: termsAccepted ? 1 : 0.5 }}
-        >
-          <span style={styles.secondaryLinkText}>
-            {openingCheckout ? "Opening secure checkout…" : "Pay on Cyzora's secure checkout page instead"}
-          </span>
-        </button>
-      )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <PrimaryButton type="submit" disabled={busy} loading={openingCheckout}>
+                Pay with M-Pesa
+              </PrimaryButton>
+              {hostedCheckoutAvailable && (
+                <PrimaryButton variant="secondary" type="button" onPress={startHostedCheckout} disabled={busy} showArrow={false}>
+                  {openingCheckout ? "Opening secure checkout…" : `Pay on ${providerLabel}'s secure checkout page instead`}
+                </PrimaryButton>
+              )}
+            </div>
+            <p className="ob-hint" style={{ margin: "0 0 0 6px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <ShieldCheck size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>You'll get an M-Pesa prompt on your phone. Nothing is added to your plan until the payment is confirmed.</span>
+            </p>
+          </aside>
+        </form>
+      </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { flexShrink: 0, width: "100%", minHeight: "100%", backgroundColor: COLORS.bg, padding: 20, paddingTop: 56, display: "flex", flexDirection: "column" },
-  backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
-  backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
-  center: { flexShrink: 0, width: "100%", minHeight: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg, padding: 24 },
-  statusText: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 16, color: COLORS.textOnDark, marginTop: 16, textAlign: "center" },
-  statusSubtext: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, marginTop: 6, textAlign: "center" },
-  secondaryLinkBtn: { marginTop: 18 },
-  secondaryLinkText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12, color: COLORS.primary, textAlign: "center" },
-  title: { fontSize: 22, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.textOnDark, margin: 0 },
-  subtitle: { fontSize: 13, fontFamily: FONTS.body, color: COLORS.textOnDarkMuted, marginTop: 4, marginBottom: 24 },
-  chosenCard: { marginBottom: 20, backgroundColor: COLORS.accentSoft, display: "flex", flexDirection: "column" },
-  chosenLabel: { fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textMuted, textTransform: "uppercase" },
-  chosenItem: { fontSize: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.text, marginTop: 2 },
-  label: { display: "block", fontSize: 13, fontFamily: FONTS.bodySemibold, fontWeight: 600, color: COLORS.textOnDark, marginBottom: 8 },
-  amountRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(252,244,234,0.06)",
-    borderRadius: RADIUS.sm,
-    border: "1.5px solid",
-    paddingLeft: 16,
-    paddingRight: 16,
-    transition: "border-color 160ms ease, box-shadow 160ms ease",
-  },
-  currencyPrefix: { fontSize: 16, fontFamily: FONTS.displayBold, fontWeight: 800, color: COLORS.primaryLight, marginRight: 8 },
-  amountInput: {
-    flex: 1,
-    fontSize: 18,
-    fontFamily: FONTS.displayBold,
-    fontWeight: 800,
-    color: COLORS.textOnDark,
-    paddingTop: 14,
-    paddingBottom: 14,
-    backgroundColor: "transparent",
-    border: "none",
-    outline: "none",
-  },
-  input: {
-    backgroundColor: "rgba(252,244,234,0.06)",
-    borderRadius: RADIUS.sm,
-    border: `1.5px solid ${COLORS.border}`,
-    paddingLeft: 16,
-    paddingRight: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
-    fontSize: 16,
-    fontFamily: FONTS.displayBold,
-    fontWeight: 800,
-    color: COLORS.textOnDark,
-    outline: "none",
-    width: "100%",
-  },
-  pillRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  presetPill: {
-    border: `1.5px solid ${COLORS.primaryLight}`,
-    borderRadius: RADIUS.pill,
-    paddingTop: 6,
-    paddingBottom: 6,
-    paddingLeft: 12,
-    paddingRight: 12,
-  },
-  presetPillText: { color: COLORS.primaryLight, fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 12 },
-  summaryCard: {
-    borderRadius: RADIUS.lg,
-    padding: 16,
-    marginTop: 24,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    background: `linear-gradient(135deg, ${GRADIENT[0]}, ${GRADIENT[1]})`,
-  },
-  summaryHeader: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
-  summaryLabel: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontFamily: FONTS.bodySemibold, fontWeight: 600, letterSpacing: 0.5 },
-  summaryValue: { color: "#fff", fontSize: 20, fontFamily: FONTS.displayBold, fontWeight: 800 },
-  error: { color: COLORS.danger, fontSize: 13, marginTop: 14, fontFamily: FONTS.bodySemibold, fontWeight: 600, textAlign: "center" },
-  disclaimerCard: { marginTop: 22, backgroundColor: COLORS.accentSoft, borderColor: "#F4C79E", display: "flex", flexDirection: "column" },
-  disclaimerTitle: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#8A4416", letterSpacing: 0.5, marginBottom: 8 },
-  disclaimerLink: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: "#8A4416", marginTop: 8, textDecoration: "underline" },
-  disclaimerBody: { fontFamily: FONTS.body, fontSize: 12, color: "#6B4A08", lineHeight: "18px", margin: 0, whiteSpace: "pre-line" },
-  checkboxRow: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 14, textAlign: "left" },
-  checkbox: {
-    width: 20, height: 20, borderRadius: 5, border: `2px solid ${COLORS.border}`,
-    display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1, flexShrink: 0,
-  },
-  checkboxChecked: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  checkboxLabel: { flex: 1, fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, lineHeight: "17px" },
-};
