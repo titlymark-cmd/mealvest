@@ -54,6 +54,10 @@ export interface HotelPayout {
   /** Unconfirmed outcome, failed recently, or stuck in processing past the stale window. */
   needs_attention?: boolean;
   submitted_at?: string | null;
+  /** How many times a send was attempted under this payout's reference (1 = the original send). */
+  submission_attempts?: number;
+  /** When the provider (or the reconciliation cron) was last asked about this payout. */
+  last_reconciled_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +100,41 @@ export async function triggerPayout(authFetch: AuthFetch, hotelId: string): Prom
 export async function refreshPayoutStatus(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
   const res = await authFetch(`/api/admin/payouts/${payoutId}/refresh`, { method: "POST" });
   const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not refresh this payout's status.");
+  return data.payout;
+}
+
+/** Re-send an 'unknown' payout now under the SAME reference — the provider de-duplicates, so it cannot pay twice. */
+export async function retryPayout(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/retry`, { method: "POST" });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not retry this payout.");
+  return data.payout;
+}
+
+export interface ResolvePayoutInput {
+  note: string;
+  /** Optional: the provider's own payout id from its dashboard (mark-paid only). */
+  providerPayoutId?: string;
+}
+
+/** Mark an unconfirmed/processing payout FAILED after checking the provider dashboard — its orders return to the unpaid pool. */
+export async function markPayoutFailed(authFetch: AuthFetch, payoutId: string, input: ResolvePayoutInput): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/mark-failed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note: input.note, confirmedInProviderDashboard: true }),
+  });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not mark this payout as failed.");
+  return data.payout;
+}
+
+/** Mark an unconfirmed/processing payout PAID when the provider dashboard shows it paid but our record never got the update. */
+export async function markPayoutPaid(authFetch: AuthFetch, payoutId: string, input: ResolvePayoutInput): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/mark-paid`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note: input.note, confirmedInProviderDashboard: true, providerPayoutId: input.providerPayoutId || undefined }),
+  });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not mark this payout as paid.");
   return data.payout;
 }
 
