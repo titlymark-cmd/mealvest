@@ -9,6 +9,7 @@ import { authRouter } from "./routes/auth.routes";
 import { studentRouter } from "./routes/student.routes";
 import { hotelRouter } from "./routes/hotel.routes";
 import { hotelsPublicRouter } from "./routes/hotels.routes";
+import { votingRouter } from "./routes/voting.routes";
 import { adminRouter } from "./routes/admin.routes";
 import { paymentsRouter } from "./routes/payments.routes";
 import { webhooksRouter } from "./routes/webhooks.routes";
@@ -75,6 +76,7 @@ export function createApp() {
   app.use("/api/student", studentRouter);
   app.use("/api/hotel", hotelRouter);
   app.use("/api/hotels", hotelsPublicRouter);
+  app.use("/api/voting", votingRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/payments", paymentsRouter);
   app.use("/api/orders", ordersRouter);

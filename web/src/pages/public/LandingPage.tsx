@@ -30,6 +30,7 @@ export default function LandingPage() {
       <DemoShowcase />
       <HowItWorks />
       <ParticipatingHotels />
+      <VotingSection />
       <WhyMealvest />
     </PublicShell>
   );
@@ -223,6 +224,123 @@ function WhyMealvest() {
             <Link to="/register/hotel" className="mvp-cta mvp-cta--secondary">Register a hotel</Link>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+
+/** Voting section — students vote for hotels to partner with Mealvest. */
+function VotingSection() {
+  const [hotels, setHotels] = useState<any[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [step, setStep] = useState<"list" | "otp" | "done">("list");
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    fetch("/api/voting/hotels")
+      .then((r) => r.json())
+      .then((d) => setHotels(d.hotels || []))
+      .catch(() => setHotels([]));
+  }, []);
+
+  const requestOtp = async () => {
+    setMsg("");
+    const res = await fetch("/api/voting/otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setStep("otp");
+      setMsg("OTP sent to your phone");
+    } else {
+      setMsg(data.error?.message || "Failed to send OTP");
+    }
+  };
+
+  const cast = async () => {
+    if (!selected) return;
+    setMsg("");
+    const res = await fetch("/api/voting/cast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, code: otp, hotelId: selected }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setStep("done");
+      setMsg(data.message || "Vote recorded!");
+    } else {
+      setMsg(data.error?.message || "Vote failed");
+    }
+  };
+
+  return (
+    <section className="mvp-section" aria-labelledby="mvp-vote-title" style={{ background: "#faf7f2" }}>
+      <div className="mv-container">
+        <span className="mvp-eyebrow">Vote for hotels</span>
+        <h2 id="mvp-vote-title" className="mvp-h2">Help hotels join MEALVEST</h2>
+        <p className="mvp-lead">Vote for hotels you want to partner with Mealvest. SMS OTP secures each vote. Once a hotel partners, your pending profile becomes active so you can take a plan.</p>
+
+        {msg && <div style={{ background: "#e8f5e9", padding: 12, borderRadius: 8, margin: "12px 0" }}>{msg}</div>}
+
+        {step === "list" && hotels && (
+          <div className="mvp-shelf" style={{ marginTop: 20 }}>
+            {hotels.slice(0, 6).map((h) => (
+              <div key={h.id} className="mvp-step-card" style={{ minWidth: 220 }}>
+                <h3>{h.name}</h3>
+                <p style={{ fontSize: 13, color: "#666" }}>{h.location || "—"}</p>
+                <p style={{ fontWeight: 600, color: "#2e7d32" }}>{h.vote_count} votes</p>
+                <button
+                  type="button"
+                  className="mvp-cta mvp-cta--primary mvp-cta--sm"
+                  style={{ marginTop: 8 }}
+                  onClick={() => { setSelected(h.id); setStep("otp"); }}
+                >
+                  Vote
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {step === "otp" && (
+          <div style={{ maxWidth: 360, marginTop: 20 }}>
+            <input
+              type="tel"
+              placeholder="+2547XXXXXXXX"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 6, border: "1px solid #ccc" }}
+            />
+            <button type="button" className="mvp-cta mvp-cta--primary" onClick={requestOtp}>Send OTP</button>
+            <button type="button" style={{ marginLeft: 8 }} onClick={() => setStep("list")}>Back</button>
+          </div>
+        )}
+
+        {step === "otp" && otp !== undefined && phone && (
+          <div style={{ maxWidth: 360, marginTop: 12 }}>
+            <input
+              type="text"
+              placeholder="6-digit OTP"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 6, border: "1px solid #ccc" }}
+            />
+            <button type="button" className="mvp-cta mvp-cta--primary" onClick={cast}>Confirm Vote</button>
+          </div>
+        )}
+
+        {step === "done" && (
+          <div style={{ marginTop: 16 }}>
+            <p>Thank you! Your vote is recorded and your profile is pending.</p>
+            <Link to="/register/student" className="mvp-cta mvp-cta--primary" style={{ marginTop: 12 }}>Create full account</Link>
+          </div>
+        )}
       </div>
     </section>
   );
