@@ -11,4 +11,4 @@ votingRouter.get("/hotels", listVotableHotels);
 votingRouter.get("/stats", getVoteStats);
 
 // Admin: activate voters when a hotel is partnered
-votingRouter.post("/hotels/:hotelId/activate", requireAuth, requireRole("admin"), activateVotersForHotel);
+votingRouter.post("/hotels/:hotelId/activate", requireAuth, requireRole("mealvest_admin"), activateVotersForHotel);

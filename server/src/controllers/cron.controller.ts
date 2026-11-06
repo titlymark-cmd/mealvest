@@ -103,7 +103,7 @@ export async function runVotingReminders(req: Request, res: Response, next: Next
     for (const row of result.rows) {
       try {
         await sendSMS({
-          to: row.phone,
+          phoneNumber: row.phone,
           message: `Mealvest has partnered with ${row.hotel_name}! Your profile is active. Create your account: https://mealvest.co.ke/register/student`,
         });
         sent++;

@@ -26,7 +26,7 @@ export async function requestVoteOtp(req: Request, res: Response, next: NextFunc
     );
 
     await sendSMS({
-      to: phone,
+      phoneNumber: phone,
       message: `Your Mealvest voting code is ${code}. Valid for 5 minutes.`,
     });
 
@@ -127,6 +127,9 @@ export async function activateVotersForHotel(req: Request, res: Response, next: 
     next(err);
   }
 }
+
+/** Public vote stats. */
+export async function getVoteStats(_req: Request, res: Response, next: NextFunction) {
   try {
     const result = await pool.query(
       `SELECT
