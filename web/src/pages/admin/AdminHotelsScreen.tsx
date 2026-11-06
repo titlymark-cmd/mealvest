@@ -142,9 +142,6 @@ export default function AdminHotelsScreen() {
     }
   };
 
-  if (loading) {
-  
-
   useEffect(() => {
     authFetch("/api/voting/admin/visibility")
       .then((r) => r.json())
@@ -184,6 +181,9 @@ export default function AdminHotelsScreen() {
       setVMsg(e.message || "Error");
     }
   };
+
+  if (loading) {
+
 
   return (
       <div style={styles.center}>
