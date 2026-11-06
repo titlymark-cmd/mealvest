@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { pool } from "../config/db";
+import { sendSMS } from "../services/smsService";
 import { Request, Response, NextFunction } from "express";
 import { env } from "../config/env";
 import { ApiError } from "../middleware/errorHandler";
@@ -82,6 +84,32 @@ export async function runDailyPayoutsCron(req: Request, res: Response, next: Nex
   try {
     requireCronSecret(req);
     res.json(await runDailyPayouts());
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Daily 6pm SMS to voters whose hotel has partnered. */
+export async function runVotingReminders(req: Request, res: Response, next: NextFunction) {
+  try {
+    requireCronSecret(req);
+    const result = await pool.query(
+      `SELECT v.phone, h.name AS hotel_name
+       FROM hotel_votes v
+       JOIN hotels h ON h.id = v.hotel_id
+       WHERE v.status = 'pending' AND h.status = 'active'`
+    );
+    let sent = 0;
+    for (const row of result.rows) {
+      try {
+        await sendSMS({
+          to: row.phone,
+          message: `Mealvest has partnered with ${row.hotel_name}! Your profile is active. Create your account: https://mealvest.co.ke/register/student`,
+        });
+        sent++;
+      } catch (_) { /* continue */ }
+    }
+    res.json({ success: true, remindersSent: sent });
   } catch (err) {
     next(err);
   }

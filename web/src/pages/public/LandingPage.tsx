@@ -235,9 +235,11 @@ function VotingCard() {
   const [hotels, setHotels] = useState<any[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"list" | "phone" | "otp" | "done">("list");
+  const [step, setStep] = useState<"list" | "details" | "otp" | "done">("list");
   const [msg, setMsg] = useState("");
+  const [profilePic, setProfilePic] = useState("");
 
   useEffect(() => {
     fetch("/api/voting/hotels")
@@ -268,15 +270,23 @@ function VotingCard() {
     const res = await fetch("/api/voting/cast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, code: otp, hotelId: selected }),
+      body: JSON.stringify({ phone, code: otp, hotelId: selected, voterName: name, profilePicture: profilePic }),
     });
     const data = await res.json();
     if (res.ok) {
       setStep("done");
-      setMsg(data.message || "Vote recorded!");
+      setMsg(data.message || "Vote recorded! Your beautiful pending profile is ready.");
     } else {
       setMsg(data.error?.message || "Vote failed");
     }
+  };
+
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setProfilePic(reader.result as string);
+    reader.readAsDataURL(f);
   };
 
   return (
@@ -290,13 +300,8 @@ function VotingCard() {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <span style={{
-            background: "#E5482E",
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.06em",
-            padding: "4px 10px",
-            borderRadius: 20,
+            background: "#E5482E", color: "#fff", fontSize: 11, fontWeight: 700,
+            letterSpacing: "0.06em", padding: "4px 10px", borderRadius: 20,
           }}>VOTE</span>
           <span style={{ color: "#E5482E", fontWeight: 600, fontSize: 13 }}>Help hotels join Mealvest</span>
         </div>
@@ -304,7 +309,7 @@ function VotingCard() {
           Vote for your favourite hotel
         </h2>
         <p style={{ margin: "0 0 18px", color: "#5c4033", fontSize: 15, lineHeight: 1.45 }}>
-          SMS OTP secures every vote. Once the hotel partners, your pending profile becomes active and you can take a plan.
+          See recommended hotels, live vote counts, and banners. Tap Vote, add your name, photo and phone — OTP creates your pending profile.
         </p>
 
         {msg && (
@@ -315,83 +320,67 @@ function VotingCard() {
 
         {step === "list" && hotels && hotels.length > 0 && (
           <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 6 }}>
-            {hotels.slice(0, 5).map((h) => (
+            {hotels.slice(0, 6).map((h) => (
               <div key={h.id} style={{
-                minWidth: 200,
-                background: "#fff",
-                borderRadius: 16,
-                padding: 14,
+                minWidth: 210, background: "#fff", borderRadius: 16, padding: 14,
                 boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
               }}>
+                {h.image_url && <img src={h.image_url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />}
                 <div style={{ fontWeight: 700, color: "#2c1810", marginBottom: 2 }}>{h.name}</div>
-                <div style={{ fontSize: 12, color: "#7a5c4a", marginBottom: 6 }}>{h.location || "—"}</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count} votes</div>
+                <div style={{ fontSize: 12, color: "#7a5c4a", marginBottom: 4 }}>{h.location || "—"}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count} votes</div>
                 <button
                   type="button"
-                  onClick={() => { setSelected(h.id); setStep("phone"); }}
+                  onClick={() => { setSelected(h.id); setStep("details"); }}
                   style={{
-                    background: "linear-gradient(160deg, #FF6B35, #E5482E)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 12,
-                    padding: "8px 14px",
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: "pointer",
+                    background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
+                    borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer",
                   }}
-                >
-                  Vote
-                </button>
+                >Vote</button>
               </div>
             ))}
           </div>
         )}
 
         {step === "list" && (!hotels || hotels.length === 0) && (
-          <div style={{ fontSize: 14, color: "#7a5c4a" }}>Hotels will appear here once the system is live.</div>
+          <div style={{ fontSize: 14, color: "#7a5c4a" }}>Recommended hotels and vote counts appear here once the system is live.</div>
         )}
 
-        {(step === "phone" || step === "otp") && (
+        {step === "details" && (
+          <div style={{ maxWidth: 360 }}>
+            <input type="text" placeholder="Your full name" value={name} onChange={(e) => setName(e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }} />
+            <input type="tel" placeholder="+2547XXXXXXXX" value={phone} onChange={(e) => setPhone(e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }} />
+            <label style={{ display: "block", marginBottom: 10, fontSize: 14, color: "#5c4033" }}>
+              Profile picture
+              <input type="file" accept="image/*" onChange={onFile} style={{ display: "block", marginTop: 4 }} />
+            </label>
+            {profilePic && <img src={profilePic} alt="preview" style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", marginBottom: 10 }} />}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={requestOtp} disabled={!name || !phone} style={{
+                background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
+                borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
+              }}>Send OTP</button>
+              <button type="button" onClick={() => setStep("list")} style={{ background: "transparent", border: "1px solid #e0d0c4", borderRadius: 12, padding: "10px 14px", cursor: "pointer" }}>Back</button>
+            </div>
+          </div>
+        )}
+
+        {step === "otp" && (
           <div style={{ maxWidth: 340 }}>
-            {step === "phone" && (
-              <>
-                <input
-                  type="tel"
-                  placeholder="+2547XXXXXXXX"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }}
-                />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" onClick={requestOtp} style={{
-                    background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
-                    borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
-                  }}>Send OTP</button>
-                  <button type="button" onClick={() => setStep("list")} style={{ background: "transparent", border: "1px solid #e0d0c4", borderRadius: 12, padding: "10px 14px", cursor: "pointer" }}>Back</button>
-                </div>
-              </>
-            )}
-            {step === "otp" && (
-              <>
-                <input
-                  type="text"
-                  placeholder="6-digit OTP"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }}
-                />
-                <button type="button" onClick={cast} style={{
-                  background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
-                  borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
-                }}>Confirm Vote</button>
-              </>
-            )}
+            <input type="text" placeholder="6-digit OTP" value={otp} onChange={(e) => setOtp(e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }} />
+            <button type="button" onClick={cast} style={{
+              background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
+              borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
+            }}>Confirm Vote</button>
           </div>
         )}
 
         {step === "done" && (
           <div>
-            <p style={{ margin: "0 0 12px", color: "#2c1810" }}>Thank you! Your vote is recorded and your profile is pending.</p>
+            <p style={{ margin: "0 0 12px", color: "#2c1810" }}>Vote recorded! Your pending profile is ready. Once the hotel partners, you'll get a daily 6pm SMS and can create your full account.</p>
             <Link to="/register/student" style={{
               display: "inline-block", background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff",
               padding: "10px 18px", borderRadius: 12, fontWeight: 600, textDecoration: "none",
