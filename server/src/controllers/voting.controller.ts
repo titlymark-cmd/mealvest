@@ -100,15 +100,23 @@ export async function listVotableHotels(_req: Request, res: Response, next: Next
     const vis = await pool.query("SELECT value FROM platform_settings WHERE key = 'votes_public'");
     const publicVotes = vis.rows[0]?.value !== "false";
 
-    const result = await pool.query(
-      `SELECT h.id, h.name, h.location, h.image_url, h.description, h.status,
-              COALESCE(v.vote_count, 0)::int AS vote_count
-       FROM hotels h
-       LEFT JOIN (
-         SELECT hotel_id, COUNT(*) AS vote_count FROM hotel_votes GROUP BY hotel_id
-       ) v ON v.hotel_id = h.id
-       ORDER BY COALESCE(v.vote_count, 0) DESC, h.name ASC`
-    );
+    let result;
+    try {
+      result = await pool.query(
+        `SELECT h.id, h.name, h.location, h.image_url, h.description, h.status,
+                COALESCE(v.vote_count, 0)::int AS vote_count
+         FROM hotels h
+         LEFT JOIN (
+           SELECT hotel_id, COUNT(*) AS vote_count FROM hotel_votes GROUP BY hotel_id
+         ) v ON v.hotel_id = h.id
+         ORDER BY COALESCE(v.vote_count, 0) DESC, h.name ASC`
+      );
+    } catch {
+      // hotel_votes table may not exist yet
+      result = await pool.query(
+        `SELECT id, name, location, image_url, description, status, 0 AS vote_count FROM hotels ORDER BY name ASC`
+      );
+    }
     const hotels = result.rows.map((h: any) => ({
       ...h,
       vote_count: publicVotes ? h.vote_count : null,
