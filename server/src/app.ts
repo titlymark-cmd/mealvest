@@ -68,7 +68,7 @@ export function createApp() {
   // the signature check would fail for every legitimate webhook.
   app.use("/api/webhooks", webhooksRouter);
 
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
   app.use(requestLogger);
 
   app.use("/api/health", healthRouter);
