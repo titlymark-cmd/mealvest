@@ -26,11 +26,11 @@ export default function LandingPage() {
 
   return (
     <PublicShell>
+      <VotingCard />
       <Hero />
       <DemoShowcase />
       <HowItWorks />
       <ParticipatingHotels />
-      <VotingSection />
       <WhyMealvest />
     </PublicShell>
   );
@@ -230,13 +230,13 @@ function WhyMealvest() {
 }
 
 
-/** Voting section — students vote for hotels to partner with Mealvest. */
-function VotingSection() {
+/** Voting card — top of landing page, matches app card style. */
+function VotingCard() {
   const [hotels, setHotels] = useState<any[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"list" | "otp" | "done">("list");
+  const [step, setStep] = useState<"list" | "phone" | "otp" | "done">("list");
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
@@ -280,26 +280,65 @@ function VotingSection() {
   };
 
   return (
-    <section className="mvp-section" aria-labelledby="mvp-vote-title" style={{ background: "#faf7f2" }}>
-      <div className="mv-container">
-        <span className="mvp-eyebrow">Vote for hotels</span>
-        <h2 id="mvp-vote-title" className="mvp-h2">Help hotels join MEALVEST</h2>
-        <p className="mvp-lead">Vote for hotels you want to partner with Mealvest. SMS OTP secures each vote. Once a hotel partners, your pending profile becomes active so you can take a plan.</p>
+    <section className="mv-container" style={{ paddingTop: 28, paddingBottom: 8 }}>
+      <div style={{
+        background: "linear-gradient(145deg, #fff8f0, #ffe8d6)",
+        borderRadius: 24,
+        padding: "28px 24px",
+        boxShadow: "0 8px 28px rgba(0,0,0,0.12)",
+        border: "1px solid rgba(229,72,46,0.12)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{
+            background: "#E5482E",
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.06em",
+            padding: "4px 10px",
+            borderRadius: 20,
+          }}>VOTE</span>
+          <span style={{ color: "#E5482E", fontWeight: 600, fontSize: 13 }}>Help hotels join Mealvest</span>
+        </div>
+        <h2 style={{ margin: "6px 0 8px", fontSize: 26, fontWeight: 800, color: "#2c1810", letterSpacing: "-0.02em" }}>
+          Vote for your favourite hotel
+        </h2>
+        <p style={{ margin: "0 0 18px", color: "#5c4033", fontSize: 15, lineHeight: 1.45 }}>
+          SMS OTP secures every vote. Once the hotel partners, your pending profile becomes active and you can take a plan.
+        </p>
 
-        {msg && <div style={{ background: "#e8f5e9", padding: 12, borderRadius: 8, margin: "12px 0" }}>{msg}</div>}
+        {msg && (
+          <div style={{ background: "#e8f5e9", color: "#1b5e20", padding: "10px 14px", borderRadius: 12, marginBottom: 14, fontSize: 14 }}>
+            {msg}
+          </div>
+        )}
 
-        {step === "list" && hotels && (
-          <div className="mvp-shelf" style={{ marginTop: 20 }}>
-            {hotels.slice(0, 6).map((h) => (
-              <div key={h.id} className="mvp-step-card" style={{ minWidth: 220 }}>
-                <h3>{h.name}</h3>
-                <p style={{ fontSize: 13, color: "#666" }}>{h.location || "—"}</p>
-                <p style={{ fontWeight: 600, color: "#2e7d32" }}>{h.vote_count} votes</p>
+        {step === "list" && hotels && hotels.length > 0 && (
+          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 6 }}>
+            {hotels.slice(0, 5).map((h) => (
+              <div key={h.id} style={{
+                minWidth: 200,
+                background: "#fff",
+                borderRadius: 16,
+                padding: 14,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              }}>
+                <div style={{ fontWeight: 700, color: "#2c1810", marginBottom: 2 }}>{h.name}</div>
+                <div style={{ fontSize: 12, color: "#7a5c4a", marginBottom: 6 }}>{h.location || "—"}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count} votes</div>
                 <button
                   type="button"
-                  className="mvp-cta mvp-cta--primary mvp-cta--sm"
-                  style={{ marginTop: 8 }}
-                  onClick={() => { setSelected(h.id); setStep("otp"); }}
+                  onClick={() => { setSelected(h.id); setStep("phone"); }}
+                  style={{
+                    background: "linear-gradient(160deg, #FF6B35, #E5482E)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 12,
+                    padding: "8px 14px",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
                 >
                   Vote
                 </button>
@@ -308,37 +347,55 @@ function VotingSection() {
           </div>
         )}
 
-        {step === "otp" && (
-          <div style={{ maxWidth: 360, marginTop: 20 }}>
-            <input
-              type="tel"
-              placeholder="+2547XXXXXXXX"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 6, border: "1px solid #ccc" }}
-            />
-            <button type="button" className="mvp-cta mvp-cta--primary" onClick={requestOtp}>Send OTP</button>
-            <button type="button" style={{ marginLeft: 8 }} onClick={() => setStep("list")}>Back</button>
-          </div>
+        {step === "list" && (!hotels || hotels.length === 0) && (
+          <div style={{ fontSize: 14, color: "#7a5c4a" }}>Hotels will appear here once the system is live.</div>
         )}
 
-        {step === "otp" && otp !== undefined && phone && (
-          <div style={{ maxWidth: 360, marginTop: 12 }}>
-            <input
-              type="text"
-              placeholder="6-digit OTP"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 6, border: "1px solid #ccc" }}
-            />
-            <button type="button" className="mvp-cta mvp-cta--primary" onClick={cast}>Confirm Vote</button>
+        {(step === "phone" || step === "otp") && (
+          <div style={{ maxWidth: 340 }}>
+            {step === "phone" && (
+              <>
+                <input
+                  type="tel"
+                  placeholder="+2547XXXXXXXX"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" onClick={requestOtp} style={{
+                    background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
+                    borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
+                  }}>Send OTP</button>
+                  <button type="button" onClick={() => setStep("list")} style={{ background: "transparent", border: "1px solid #e0d0c4", borderRadius: 12, padding: "10px 14px", cursor: "pointer" }}>Back</button>
+                </div>
+              </>
+            )}
+            {step === "otp" && (
+              <>
+                <input
+                  type="text"
+                  placeholder="6-digit OTP"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #e0d0c4", marginBottom: 10, fontSize: 15 }}
+                />
+                <button type="button" onClick={cast} style={{
+                  background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
+                  borderRadius: 12, padding: "10px 18px", fontWeight: 600, cursor: "pointer",
+                }}>Confirm Vote</button>
+              </>
+            )}
           </div>
         )}
 
         {step === "done" && (
-          <div style={{ marginTop: 16 }}>
-            <p>Thank you! Your vote is recorded and your profile is pending.</p>
-            <Link to="/register/student" className="mvp-cta mvp-cta--primary" style={{ marginTop: 12 }}>Create full account</Link>
+          <div>
+            <p style={{ margin: "0 0 12px", color: "#2c1810" }}>Thank you! Your vote is recorded and your profile is pending.</p>
+            <Link to="/register/student" style={{
+              display: "inline-block", background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff",
+              padding: "10px 18px", borderRadius: 12, fontWeight: 600, textDecoration: "none",
+            }}>Create full account</Link>
           </div>
         )}
       </div>
