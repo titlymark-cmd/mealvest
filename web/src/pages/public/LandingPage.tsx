@@ -319,26 +319,50 @@ function VotingCard() {
         )}
 
         {step === "list" && hotels && hotels.length > 0 && (
-          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 6 }}>
-            {hotels.slice(0, 6).map((h) => (
-              <div key={h.id} style={{
-                minWidth: 210, background: "#fff", borderRadius: 16, padding: 14,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-              }}>
-                {h.image_url && <img src={h.image_url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />}
-                <div style={{ fontWeight: 700, color: "#2c1810", marginBottom: 2 }}>{h.name}</div>
-                <div style={{ fontSize: 12, color: "#7a5c4a", marginBottom: 4 }}>{h.location || "—"}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count != null ? `${h.vote_count} votes` : "Votes hidden"}</div>
-                <button
-                  type="button"
-                  onClick={() => { setSelected(h.id); setStep("details"); }}
-                  style={{
-                    background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff", border: "none",
-                    borderRadius: 12, padding: "8px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer",
-                  }}
-                >Vote</button>
-              </div>
-            ))}
+          <div style={{ position: "relative", height: 280, perspective: 1000, margin: "10px 0 20px" }}>
+            <style>{`
+              @keyframes rotateCarousel {
+                from { transform: rotateY(0deg); }
+                to { transform: rotateY(360deg); }
+              }
+              .vote-carousel {
+                position: absolute; width: 100%; height: 100%;
+                transform-style: preserve-3d;
+                animation: rotateCarousel 20s linear infinite;
+              }
+              .vote-carousel:hover { animation-play-state: paused; }
+              .vote-card {
+                position: absolute; left: 50%; top: 20px; width: 200px; height: 220px;
+                margin-left: -100px; background: #fff; border-radius: 16px; padding: 12px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.15); transform-style: preserve-3d;
+                backface-visibility: hidden; cursor: pointer;
+              }
+            `}</style>
+            <div className="vote-carousel">
+              {hotels.slice(0, 6).map((h, i) => {
+                const angle = (360 / Math.min(hotels.length, 6)) * i;
+                const radius = 220;
+                return (
+                  <div
+                    key={h.id}
+                    className="vote-card"
+                    style={{ transform: `rotateY(${angle}deg) translateZ(${radius}px)` }}
+                    onClick={() => { setSelected(h.id); setStep("details"); }}
+                  >
+                    {h.image_url && <img src={h.image_url} alt="" style={{ width: "100%", height: 70, objectFit: "cover", borderRadius: 10, marginBottom: 6 }} />}
+                    <div style={{ fontWeight: 700, color: "#2c1810", fontSize: 14, marginBottom: 2 }}>{h.name}</div>
+                    <div style={{ fontSize: 11, color: "#7a5c4a", marginBottom: 4 }}>{h.location || "—"}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#2e7d32", marginBottom: 6 }}>
+                      {h.vote_count != null ? `${h.vote_count} votes` : "Votes hidden"}
+                    </div>
+                    <div style={{
+                      background: "linear-gradient(160deg, #FF6B35, #E5482E)", color: "#fff",
+                      borderRadius: 10, padding: "6px 10px", fontWeight: 600, fontSize: 12, textAlign: "center",
+                    }}>Vote</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
