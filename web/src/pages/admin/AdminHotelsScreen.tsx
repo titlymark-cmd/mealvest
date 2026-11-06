@@ -194,22 +194,24 @@ export default function AdminHotelsScreen() {
 
   return (
     <div style={styles.container}>
-      <div style={styles.headerRow}>
-        <div>
+      <div style={{ ...styles.headerRow, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ flex: "1 1 200px" }}>
           <h1 style={styles.title}>Hotels</h1>
           <p style={styles.subtitle}>{hotels.length} partner hotel{hotels.length === 1 ? "" : "s"} registered with MEALVEST.</p>
         </div>
-        <button className="mv-action" onClick={() => setShowAddModal(true)} style={styles.addBtn}>
-          <Plus size={14} color={COLORS.primary} />
-          <span style={styles.addBtnText}>Add hotel</span>
-        </button>
-        <button className="mv-action" onClick={() => setShowVotingForm((v) => !v)} style={{ ...styles.addBtn, marginLeft: 8 }}>
-          <Plus size={14} color={COLORS.primary} />
-          <span style={styles.addBtnText}>Add for voting</span>
-        </button>
-        <button className="mv-action" onClick={toggleVotes} style={{ ...styles.addBtn, marginLeft: 8 }}>
-          <span style={styles.addBtnText}>{votesPublic ? "Votes: Visible" : "Votes: Hidden"}</span>
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="mv-action" onClick={() => setShowAddModal(true)} style={styles.addBtn}>
+            <Plus size={14} color={COLORS.primary} />
+            <span style={styles.addBtnText}>Add hotel</span>
+          </button>
+          <button className="mv-action" onClick={() => setShowVotingForm((v) => !v)} style={styles.addBtn}>
+            <Plus size={14} color={COLORS.primary} />
+            <span style={styles.addBtnText}>Add for voting</span>
+          </button>
+          <button className="mv-action" onClick={toggleVotes} style={styles.addBtn}>
+            <span style={styles.addBtnText}>{votesPublic ? "Votes visible" : "Votes hidden"}</span>
+          </button>
+        </div>
       </div>
 
       {showVotingForm && (
@@ -218,7 +220,18 @@ export default function AdminHotelsScreen() {
           <input placeholder="Hotel name" value={vName} onChange={(e) => setVName(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
           <input placeholder="Location" value={vLocation} onChange={(e) => setVLocation(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
           <input placeholder="Description" value={vDesc} onChange={(e) => setVDesc(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
-          <input placeholder="Logo / image URL" value={vLogo} onChange={(e) => setVLogo(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <label style={{ display: "block", marginBottom: 8, fontSize: 13, color: "#5c4033" }}>
+            Banner / logo
+            <input type="file" accept="image/*" onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const reader = new FileReader();
+              reader.onload = () => setVLogo(reader.result as string);
+              reader.readAsDataURL(f);
+            }} style={{ display: "block", marginTop: 4 }} />
+          </label>
+          {vLogo && <img src={vLogo} alt="banner" style={{ width: 80, height: 50, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
+          <input placeholder="Or paste image URL" value={vLogo.startsWith("data:") ? "" : vLogo} onChange={(e) => setVLogo(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
           {vMsg && <p style={{ color: "#2e7d32", margin: "0 0 8px" }}>{vMsg}</p>}
           <button type="button" onClick={createVotingHotel} style={{ background: "linear-gradient(160deg,#FF6B35,#E5482E)", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}>
             Save hotel for voting
