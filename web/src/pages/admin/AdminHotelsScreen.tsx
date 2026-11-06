@@ -217,9 +217,12 @@ export default function AdminHotelsScreen() {
       {showVotingForm && (
         <div style={{ background: "#fff8f0", borderRadius: 16, padding: 16, marginBottom: 16, border: "1px solid #f0e0d4" }}>
           <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>Add hotel for voting</h3>
-          <input placeholder="Hotel name" value={vName} onChange={(e) => setVName(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
-          <input placeholder="Location" value={vLocation} onChange={(e) => setVLocation(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
-          <input placeholder="Description" value={vDesc} onChange={(e) => setVDesc(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#2c1810", marginBottom: 4 }}>Name</label>
+          <input placeholder="Hotel name" value={vName} onChange={(e) => setVName(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 12, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#2c1810", marginBottom: 4 }}>Location</label>
+          <input placeholder="e.g. Nyawita, Maseno" value={vLocation} onChange={(e) => setVLocation(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 12, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#2c1810", marginBottom: 4 }}>Target students for partnership</label>
+          <input placeholder="e.g. 500 students" value={vDesc} onChange={(e) => setVDesc(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 12, borderRadius: 8, border: "1px solid #e0d0c4" }} />
           <label style={{ display: "block", marginBottom: 8, fontSize: 13, color: "#5c4033" }}>
             Banner / logo
             <input type="file" accept="image/*" onChange={(e) => {
