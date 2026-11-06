@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requestVoteOtp, castVote, listVotableHotels, getVoteStats, activateVotersForHotel } from "../controllers/voting.controller";
+import { requestVoteOtp, castVote, listVotableHotels, getVoteStats, activateVotersForHotel, createVotingHotel } from "../controllers/voting.controller";
 import { requireAuth, requireRole } from "../middleware/auth";
 
 export const votingRouter = Router();
@@ -12,3 +12,4 @@ votingRouter.get("/stats", getVoteStats);
 
 // Admin: activate voters when a hotel is partnered
 votingRouter.post("/hotels/:hotelId/activate", requireAuth, requireRole("mealvest_admin"), activateVotersForHotel);
+votingRouter.post("/admin/hotels", requireAuth, requireRole("mealvest_admin"), createVotingHotel);

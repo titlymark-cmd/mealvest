@@ -43,6 +43,12 @@ export default function AdminHotelsScreen() {
   const [modeDraft, setModeDraft] = useState<PayoutMode>("instant");
   const [timeDraft, setTimeDraft] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showVotingForm, setShowVotingForm] = useState(false);
+  const [vName, setVName] = useState("");
+  const [vLocation, setVLocation] = useState("");
+  const [vDesc, setVDesc] = useState("");
+  const [vLogo, setVLogo] = useState("");
+  const [vMsg, setVMsg] = useState("");
   const [detailHotelId, setDetailHotelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -136,7 +142,27 @@ export default function AdminHotelsScreen() {
   };
 
   if (loading) {
-    return (
+  
+  const createVotingHotel = async () => {
+    setVMsg("");
+    try {
+      const res = await authFetch("/api/voting/admin/hotels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: vName, location: vLocation, description: vDesc, imageUrl: vLogo }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || "Failed");
+      setVMsg("Hotel added for voting!");
+      setVName(""); setVLocation(""); setVDesc(""); setVLogo("");
+      setShowVotingForm(false);
+      await load();
+    } catch (e: any) {
+      setVMsg(e.message || "Error");
+    }
+  };
+
+  return (
       <div style={styles.center}>
         <Spinner size="large" color={COLORS.primary} />
       </div>
@@ -154,7 +180,25 @@ export default function AdminHotelsScreen() {
           <Plus size={14} color={COLORS.primary} />
           <span style={styles.addBtnText}>Add hotel</span>
         </button>
+        <button className="mv-action" onClick={() => setShowVotingForm((v) => !v)} style={{ ...styles.addBtn, marginLeft: 8 }}>
+          <Plus size={14} color={COLORS.primary} />
+          <span style={styles.addBtnText}>Add for voting</span>
+        </button>
       </div>
+
+      {showVotingForm && (
+        <div style={{ background: "#fff8f0", borderRadius: 16, padding: 16, marginBottom: 16, border: "1px solid #f0e0d4" }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>Add hotel for voting</h3>
+          <input placeholder="Hotel name" value={vName} onChange={(e) => setVName(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <input placeholder="Location" value={vLocation} onChange={(e) => setVLocation(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <input placeholder="Description" value={vDesc} onChange={(e) => setVDesc(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          <input placeholder="Logo / image URL" value={vLogo} onChange={(e) => setVLogo(e.target.value)} style={{ width: "100%", padding: 10, marginBottom: 8, borderRadius: 8, border: "1px solid #e0d0c4" }} />
+          {vMsg && <p style={{ color: "#2e7d32", margin: "0 0 8px" }}>{vMsg}</p>}
+          <button type="button" onClick={createVotingHotel} style={{ background: "linear-gradient(160deg,#FF6B35,#E5482E)", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 600, cursor: "pointer" }}>
+            Save hotel for voting
+          </button>
+        </div>
+      )}
 
       {showAddModal && (
         <AddHotelModal

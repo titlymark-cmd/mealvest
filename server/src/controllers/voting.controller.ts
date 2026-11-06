@@ -141,3 +141,23 @@ export async function getVoteStats(_req: Request, res: Response, next: NextFunct
     next(err);
   }
 }
+
+/** Admin: create a simple voting hotel (name, logo, location, description). */
+export async function createVotingHotel(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { name, location, description, imageUrl } = req.body;
+    if (!name || typeof name !== "string" || !name.trim()) {
+      res.status(400).json({ error: { code: "MISSING_NAME", message: "Hotel name is required." } });
+      return;
+    }
+    const result = await pool.query(
+      `INSERT INTO hotels (name, location, description, image_url, status)
+       VALUES ($1, $2, $3, $4, 'pending_verification')
+       RETURNING id, name, location, description, image_url, status`,
+      [name.trim(), location || null, description || null, imageUrl || null]
+    );
+    res.json({ success: true, hotel: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
