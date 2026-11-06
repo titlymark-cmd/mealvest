@@ -97,6 +97,9 @@ export async function castVote(req: Request, res: Response, next: NextFunction) 
 /** List hotels available for voting (includes pending ones), with vote counts. */
 export async function listVotableHotels(_req: Request, res: Response, next: NextFunction) {
   try {
+    const vis = await pool.query("SELECT value FROM platform_settings WHERE key = 'votes_public'");
+    const publicVotes = vis.rows[0]?.value !== "false";
+
     const result = await pool.query(
       `SELECT h.id, h.name, h.location, h.image_url, h.description, h.status,
               COALESCE(v.vote_count, 0)::int AS vote_count
@@ -106,7 +109,36 @@ export async function listVotableHotels(_req: Request, res: Response, next: Next
        ) v ON v.hotel_id = h.id
        ORDER BY COALESCE(v.vote_count, 0) DESC, h.name ASC`
     );
-    res.json({ hotels: result.rows });
+    const hotels = result.rows.map((h: any) => ({
+      ...h,
+      vote_count: publicVotes ? h.vote_count : null,
+    }));
+    res.json({ hotels, votesPublic: publicVotes });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Admin: get/set whether vote counts are publicly visible. */
+export async function getVotesVisibility(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const r = await pool.query("SELECT value FROM platform_settings WHERE key = 'votes_public'");
+    res.json({ votesPublic: r.rows[0]?.value !== "false" });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function setVotesVisibility(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { votesPublic } = req.body;
+    const value = votesPublic === false ? "false" : "true";
+    await pool.query(
+      `INSERT INTO platform_settings (key, value, updated_at) VALUES ('votes_public', $1, now())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = now()`,
+      [value]
+    );
+    res.json({ success: true, votesPublic: value === "true" });
   } catch (err) {
     next(err);
   }

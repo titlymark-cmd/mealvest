@@ -44,6 +44,7 @@ export default function AdminHotelsScreen() {
   const [timeDraft, setTimeDraft] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showVotingForm, setShowVotingForm] = useState(false);
+  const [votesPublic, setVotesPublic] = useState(true);
   const [vName, setVName] = useState("");
   const [vLocation, setVLocation] = useState("");
   const [vDesc, setVDesc] = useState("");
@@ -143,6 +144,28 @@ export default function AdminHotelsScreen() {
 
   if (loading) {
   
+
+  useEffect(() => {
+    authFetch("/api/voting/admin/visibility")
+      .then((r) => r.json())
+      .then((d) => setVotesPublic(d.votesPublic !== false))
+      .catch(() => {});
+  }, [authFetch]);
+
+  const toggleVotes = async () => {
+    const next = !votesPublic;
+    setVotesPublic(next);
+    try {
+      await authFetch("/api/voting/admin/visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ votesPublic: next }),
+      });
+    } catch {
+      setVotesPublic(!next);
+    }
+  };
+
   const createVotingHotel = async () => {
     setVMsg("");
     try {
@@ -183,6 +206,9 @@ export default function AdminHotelsScreen() {
         <button className="mv-action" onClick={() => setShowVotingForm((v) => !v)} style={{ ...styles.addBtn, marginLeft: 8 }}>
           <Plus size={14} color={COLORS.primary} />
           <span style={styles.addBtnText}>Add for voting</span>
+        </button>
+        <button className="mv-action" onClick={toggleVotes} style={{ ...styles.addBtn, marginLeft: 8 }}>
+          <span style={styles.addBtnText}>{votesPublic ? "Votes: Visible" : "Votes: Hidden"}</span>
         </button>
       </div>
 

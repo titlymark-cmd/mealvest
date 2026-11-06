@@ -328,7 +328,7 @@ function VotingCard() {
                 {h.image_url && <img src={h.image_url} alt="" style={{ width: "100%", height: 80, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />}
                 <div style={{ fontWeight: 700, color: "#2c1810", marginBottom: 2 }}>{h.name}</div>
                 <div style={{ fontSize: 12, color: "#7a5c4a", marginBottom: 4 }}>{h.location || "—"}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count} votes</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#2e7d32", marginBottom: 8 }}>{h.vote_count != null ? `${h.vote_count} votes` : "Votes hidden"}</div>
                 <button
                   type="button"
                   onClick={() => { setSelected(h.id); setStep("details"); }}
