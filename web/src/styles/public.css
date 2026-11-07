@@ -1374,3 +1374,292 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+/* ============================================================
+   MEALVEST — Hotel voting page (/vote)
+   Hero photo background + 3D rotating hotel carousel, a simple
+   vote form (name / phone / email / photo) and a leaderboard.
+   Namespaced .mvv-* so it never collides with landing styles.
+   ============================================================ */
+
+.mvv-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 28px;
+  margin: 18px auto 8px;
+  padding: 40px 20px 28px;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: #1d1511;
+}
+.mvv-hero-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.04);
+}
+.mvv-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(20, 14, 11, 0.55) 0%, rgba(20, 14, 11, 0.35) 42%, rgba(20, 14, 11, 0.85) 100%),
+    radial-gradient(120% 80% at 50% 10%, rgba(229, 72, 46, 0.25), transparent 60%);
+}
+.mvv-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(229, 72, 46, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  backdrop-filter: blur(2px);
+}
+.mvv-hero h1 {
+  margin: 14px 0 8px;
+  font-size: clamp(28px, 6vw, 46px);
+  line-height: 1.05;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+  max-width: 16ch;
+}
+.mvv-hero p.mvv-hero-lead {
+  margin: 0 auto;
+  max-width: 54ch;
+  color: rgba(255, 244, 234, 0.92);
+  font-size: clamp(14px, 2.4vw, 17px);
+  line-height: 1.5;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- 3D rotating carousel ---- */
+.mvv-stage {
+  position: relative;
+  width: 100%;
+  height: 330px;
+  margin: 26px 0 6px;
+  perspective: 1200px;
+  perspective-origin: 50% 42%;
+}
+.mvv-carousel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  animation: mvv-spin 26s linear infinite;
+  will-change: transform;
+}
+.mvv-stage:hover .mvv-carousel,
+.mvv-stage:focus-within .mvv-carousel {
+  animation-play-state: paused;
+}
+@keyframes mvv-spin {
+  from { transform: translate(-50%, -50%) rotateY(0deg); }
+  to   { transform: translate(-50%, -50%) rotateY(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mvv-carousel { animation: none; }
+}
+.mvv-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 190px;
+  margin: -130px 0 0 -95px; /* half height / half width */
+  height: 250px;
+  background: #fffdf9;
+  color: #2c1810;
+  border-radius: 18px;
+  padding: 10px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  backface-visibility: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+  display: flex;
+  flex-direction: column;
+}
+.mvv-card:hover,
+.mvv-card:focus-visible { border-color: var(--mv-tomato); outline: none; }
+.mvv-card.is-selected { border-color: var(--mv-tomato); box-shadow: 0 0 0 3px rgba(229, 72, 46, 0.35), 0 18px 40px rgba(0,0,0,0.45); }
+.mvv-card-img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: #e9ddce;
+}
+.mvv-card-img--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b9a48f;
+}
+.mvv-card-name { font-weight: 800; font-size: 15px; line-height: 1.15; }
+.mvv-card-loc { font-size: 12px; color: #7a5c4a; margin: 2px 0 6px; display: flex; align-items: center; gap: 4px; }
+.mvv-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; }
+.mvv-card-votes { font-size: 12px; font-weight: 800; color: #2e7d32; }
+.mvv-card-stars { font-size: 12px; color: #c98a00; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.mvv-card-vote {
+  margin-top: 8px;
+  background: linear-gradient(160deg, var(--mv-orange), var(--mv-tomato));
+  color: #fff;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-weight: 800;
+  font-size: 13px;
+  text-align: center;
+}
+.mvv-hint { color: rgba(255,244,234,0.85); font-size: 13px; margin-top: 6px; }
+
+@media (max-width: 600px) {
+  .mvv-stage { height: 300px; perspective: 900px; }
+  .mvv-card { width: 160px; height: 226px; margin: -118px 0 0 -80px; }
+  .mvv-card-img { height: 82px; }
+}
+
+/* ---- Vote form ---- */
+.mvv-formwrap {
+  max-width: 460px;
+  margin: 10px auto 0;
+  background: var(--mv-surface-dark);
+  border: 1px solid rgba(255, 225, 199, 0.12);
+  border-radius: 20px;
+  padding: 22px 20px;
+}
+.mvv-formwrap h2 { margin: 0 0 4px; font-size: 20px; font-weight: 800; color: var(--mv-cream); }
+.mvv-formwrap .mvv-sub { margin: 0 0 16px; font-size: 14px; color: rgba(252, 244, 234, 0.72); }
+.mvv-chosen {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(229, 72, 46, 0.12);
+  border: 1px solid rgba(229, 72, 46, 0.35);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+  color: var(--mv-cream); font-size: 14px;
+}
+.mvv-chosen strong { color: var(--mv-orange); }
+.mvv-field { margin-bottom: 12px; }
+.mvv-field label { display: block; font-size: 13px; font-weight: 600; color: rgba(252,244,234,0.85); margin-bottom: 6px; }
+.mvv-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 225, 199, 0.18);
+  background: var(--mv-espresso);
+  color: var(--mv-cream);
+  font-size: 15px;
+}
+.mvv-input::placeholder { color: rgba(252, 244, 234, 0.4); }
+.mvv-input:focus-visible { outline: none; border-color: var(--mv-orange); box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.25); }
+.mvv-avatarrow { display: flex; align-items: center; gap: 12px; }
+.mvv-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid var(--mv-orange); }
+.mvv-avatar--empty { display: inline-flex; align-items: center; justify-content: center; background: var(--mv-espresso); color: rgba(252,244,234,0.4); }
+.mvv-filebtn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(255,225,199,0.18); background: var(--mv-espresso); color: var(--mv-cream);
+  font-size: 14px; font-weight: 600;
+}
+.mvv-filebtn input { display: none; }
+.mvv-alert { border-radius: 12px; padding: 10px 14px; font-size: 14px; margin-bottom: 14px; }
+.mvv-alert--err { background: rgba(229, 72, 46, 0.14); color: #ffb9a9; border: 1px solid rgba(229,72,46,0.3); }
+.mvv-alert--ok { background: rgba(46, 125, 50, 0.16); color: #b7e6b9; border: 1px solid rgba(46,125,50,0.35); }
+.mvv-submit {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 13px 18px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(160deg, var(--mv-orange), var(--mv-tomato));
+}
+.mvv-submit:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- Leaderboard ---- */
+.mvv-lb { margin-top: 34px; }
+.mvv-lb-head { margin-bottom: 14px; }
+.mvv-lb-head h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 900; color: var(--mv-cream); margin: 4px 0 2px; }
+.mvv-lb-head p { color: rgba(252,244,234,0.7); font-size: 14px; margin: 0; }
+.mvv-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0 22px; }
+.mvv-stat {
+  background: var(--mv-surface-dark);
+  border: 1px solid rgba(255,225,199,0.1);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+.mvv-stat-num { font-size: clamp(22px, 5vw, 30px); font-weight: 900; color: var(--mv-orange); line-height: 1; }
+.mvv-stat-label { font-size: 12px; color: rgba(252,244,234,0.7); margin-top: 6px; }
+.mvv-lb-list { display: flex; flex-direction: column; gap: 10px; }
+.mvv-lb-row {
+  display: grid;
+  grid-template-columns: 34px 64px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  background: var(--mv-surface-dark);
+  border: 1px solid rgba(255,225,199,0.1);
+  border-radius: 16px;
+  padding: 10px 14px;
+}
+.mvv-lb-rank { font-size: 18px; font-weight: 900; color: rgba(252,244,234,0.5); text-align: center; }
+.mvv-lb-row:nth-child(1) .mvv-lb-rank { color: #ffcf5c; }
+.mvv-lb-row:nth-child(2) .mvv-lb-rank { color: #d7d7d7; }
+.mvv-lb-row:nth-child(3) .mvv-lb-rank { color: #e0a06a; }
+.mvv-lb-banner { width: 64px; height: 48px; border-radius: 10px; object-fit: cover; background: var(--mv-espresso); }
+.mvv-lb-banner--empty { display: inline-flex; align-items: center; justify-content: center; color: rgba(252,244,234,0.3); }
+.mvv-lb-name { font-weight: 800; color: var(--mv-cream); font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mvv-lb-sub { font-size: 12px; color: rgba(252,244,234,0.65); display: flex; align-items: center; gap: 10px; margin-top: 3px; flex-wrap: wrap; }
+.mvv-lb-stars { color: #ffcf5c; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.mvv-tag-partner { font-size: 10px; font-weight: 800; letter-spacing: 0.04em; color: #b7e6b9; background: rgba(46,125,50,0.2); border-radius: 999px; padding: 2px 8px; }
+.mvv-lb-votes { text-align: right; }
+.mvv-lb-votes b { display: block; font-size: 20px; font-weight: 900; color: var(--mv-orange); line-height: 1; }
+.mvv-lb-votes span { font-size: 11px; color: rgba(252,244,234,0.6); }
+@media (max-width: 600px) {
+  .mvv-lb-row { grid-template-columns: 26px 52px 1fr auto; gap: 8px; padding: 9px 11px; }
+  .mvv-lb-banner { width: 52px; height: 42px; }
+}
+
+/* ---- Hotels-page call-to-vote card ---- */
+.mvv-cta-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(229,72,46,0.16), rgba(255,138,61,0.10));
+  border: 1px solid rgba(255,138,61,0.3);
+  border-radius: 20px;
+  padding: 18px 20px;
+  margin: 4px 0 24px;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.mvv-cta-card:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(0,0,0,0.3); border-color: var(--mv-orange); }
+.mvv-cta-ico {
+  flex: 0 0 auto;
+  width: 54px; height: 54px; border-radius: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, var(--mv-orange), var(--mv-tomato));
+  color: #fff;
+}
+.mvv-cta-text h3 { margin: 0 0 3px; font-size: 17px; font-weight: 800; color: var(--mv-cream); }
+.mvv-cta-text p { margin: 0; font-size: 13.5px; color: rgba(252,244,234,0.75); }
+.mvv-cta-arrow { margin-left: auto; color: var(--mv-orange); flex: 0 0 auto; }
+@media (max-width: 520px) {
+  .mvv-cta-arrow { display: none; }
+}

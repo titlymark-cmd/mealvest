@@ -83,7 +83,10 @@ export default function StudentHomeScreen() {
   const spentToday = budget ? Number(budget.spent_today) : 0;
   const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday);
   const todayTotal = dailyCredit + bankedAmount;
-  const pct = todayTotal > 0 ? spentToday / todayTotal : 0;
+  // Clamp to 0–100%: spent_today can momentarily exceed today's total (e.g. a
+  // same-day boost that lands after spending, or banked-amount accounting), and
+  // the ring/label must never read above 100%.
+  const pct = todayTotal > 0 ? Math.min(1, Math.max(0, spentToday / todayTotal)) : 0;
   const dailyCreditStatus = getDailyCreditStatus(spentToday, todayTotal);
   const dailyCreditColor =
     dailyCreditStatus === "unused" ? COLORS.success : dailyCreditStatus === "low" ? COLORS.danger : COLORS.warning;

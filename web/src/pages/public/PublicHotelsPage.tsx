@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { RefreshCw, Search, Store, X } from "lucide-react";
+import { ArrowRight, RefreshCw, Search, Store, Vote, X } from "lucide-react";
 import { PublicShell } from "../../components/public/PublicShell";
 import { HotelCard } from "../../components/public/HotelCard";
 import { Hotel } from "../../services/hotelsApi";
@@ -65,6 +65,15 @@ export default function PublicHotelsPage() {
             </p>
           )}
         </header>
+
+        <Link to="/vote" className="mvv-cta-card" aria-label="Go to hotel voting">
+          <span className="mvv-cta-ico"><Vote size={26} aria-hidden /></span>
+          <span className="mvv-cta-text">
+            <h3>Vote your favourite hotel onto MEALVEST</h3>
+            <p>Don’t see your hotel? Cast a vote and see the live leaderboard.</p>
+          </span>
+          <ArrowRight className="mvv-cta-arrow" size={22} aria-hidden />
+        </Link>
 
         {hotels === null && !error && (
           <div className="mvp-hotels-grid" aria-busy="true" aria-label="Loading hotels">
