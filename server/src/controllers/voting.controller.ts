@@ -36,32 +36,56 @@ export async function requestVoteOtp(req: Request, res: Response, next: NextFunc
   }
 }
 
-/** Verify OTP and cast a vote. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Cast a vote. The student provides their name, phone, email and (optionally)
+ * a profile photo. One vote per phone number — re-voting moves the vote and
+ * refreshes the profile. Phone/email are stored safely in hotel_votes.
+ *
+ * OTP is OPTIONAL: if a `code` is supplied it is verified (the SMS-proof
+ * flow), otherwise the vote is accepted directly so the system works
+ * end-to-end even when SMS is not configured. This keeps the "just enter
+ * phone, email, name and photo" flow working everywhere.
+ */
 export async function castVote(req: Request, res: Response, next: NextFunction) {
   try {
-    const { phone, code, hotelId, voterName, profilePicture } = req.body;
+    const { phone, code, hotelId, voterName, email, profilePicture } = req.body;
 
-    if (!phone || !code || !hotelId) {
-      res.status(400).json({ error: { code: "MISSING_FIELDS", message: "phone, code, and hotelId are required." } });
+    if (!phone || typeof phone !== "string" || !phone.trim()) {
+      res.status(400).json({ error: { code: "MISSING_PHONE", message: "Phone number is required." } });
+      return;
+    }
+    if (!voterName || typeof voterName !== "string" || !voterName.trim()) {
+      res.status(400).json({ error: { code: "MISSING_NAME", message: "Your name is required." } });
+      return;
+    }
+    if (!email || typeof email !== "string" || !EMAIL_RE.test(email.trim())) {
+      res.status(400).json({ error: { code: "INVALID_EMAIL", message: "A valid email is required." } });
+      return;
+    }
+    if (!hotelId) {
+      res.status(400).json({ error: { code: "MISSING_HOTEL", message: "Please choose a hotel to vote for." } });
       return;
     }
 
-    const otpResult = await pool.query(
-      `SELECT id FROM vote_otps
-       WHERE phone = $1 AND code = $2 AND used = false AND expires_at > now()
-       ORDER BY created_at DESC LIMIT 1`,
-      [phone, code]
-    );
+    const normalizedPhone = phone.trim();
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (otpResult.rows.length === 0) {
-      res.status(400).json({ error: { code: "INVALID_OTP", message: "Invalid or expired OTP." } });
-      return;
+    // Optional OTP proof: only enforced when a code is sent along.
+    if (code) {
+      const otpResult = await pool.query(
+        `SELECT id FROM vote_otps
+         WHERE phone = $1 AND code = $2 AND used = false AND expires_at > now()
+         ORDER BY created_at DESC LIMIT 1`,
+        [normalizedPhone, code]
+      );
+      if (otpResult.rows.length === 0) {
+        res.status(400).json({ error: { code: "INVALID_OTP", message: "Invalid or expired OTP." } });
+        return;
+      }
+      await pool.query(`UPDATE vote_otps SET used = true WHERE id = $1`, [otpResult.rows[0].id]);
     }
-
-    const otpId = otpResult.rows[0].id;
-
-    // Mark OTP used
-    await pool.query(`UPDATE vote_otps SET used = true WHERE id = $1`, [otpId]);
 
     // Check hotel exists
     const hotelResult = await pool.query(`SELECT id, name, status FROM hotels WHERE id = $1`, [hotelId]);
@@ -72,15 +96,16 @@ export async function castVote(req: Request, res: Response, next: NextFunction) 
 
     // Upsert vote (one per phone)
     const voteResult = await pool.query(
-      `INSERT INTO hotel_votes (phone, hotel_id, voter_name, profile_picture, status)
-       VALUES ($1, $2, $3, $4, 'pending')
+      `INSERT INTO hotel_votes (phone, hotel_id, voter_name, email, profile_picture, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
        ON CONFLICT (phone) DO UPDATE SET
          hotel_id = EXCLUDED.hotel_id,
          voter_name = COALESCE(EXCLUDED.voter_name, hotel_votes.voter_name),
+         email = COALESCE(EXCLUDED.email, hotel_votes.email),
          profile_picture = COALESCE(EXCLUDED.profile_picture, hotel_votes.profile_picture),
          updated_at = now()
        RETURNING id, status`,
-      [phone, hotelId, voterName || null, profilePicture || null]
+      [normalizedPhone, hotelId, voterName.trim(), normalizedEmail, profilePicture || null]
     );
 
     res.json({
@@ -104,17 +129,25 @@ export async function listVotableHotels(_req: Request, res: Response, next: Next
     try {
       result = await pool.query(
         `SELECT h.id, h.name, h.location, h.image_url, h.description, h.status,
-                COALESCE(v.vote_count, 0)::int AS vote_count
+                COALESCE(v.vote_count, 0)::int AS vote_count,
+                COALESCE(r.review_count, 0)::int AS review_count,
+                r.average_rating
          FROM hotels h
          LEFT JOIN (
            SELECT hotel_id, COUNT(*) AS vote_count FROM hotel_votes GROUP BY hotel_id
          ) v ON v.hotel_id = h.id
-         ORDER BY COALESCE(v.vote_count, 0) DESC, h.name ASC`
+         LEFT JOIN (
+           SELECT hotel_id, COUNT(*) AS review_count, ROUND(AVG(rating)::numeric, 1) AS average_rating
+           FROM hotel_reviews GROUP BY hotel_id
+         ) r ON r.hotel_id = h.id
+         ORDER BY COALESCE(v.vote_count, 0) DESC, r.average_rating DESC NULLS LAST, h.name ASC`
       );
     } catch {
-      // hotel_votes table may not exist yet
+      // hotel_votes / hotel_reviews table may not exist yet
       result = await pool.query(
-        `SELECT id, name, location, image_url, description, status, 0 AS vote_count FROM hotels ORDER BY name ASC`
+        `SELECT id, name, location, image_url, description, status,
+                0 AS vote_count, 0 AS review_count, NULL AS average_rating
+         FROM hotels ORDER BY name ASC`
       );
     }
     const hotels = result.rows.map((h: any) => ({

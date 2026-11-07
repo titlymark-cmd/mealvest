@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { PiggyBank, Zap, Lock, UtensilsCrossed, ChevronRight, Phone, ArrowRightLeft, CalendarDays, Info, RefreshCw, Store } from "lucide-react";
+import { PiggyBank, Zap, Lock, UtensilsCrossed, ChevronRight, Phone, ArrowRightLeft, CalendarDays, Info, RefreshCw, Store, QrCode } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -81,9 +81,15 @@ export default function StudentHomeScreen() {
   const dailyCredit = budget ? Number(budget.daily_allowance) : 0;
   const bankedAmount = budget ? Number(budget.banked_amount) : 0;
   const spentToday = budget ? Number(budget.spent_today) : 0;
-  const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday);
+  // Money held by meal passes not yet scanned. It is NOT spent — it comes back
+  // if the pass isn't scanned — but it isn't available to spend again meanwhile.
+  const heldAmount = budget ? Number(budget.reserved_amount ?? 0) : 0;
+  const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday - heldAmount);
   const todayTotal = dailyCredit + bankedAmount;
-  const pct = todayTotal > 0 ? spentToday / todayTotal : 0;
+  // Clamp to 0–100%: spent_today can momentarily exceed today's total (e.g. a
+  // same-day boost that lands after spending, or banked-amount accounting), and
+  // the ring/label must never read above 100%.
+  const pct = todayTotal > 0 ? Math.min(1, Math.max(0, spentToday / todayTotal)) : 0;
   const dailyCreditStatus = getDailyCreditStatus(spentToday, todayTotal);
   const dailyCreditColor =
     dailyCreditStatus === "unused" ? COLORS.success : dailyCreditStatus === "low" ? COLORS.danger : COLORS.warning;
@@ -192,6 +198,15 @@ export default function StudentHomeScreen() {
                   <span style={{ flex: 1, textAlign: "left" }}>KSh {bankedAmount.toLocaleString()} carried over from earlier days</span>
                   <Info size={14} color={COLORS.textMuted} aria-hidden />
                 </button>
+              )}
+
+              {heldAmount > 0 && (
+                <div style={styles.heldRow} role="status">
+                  <QrCode size={16} color={COLORS.primary} aria-hidden />
+                  <span style={{ flex: 1, textAlign: "left" }}>
+                    KSh {heldAmount.toLocaleString()} on hold for a meal pass — taken only when scanned, or returned if not.
+                  </span>
+                </div>
               )}
 
               <div style={styles.heroActions}>
@@ -412,6 +427,20 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: RADIUS.sm,
     backgroundColor: COLORS.accentSoft,
     boxShadow: NEU.creamRaisedSm,
+    fontSize: 12,
+    fontFamily: FONTS.bodySemibold,
+    fontWeight: 600,
+    color: COLORS.primaryDark,
+    width: "100%",
+  },
+  heldRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    padding: "8px 14px",
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.accentSoft,
     fontSize: 12,
     fontFamily: FONTS.bodySemibold,
     fontWeight: 600,

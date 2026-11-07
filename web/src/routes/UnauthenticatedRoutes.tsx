@@ -4,6 +4,7 @@ import AuthScreen from "../pages/AuthScreen";
 import LandingPage from "../pages/public/LandingPage";
 import PublicHotelsPage from "../pages/public/PublicHotelsPage";
 import PublicHotelDetailPage from "../pages/public/PublicHotelDetailPage";
+import VotingPage from "../pages/public/VotingPage";
 import { ForgotPasswordScreen } from "../pages/ForgotPasswordScreen";
 import { ResetPasswordScreen } from "../pages/ResetPasswordScreen";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
@@ -27,6 +28,7 @@ export function UnauthenticatedRoutes() {
       <Route path="/login" element={<AuthScreen mode="login" />} />
       <Route path="/" element={<LandingPage />} />
       <Route path="/hotels" element={<PublicHotelsPage />} />
+      <Route path="/vote" element={<VotingPage />} />
       <Route path="/hotels/:hotelId" element={<PublicHotelDetailPage />} />
       <Route path="/welcome" element={<Navigate to="/" replace />} />
       <Route path="/forgot-password" element={<ForgotPasswordScreen />} />

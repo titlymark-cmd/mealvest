@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { ShieldCheck, ArrowLeft } from "lucide-react";
@@ -7,7 +7,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { createOrder, payOrder, Order } from "../../services/ordersApi";
+import { createOrder, payOrder, cancelOrder, Order } from "../../services/ordersApi";
 
 type Stage = "creating" | "paying" | "ready" | "error";
 
@@ -28,6 +28,12 @@ export default function MealPassScreen() {
   const [stage, setStage] = useState<Stage>("creating");
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Holds the latest paid-but-unscanned pass so we can release its hold when
+  // the student leaves without the hotel scanning it (money reorganizes back).
+  // The backend keeps an already-scanned pass redeemed, so this is a no-op then.
+  const heldOrderRef = useRef<Order | null>(null);
+  const releasedRef = useRef(false);
 
   // A stable key per (hotel, item) order attempt, persisted across
   // remounts of this screen — a retry after a failed payOrder (or the
@@ -52,6 +58,7 @@ export default function MealPassScreen() {
       const created = await createOrder(authFetch, hotelId, [{ itemId, quantity: 1 }], idempotencyKey);
       setStage("paying");
       const paid = await payOrder(authFetch, created.id);
+      heldOrderRef.current = paid;
       setOrder(paid);
       setStage("ready");
       sessionStorage.removeItem(idempotencyStorageKey);
@@ -64,6 +71,17 @@ export default function MealPassScreen() {
 
   useEffect(() => {
     runFlow();
+    // On leave: release the hold on a pass that was never scanned, so the money
+    // returns to the plan. Best-effort; the timed server sweep is the backstop.
+    return () => {
+      const held = heldOrderRef.current;
+      if (held && !releasedRef.current && (held.status === "paid" || held.status === "ready")) {
+        releasedRef.current = true;
+        cancelOrder(authFetch, held.id).catch(() => {
+          /* backstopped by the server-side hold sweep */
+        });
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -124,7 +142,10 @@ export default function MealPassScreen() {
         </div>
       </Card>
 
-      <p style={styles.hint}>This code is unique to this exact order and expires once redeemed.</p>
+      <p style={styles.hint}>
+        Your money is only taken when {hotelName} scans this code. If it isn’t scanned and you leave,
+        the amount goes straight back into your plan.
+      </p>
 
       <PrimaryButton onPress={() => navigate("/student")} style={{ marginTop: 24 }}>
         Done

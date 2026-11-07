@@ -8,6 +8,7 @@ import * as model from "../models/notificationModel";
 import * as notificationEvents from "../services/notificationEvents";
 import { runReconciliation } from "../services/reconciliationService";
 import { runDailyPayouts } from "../services/dailyPayoutService";
+import { releaseExpiredReservations } from "../services/budgetService";
 import { businessDate } from "../lib/businessTime";
 
 /**
@@ -67,7 +68,31 @@ export async function runReconcile(req: Request, res: Response, next: NextFuncti
   try {
     requireCronSecret(req);
     const summary = await runReconciliation();
-    res.json(summary);
+    // Also release meal passes held but never scanned past their TTL — the
+    // safety net behind the on-leave cancel (closed tabs, crashes, lost
+    // connections). Always returns money, never throws fatally for reconcile.
+    let holdsReleased = 0;
+    try {
+      holdsReleased = (await releaseExpiredReservations()).released;
+    } catch {
+      /* non-fatal: the next run retries */
+    }
+    res.json({ ...summary, holdsReleased });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/cron/release-holds — releases meal passes held but never scanned
+ * past ORDER_HOLD_TTL_MINUTES. Standalone so a scheduler can run it far more
+ * often than the daily reconcile (the hold TTL is minutes, not days).
+ * Idempotent and safe to run concurrently.
+ */
+export async function runReleaseHolds(req: Request, res: Response, next: NextFunction) {
+  try {
+    requireCronSecret(req);
+    res.json(await releaseExpiredReservations());
   } catch (err) {
     next(err);
   }

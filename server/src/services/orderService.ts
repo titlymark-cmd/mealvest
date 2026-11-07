@@ -1,6 +1,6 @@
 import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
-import { deductFromBudgetInTx } from "./budgetService";
+import { reserveFromBudgetInTx, settleReservationInTx, releaseReservationInTx } from "./budgetService";
 import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
 import * as notificationEvents from "./notificationEvents";
 import * as hotelPayoutService from "./hotelPayoutService";
@@ -135,12 +135,19 @@ export async function getOrdersForHotel(hotelId: string, status?: string) {
 }
 
 /**
- * Pays for an order out of the student's already-active budget
- * (this app's model: M-Pesa/Paystack funds the BUDGET once;
- * individual meals are then paid for by spending down that budget,
- * not by a fresh charge per meal). Deducts, then mints the QR token
- * only once the order is durably marked 'paid' — never before, so a
- * QR can never exist for an order that wasn't actually paid for.
+ * Generates a meal pass from the student's already-active budget (this app's
+ * model: M-Pesa/Paystack funds the BUDGET once; meals are then drawn from it,
+ * not charged per meal).
+ *
+ * IMPORTANT (hold, settle on scan): this does NOT spend the money. It places a
+ * HOLD (reserveFromBudgetInTx) and mints the QR, marking the order 'paid'
+ * (= "authorised, awaiting scan"). The money is only truly deducted when the
+ * hotel scans the QR (redeemOrderByQr → settleReservationInTx). If the pass is
+ * never scanned, the hold is released (cancelHeldOrder on leave, or the timed
+ * sweep) and the money reorganizes back — nothing is lost.
+ *
+ * Lock order is always order row -> budget row (reserveFromBudgetInTx locks the
+ * budget), the global rule that keeps this deadlock-free against scans/sweeps.
  */
 export async function payOrderFromBudget(orderId: string, userId: string) {
   const client = await pool.connect();
@@ -163,28 +170,26 @@ export async function payOrderFromBudget(orderId: string, userId: string) {
       return order;
     }
 
-    // Same client, same transaction (finding H2): the deduction and the
-    // order's 'paid' flip commit together or not at all. Lock order is
-    // always order row -> budget row, so this can't deadlock with
-    // another payment for the same student.
-    const deduction = await deductFromBudgetInTx(client, userId, Number(order.amount));
+    // Hold (not spend) the amount; the 'paid' flip, the QR and the hold all
+    // commit together or not at all.
+    const reservation = await reserveFromBudgetInTx(client, userId, Number(order.amount));
 
     const qrPayload = generateOrderQrPayload(order.id);
 
     const updated = await client.query(
-      `UPDATE orders SET status = 'paid', qr_token = $1, updated_at = now()
-       WHERE id = $2 AND status = 'pending_payment' RETURNING *`,
-      [qrPayload, orderId]
+      `UPDATE orders SET status = 'paid', qr_token = $1, budget_id = $2, reserved_at = now(), updated_at = now()
+       WHERE id = $3 AND status = 'pending_payment' RETURNING *`,
+      [qrPayload, reservation.budgetId, orderId]
     );
     if (updated.rows.length === 0) {
-      // Cannot happen while we hold the row lock; refuse rather than keep a deduction without a paid order.
+      // Cannot happen while we hold the row lock; refuse rather than keep a hold without a paid order.
       throw new ApiError(409, "ORDER_STATE_CHANGED", "This order changed while it was being paid. Please try again.");
     }
 
     await client.query("COMMIT");
 
-    if (deduction.lowBalance) {
-      notificationEvents.lowBudgetWarning(userId, deduction.budget.id, deduction.spendableTodayAfter);
+    if (reservation.lowBalance) {
+      notificationEvents.lowBudgetWarning(userId, reservation.budget.id, reservation.spendableTodayAfter);
     }
 
     const paidOrder = updated.rows[0];
@@ -265,6 +270,16 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
       [redeemedByUserId, commissionAmount, hotelAmount, orderId]
     );
 
+    // THE scan is the moment money actually leaves the student: settle the
+    // hold into a real spend. Same transaction, so the redemption and the
+    // deduction commit together. Order was locked first, budget second — the
+    // global lock order. Orders created under the pre-reservation model have
+    // no budget_id (money was already deducted at pay time), so they are
+    // skipped here and never double-charged.
+    if (order.budget_id) {
+      await settleReservationInTx(client, order.budget_id, amount);
+    }
+
     await client.query("COMMIT");
 
     const redeemedOrder = updated.rows[0];
@@ -341,4 +356,55 @@ export async function markOrderReady(orderId: string, hotelId: string) {
     );
   }
   return result.rows[0];
+}
+
+/**
+ * Cancels a held (paid/ready) but unscanned meal pass and releases its hold
+ * back to the student's plan — "if it's not scanned and the student moves back,
+ * money is not deducted, it just reorganizes." Called when the student leaves
+ * the meal-pass screen. Safe and idempotent:
+ *   - a pass the hotel already SCANNED is 'redeemed', so this is a no-op (the
+ *     money stays correctly settled — a race where the scan just happened can
+ *     never un-redeem a real sale),
+ *   - an already-cancelled pass is a no-op.
+ * Locks the order first, then the budget — the global lock order.
+ */
+export async function cancelHeldOrder(orderId: string, userId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const orderResult = await client.query("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [orderId]);
+    if (orderResult.rows.length === 0) {
+      throw new ApiError(404, "ORDER_NOT_FOUND", "Order not found.");
+    }
+    const order = orderResult.rows[0];
+    if (order.user_id !== userId) {
+      throw new ApiError(403, "FORBIDDEN", "This is not your order.");
+    }
+    if (order.status !== "paid" && order.status !== "ready") {
+      // redeemed / cancelled / pending_payment — nothing held to release.
+      await client.query("COMMIT");
+      return order;
+    }
+
+    const updated = await client.query(
+      `UPDATE orders SET status = 'cancelled', idempotency_key = NULL, updated_at = now()
+       WHERE id = $1 AND status IN ('paid', 'ready') RETURNING *`,
+      [orderId]
+    );
+    if (updated.rows.length === 0) {
+      await client.query("COMMIT");
+      return order;
+    }
+    if (order.budget_id) {
+      await releaseReservationInTx(client, order.budget_id, Number(order.amount));
+    }
+    await client.query("COMMIT");
+    return updated.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
