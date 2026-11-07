@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { runMealReminders, runReconcile, runDailyPayoutsCron, runVotingReminders } from "../controllers/cron.controller";
+import { runMealReminders, runReconcile, runDailyPayoutsCron, runVotingReminders, runReleaseHolds } from "../controllers/cron.controller";
 
 // Deliberately NOT behind requireAuth — these are system-triggered
 // calls from Vercel Cron, not a signed-in user's request. Each
@@ -11,3 +11,4 @@ cronRouter.get("/meal-reminders", runMealReminders);
 cronRouter.get("/reconcile", runReconcile);
 cronRouter.get("/daily-payouts", runDailyPayoutsCron);
 cronRouter.get("/voting-reminders", runVotingReminders);
+cronRouter.get("/release-holds", runReleaseHolds);

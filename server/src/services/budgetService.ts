@@ -20,6 +20,8 @@ export interface BudgetRow {
   banked_amount: string;
   pending_tomorrow_amount: string;
   pending_rollover_amount: string;
+  /** Money held by paid-but-unscanned meal passes; not yet spent (migration 055). */
+  reserved_amount: string;
   created_at: string;
   updated_at: string;
 }
@@ -480,6 +482,186 @@ export async function deductFromBudget(userId: string, amount: number): Promise<
   } finally {
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Meal-pass reservations ("hold, settle on scan") — migration 055.
+//
+// A meal pass HOLDS money (reserved_amount) instead of spending it. The hold
+// becomes a real spend ONLY when the hotel scans the QR (settleReservationInTx,
+// called from redeemOrderByQr). If the pass is never scanned it is released
+// (releaseReservationInTx) by an explicit cancel, or by the timed sweep below.
+//
+// Locking rule to stay deadlock-free: every caller that locks BOTH an order
+// and a budget locks the ORDER first, then the budget. These helpers lock only
+// the budget, so they compose safely under that rule.
+// ---------------------------------------------------------------------------
+
+export interface ReservationResult {
+  budget: BudgetRow;
+  budgetId: string;
+  spendableTodayAfter: number;
+  lowBalance: boolean;
+}
+
+/**
+ * Places a HOLD of `amount` on the student's active budget. Nothing is spent:
+ * only reserved_amount moves. Enforces the same two caps as a real spend, but
+ * measured against what is still FREE after existing holds — today's spendable
+ * minus reserved, and the plan's remaining minus reserved — so held money can
+ * never be reserved or spent twice. Caller supplies the transaction.
+ */
+export async function reserveFromBudgetInTx(client: DbClient, userId: string, amount: number): Promise<ReservationResult> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, "INVALID_ARGUMENT", "Reservation amount must be greater than zero.");
+  }
+  const result = await client.query<BudgetRow>(
+    "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
+    [userId]
+  );
+  let budget = result.rows[0];
+  if (!budget) {
+    throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
+  }
+  budget = await applyDailyRollover(client, budget);
+
+  const reserved = Number(budget.reserved_amount);
+  const freeToday =
+    Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today) - reserved) * 100) /
+    100;
+  const freePlan = Math.round((Number(budget.remaining_amount) - reserved) * 100) / 100;
+
+  if (amount > freeToday) {
+    throw new ApiError(
+      402,
+      "DAILY_LIMIT_EXCEEDED",
+      `This meal costs more than today's available balance (${Math.max(0, freeToday)} left today, including any rolled-over amount and after meal passes already held).`
+    );
+  }
+  if (amount > freePlan) {
+    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This meal costs more than your remaining plan balance.");
+  }
+
+  const newReserved = Math.round((reserved + amount) * 100) / 100;
+  // The WHERE re-asserts the free-plan condition against the row's CURRENT
+  // (pre-update) reserved_amount, so the database itself refuses an over-hold.
+  const updated = await client.query<BudgetRow>(
+    `UPDATE budgets SET reserved_amount = $1, updated_at = now()
+     WHERE id = $2 AND status = 'active' AND (remaining_amount - reserved_amount) >= $3
+     RETURNING *`,
+    [newReserved, budget.id, amount]
+  );
+  if (updated.rows.length === 0) {
+    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This meal costs more than your remaining plan balance.");
+  }
+
+  const b = updated.rows[0];
+  const spendableTodayAfter =
+    Math.round((Number(b.daily_allowance) + Number(b.banked_amount) - Number(b.spent_today) - Number(b.reserved_amount)) * 100) /
+    100;
+  return {
+    budget: b,
+    budgetId: b.id,
+    spendableTodayAfter,
+    lowBalance: spendableTodayAfter < Number(b.daily_allowance) / 4,
+  };
+}
+
+/**
+ * Settles a previously-held amount into a real spend — called inside
+ * redeemOrderByQr's transaction when the hotel scans the QR. Moves the money
+ * out of reserved_amount and into the spend ledger (remaining/amount_spent/
+ * spent_today, drawing down banked exactly as deductFromBudgetInTx does). No
+ * cap re-check: the hold already guaranteed the funds, and remaining_amount has
+ * not moved since. Returns null if the budget is no longer active (rare: e.g.
+ * the plan was withdrawn after the hold) so the caller can still complete the
+ * redemption without blocking a meal the hotel already served.
+ */
+export async function settleReservationInTx(client: DbClient, budgetId: string, amount: number): Promise<BudgetRow | null> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ApiError(400, "INVALID_ARGUMENT", "Settlement amount must be greater than zero.");
+  }
+  const result = await client.query<BudgetRow>("SELECT * FROM budgets WHERE id = $1 FOR UPDATE", [budgetId]);
+  let budget = result.rows[0];
+  if (!budget || budget.status !== "active") return null;
+
+  budget = await applyDailyRollover(client, budget);
+
+  const newRemaining = Math.max(0, Math.round((Number(budget.remaining_amount) - amount) * 100) / 100);
+  const newSpent = Math.round((Number(budget.amount_spent) + amount) * 100) / 100;
+  const newSpentToday = Math.round((Number(budget.spent_today) + amount) * 100) / 100;
+  const bankedUsedToday = Math.max(0, newSpentToday - Number(budget.daily_allowance));
+  const newBanked = Math.max(0, Math.round((Number(budget.banked_amount) - bankedUsedToday) * 100) / 100);
+  const newReserved = Math.max(0, Math.round((Number(budget.reserved_amount) - amount) * 100) / 100);
+
+  const updated = await client.query<BudgetRow>(
+    `UPDATE budgets SET remaining_amount = $1, amount_spent = $2, spent_today = $3, banked_amount = $4,
+            reserved_amount = $5, updated_at = now()
+     WHERE id = $6 RETURNING *`,
+    [newRemaining, newSpent, newSpentToday, newBanked, newReserved, budgetId]
+  );
+  return updated.rows[0];
+}
+
+/**
+ * Releases a hold back to the plan (money "reorganizes" back) — called when a
+ * meal pass is cancelled (student left it unscanned) or swept for timeout.
+ * Only reserved_amount moves; nothing was ever spent. Idempotent-safe via
+ * GREATEST so a double release can never push reserved below zero.
+ */
+export async function releaseReservationInTx(client: DbClient, budgetId: string, amount: number): Promise<void> {
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  await client.query(
+    `UPDATE budgets SET reserved_amount = GREATEST(0, reserved_amount - $2), updated_at = now()
+     WHERE id = $1`,
+    [budgetId, Math.round(amount * 100) / 100]
+  );
+}
+
+/**
+ * Timed sweep: releases meal passes that were held but never scanned after the
+ * hold TTL (ORDER_HOLD_TTL_MINUTES, default 30). Covers the cases the on-leave
+ * cancel can't — a closed tab, a crash, a lost connection. Locks the ORDER
+ * first then the budget (the global order→budget rule), one short transaction
+ * per order, so it never deadlocks with a concurrent scan/pay.
+ */
+export async function releaseExpiredReservations(): Promise<{ released: number }> {
+  const ttlMinutes = Number(process.env.ORDER_HOLD_TTL_MINUTES) || 30;
+  const candidates = await pool.query<{ id: string }>(
+    `SELECT id FROM orders
+     WHERE status = 'paid' AND budget_id IS NOT NULL
+       AND reserved_at IS NOT NULL AND reserved_at < now() - ($1 || ' minutes')::interval
+     LIMIT 500`,
+    [String(ttlMinutes)]
+  );
+
+  let released = 0;
+  for (const { id } of candidates.rows) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const o = await client.query("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [id]);
+      const order = o.rows[0];
+      if (!order || order.status !== "paid") {
+        await client.query("COMMIT");
+        continue;
+      }
+      await client.query(
+        "UPDATE orders SET status = 'cancelled', idempotency_key = NULL, updated_at = now() WHERE id = $1",
+        [id]
+      );
+      if (order.budget_id) {
+        await releaseReservationInTx(client, order.budget_id, Number(order.amount));
+      }
+      await client.query("COMMIT");
+      released++;
+    } catch {
+      await client.query("ROLLBACK").catch(() => {});
+    } finally {
+      client.release();
+    }
+  }
+  return { released };
 }
 
 /**

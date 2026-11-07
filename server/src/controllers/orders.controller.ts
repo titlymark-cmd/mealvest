@@ -42,6 +42,16 @@ export async function payOrder(req: AuthedRequest, res: Response, next: NextFunc
   }
 }
 
+export async function cancelOrder(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const { orderId } = req.params;
+    const order = await orderService.cancelHeldOrder(orderId, req.user!.id);
+    res.json({ order });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getOrder(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const order = await orderService.getOrderById(req.params.orderId);

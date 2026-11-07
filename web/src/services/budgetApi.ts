@@ -15,6 +15,8 @@ export interface Budget {
   pending_tomorrow_amount: string;
   pending_rollover_amount: string;
   last_spend_date: string | null;
+  /** Money held by meal passes not yet scanned; returns to the plan if unscanned. */
+  reserved_amount?: string;
 }
 
 /**

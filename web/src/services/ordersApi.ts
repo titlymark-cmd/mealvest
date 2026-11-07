@@ -51,6 +51,17 @@ export async function payOrder(authFetch: AuthFetch, orderId: string): Promise<O
   return data.order;
 }
 
+/**
+ * Releases a held, unscanned meal pass so the money reorganizes back into the
+ * student's plan. Safe to call on leaving the pass screen: if the hotel already
+ * scanned it, the backend keeps it redeemed (no-op). Best-effort by design.
+ */
+export async function cancelOrder(authFetch: AuthFetch, orderId: string): Promise<Order> {
+  const res = await authFetch(`/api/orders/${orderId}/cancel`, { method: "POST" });
+  const data = await parseOrError<{ order: Order }>(res, "Could not release this order.");
+  return data.order;
+}
+
 export async function getOrder(authFetch: AuthFetch, orderId: string): Promise<Order> {
   const res = await authFetch(`/api/orders/${orderId}`);
   const data = await parseOrError<{ order: Order }>(res, "Could not load this order.");

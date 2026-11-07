@@ -281,28 +281,65 @@ describe("H1 atomic payment activation", { skip }, () => {
 
 // =================================================================== H2
 describe("H2 atomic meal payment", { skip }, () => {
-  test("concurrent orders can never overspend (100/day budget, 10 × KSh 30 orders -> exactly 3 paid)", async () => {
+  test("concurrent passes can never over-hold (100/day budget, 10 × KSh 30 -> exactly 3 held), then scanning settles them", async () => {
     const s = await makeUser();
     const h = await makeHotel(30);
+    const staff = await makeUser("hotel_owner");
     await fund(s.id, 3000, 30); // 100/day
     const orders = [];
     for (let i = 0; i < 10; i++) orders.push(await m.order.createOrder({ userId: s.id, hotelId: h.id, lines: [{ itemId: h.itemId, quantity: 1 }] }));
     const { ok, errors } = await settled(orders.map((o) => m.order.payOrderFromBudget(o.id, s.id)));
     assert.equal(ok.length, 3);
     assert.ok(errors.every((e: any) => e.code === "DAILY_LIMIT_EXCEEDED"));
-    const b = await activeBudget(s.id);
+    // A meal pass HOLDS the money — nothing is spent until the QR is scanned.
+    let b = await activeBudget(s.id);
+    assert.equal(Number(b.remaining_amount), 3000);
+    assert.equal(Number(b.reserved_amount), 90);
+    assert.equal(Number(b.spent_today), 0);
+    assert.equal((await q("SELECT count(*)::int n FROM orders WHERE user_id=$1 AND status='paid'", [s.id]))[0].n, 3);
+    // The scan settles each hold into a real spend.
+    for (const o of ok) await m.order.redeemOrderByQr(o.qr_token, h.id, staff.id);
+    b = await activeBudget(s.id);
     assert.equal(Number(b.remaining_amount), 2910);
     assert.equal(Number(b.spent_today), 90);
-    assert.equal((await q("SELECT count(*)::int n FROM orders WHERE user_id=$1 AND status='paid'", [s.id]))[0].n, 3);
+    assert.equal(Number(b.reserved_amount), 0);
   });
 
-  test("paying the same order 10 times concurrently deducts once", async () => {
+  test("an unscanned pass that is cancelled returns the money (reorganizes), nothing spent", async () => {
+    const s = await makeUser();
+    const h = await makeHotel(40);
+    await fund(s.id, 3000, 30); // 100/day
+    const o = await m.order.createOrder({ userId: s.id, hotelId: h.id, lines: [{ itemId: h.itemId, quantity: 1 }] });
+    await m.order.payOrderFromBudget(o.id, s.id);
+    let b = await activeBudget(s.id);
+    assert.equal(Number(b.reserved_amount), 40);
+    assert.equal(Number(b.remaining_amount), 3000);
+    // Student leaves without the hotel scanning -> hold released.
+    await m.order.cancelHeldOrder(o.id, s.id);
+    b = await activeBudget(s.id);
+    assert.equal(Number(b.reserved_amount), 0);
+    assert.equal(Number(b.remaining_amount), 3000);
+    assert.equal(Number(b.spent_today), 0);
+    assert.equal((await q("SELECT status FROM orders WHERE id=$1", [o.id]))[0].status, "cancelled");
+    // A cancelled pass can no longer be redeemed.
+    const [row] = await q("SELECT qr_token FROM orders WHERE id=$1", [o.id]);
+    await assert.rejects(m.order.redeemOrderByQr(row.qr_token, h.id, (await makeUser("hotel_owner")).id), /not been paid/);
+  });
+
+  test("paying the same order 10 times concurrently holds once; scanning settles once", async () => {
     const s = await makeUser();
     const h = await makeHotel(25);
+    const staff = await makeUser("hotel_owner");
     await fund(s.id, 3000, 30);
     const o = await m.order.createOrder({ userId: s.id, hotelId: h.id, lines: [{ itemId: h.itemId, quantity: 1 }] });
     await Promise.all(Array.from({ length: 10 }, () => m.order.payOrderFromBudget(o.id, s.id)));
-    assert.equal(Number((await activeBudget(s.id)).remaining_amount), 2975);
+    assert.equal(Number((await activeBudget(s.id)).reserved_amount), 25);
+    assert.equal(Number((await activeBudget(s.id)).remaining_amount), 3000);
+    const [row] = await q("SELECT qr_token FROM orders WHERE id=$1", [o.id]);
+    await m.order.redeemOrderByQr(row.qr_token, h.id, staff.id);
+    const b = await activeBudget(s.id);
+    assert.equal(Number(b.remaining_amount), 2975);
+    assert.equal(Number(b.reserved_amount), 0);
   });
 
   test("same idempotency key concurrently -> one order", async () => {
@@ -315,7 +352,7 @@ describe("H2 atomic meal payment", { skip }, () => {
     await assert.rejects(m.order.createOrder({ userId: other.id, hotelId: h.id, lines: [{ itemId: h.itemId, quantity: 1 }], idempotencyKey: key }), /does not belong/);
   });
 
-  test("if the order update fails, the deduction is rolled back", async () => {
+  test("if the order update fails, the hold is rolled back", async () => {
     const s = await makeUser();
     const h = await makeHotel(25);
     await fund(s.id, 3000, 30);
@@ -329,11 +366,12 @@ describe("H2 atomic meal payment", { skip }, () => {
     }
     const b = await activeBudget(s.id);
     assert.equal(Number(b.remaining_amount), 3000);
+    assert.equal(Number(b.reserved_amount), 0);
     assert.equal(Number(b.spent_today), 0);
     assert.equal((await q("SELECT status FROM orders WHERE id=$1", [o.id]))[0].status, "pending_payment");
   });
 
-  test("if the deduction fails, the order stays unpaid and has no QR", async () => {
+  test("if the hold fails, the order stays unpaid and has no QR", async () => {
     const s = await makeUser();
     const h = await makeHotel(500);
     await fund(s.id, 3000, 30); // 100/day < 500
