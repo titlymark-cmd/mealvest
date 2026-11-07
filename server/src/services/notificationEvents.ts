@@ -160,19 +160,37 @@ export function mealRedeemed(userId: string, hotelName: string, amount: number):
 }
 
 // ---------------------------------------------------------------------------
-// HOTEL — notifies every hotel_staff row for the hotel (owner and any
-// staff accounts alike), never the student's own name/identity, per
-// the "do not expose student private information unnecessarily" rule.
+// HOTEL — notifies the hotel's ACTIVE team (owner + active staff), never the
+// student's own name/identity, per the "do not expose student private
+// information unnecessarily" rule.
+//
+// Audience rules (staff must never receive owner-private or settlement data):
+//   - deactivated staff (is_active = false) receive nothing;
+//   - `ownerOnly` events (payouts, settlement) go to the owner row alone;
+//   - events both roles get are built per recipient, so a staff member gets a
+//     counter-ops message with no revenue figures and a deep link into the
+//     STAFF app (/hotel-staff/...), while the owner keeps the amounts and the
+//     owner-app link.
 // ---------------------------------------------------------------------------
+
+interface HotelRecipient {
+  userId: string;
+  isOwner: boolean;
+}
 
 async function notifyHotelStaff(
   hotelId: string,
-  build: (userId: string) => Parameters<typeof notify>[0]
+  build: (recipient: HotelRecipient) => Parameters<typeof notify>[0],
+  opts: { ownerOnly?: boolean } = {}
 ): Promise<void> {
   try {
-    const result = await pool.query("SELECT user_id FROM hotel_staff WHERE hotel_id = $1", [hotelId]);
+    const result = await pool.query(
+      `SELECT user_id, permission_level FROM hotel_staff
+        WHERE hotel_id = $1 AND is_active = true ${opts.ownerOnly ? "AND permission_level = 'owner'" : ""}`,
+      [hotelId]
+    );
     for (const row of result.rows) {
-      send(build(row.user_id));
+      send(build({ userId: row.user_id, isOwner: row.permission_level === "owner" }));
     }
   } catch (err) {
     console.error("[notificationEvents.notifyHotelStaff] failed:", err);
@@ -180,24 +198,25 @@ async function notifyHotelStaff(
 }
 
 export function hotelOrderReceived(hotelId: string, amount: number, orderId: string): void {
-  void notifyHotelStaff(hotelId, (userId) => ({
+  void notifyHotelStaff(hotelId, ({ userId, isOwner }) => ({
     userId,
     type: "hotel_order_received",
     title: "New order received",
     body: `A student paid for a ${formatKsh(amount)} meal — waiting for prep.`,
-    deepLink: "/hotel-owner/orders",
+    deepLink: isOwner ? "/hotel-owner/orders" : "/hotel-staff/orders",
     category: "payment_updates",
     dedupeKey: `hotel_order_received:${orderId}`,
   }));
 }
 
 export function hotelMealRedeemed(hotelId: string, hotelAmount: number, orderId: string): void {
-  void notifyHotelStaff(hotelId, (userId) => ({
+  void notifyHotelStaff(hotelId, ({ userId, isOwner }) => ({
     userId,
     type: "hotel_meal_redeemed",
     title: "Meal redeemed",
-    body: `A meal was redeemed — ${formatKsh(hotelAmount)} added to your revenue.`,
-    deepLink: "/hotel-owner/orders",
+    // Revenue figures are owner information; staff just see the counter event.
+    body: isOwner ? `A meal was redeemed — ${formatKsh(hotelAmount)} added to your revenue.` : "A meal was redeemed.",
+    deepLink: isOwner ? "/hotel-owner/orders" : "/hotel-staff/orders",
     category: "payment_updates",
     dedupeKey: `hotel_meal_redeemed:${orderId}`,
   }));
@@ -219,15 +238,20 @@ export function savingsWithdrawalStatusChanged(userId: string, status: "complete
 }
 
 export function hotelPayoutStatusChanged(hotelId: string, status: "successful" | "failed", amount: number): void {
-  void notifyHotelStaff(hotelId, (userId) => ({
-    userId,
-    type: "hotel_payout_status",
-    title: status === "successful" ? "Payout sent ✅" : "Payout failed",
-    body:
-      status === "successful"
-        ? `${formatKsh(amount)} has been sent to your registered M-Pesa number.`
-        : `A ${formatKsh(amount)} payout to your account failed — MEALVEST will retry or follow up.`,
-    deepLink: "/hotel-owner/home",
-    category: "payment_updates",
-  }));
+  // Settlement/payout information is OWNER-ONLY: staff are never told about payouts.
+  void notifyHotelStaff(
+    hotelId,
+    ({ userId }) => ({
+      userId,
+      type: "hotel_payout_status",
+      title: status === "successful" ? "Payout sent ✅" : "Payout failed",
+      body:
+        status === "successful"
+          ? `${formatKsh(amount)} has been sent to your registered M-Pesa number.`
+          : `A ${formatKsh(amount)} payout to your account failed — MEALVEST will retry or follow up.`,
+      deepLink: "/hotel-owner/home",
+      category: "payment_updates",
+    }),
+    { ownerOnly: true }
+  );
 }

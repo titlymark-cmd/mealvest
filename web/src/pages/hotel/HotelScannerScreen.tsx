@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRoleBack } from "../../hooks/useRoleBack";
 import { ArrowLeft, ShieldCheck, XCircle } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -37,7 +37,9 @@ const ERROR_COPY: Record<string, string> = {
  */
 export default function HotelScannerScreen() {
   const { authFetch } = useAuth();
-  const navigate = useNavigate();
+  // Role-aware: back one step when there is in-app history, otherwise to this role's own home
+  // (navigate(-1) would leave the app when opened from a notification, bookmark or PWA relaunch).
+  const goBack = useRoleBack();
   const [state, setState] = useState<ScanState>("scanning");
   const [result, setResult] = useState<QrCheckResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -157,7 +159,7 @@ export default function HotelScannerScreen() {
   return (
     <div style={styles.container}>
       <div style={styles.headerRow}>
-        <button onClick={() => navigate(-1)} style={styles.backBtn}>
+        <button onClick={goBack} style={styles.backBtn}>
           <ArrowLeft size={18} color="#fff" />
         </button>
         <span style={styles.headerText}>Scan meal QR code</span>

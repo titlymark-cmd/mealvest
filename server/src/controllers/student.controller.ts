@@ -245,15 +245,8 @@ export async function requestWithdrawal(req: AuthedRequest, res: Response, next:
       if (!normalized) throw new ApiError(400, "INVALID_PHONE_NUMBER", "Enter a valid Kenyan M-Pesa number.");
       destination = normalized;
     }
-    // Optional policy (M3): require a verified phone before withdrawing.
-    // Off by default so existing (unverified) accounts aren't locked out;
-    // enable once SMS verification is configured and users have been notified.
-    if (process.env.REQUIRE_VERIFIED_PHONE_FOR_WITHDRAWAL === "true") {
-      const v = await pool.query("SELECT phone_verified FROM users WHERE id = $1", [req.user!.id]);
-      if (!v.rows[0]?.phone_verified) {
-        throw new ApiError(403, "PHONE_NOT_VERIFIED", "Verify your phone number in your profile before withdrawing.");
-      }
-    }
+    // Verified-phone / verified-email policies for withdrawals are enforced by
+    // middleware on the route (middleware/verification.ts), before this handler runs.
 
     // Server-side step-up before any money is reserved (same atomic PIN lockout as login).
     await verifyStepUp(req.user!.id, { pin: parsed.data.pin, googleIdToken: parsed.data.googleIdToken }, verifyGoogleIdToken);

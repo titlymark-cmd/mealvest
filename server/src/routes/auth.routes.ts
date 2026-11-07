@@ -13,12 +13,14 @@ import {
   forgotPassword,
   resetPassword,
   linkGoogle,
+  getVerificationStatus,
   requestEmailVerification,
   confirmEmailVerification,
   requestPhoneVerification,
   confirmPhoneVerification,
 } from "../controllers/auth.controller";
 import { authRateLimiter, accountRateLimiter, refreshRateLimiter, verificationRateLimiter } from "../middleware/rateLimit";
+import { requireVerifiedEmailForSensitiveOps } from "../middleware/verification";
 import { requireAuth } from "../middleware/auth";
 
 export const authRouter = Router();
@@ -36,7 +38,7 @@ authRouter.post("/login", authRateLimiter, accountRateLimiter, login);
 authRouter.post("/login/verify-pin", authRateLimiter, verifyLoginPin);
 authRouter.post("/login/set-pin", authRateLimiter, setLoginPin);
 authRouter.post("/google", authRateLimiter, googleLogin);
-authRouter.post("/google/link", requireAuth, authRateLimiter, linkGoogle);
+authRouter.post("/google/link", requireAuth, requireVerifiedEmailForSensitiveOps, authRateLimiter, linkGoogle);
 authRouter.post("/refresh", refreshRateLimiter, refresh);
 authRouter.post("/logout", refreshRateLimiter, logout);
 
@@ -56,6 +58,9 @@ authRouter.post("/forgot-password", authRateLimiter, accountRateLimiter, forgotP
 authRouter.post("/reset-password", authRateLimiter, resetPassword);
 
 // Email / phone verification — every endpoint rate limited (fail-closed).
+// Read-only status (authenticated) — deliberately NOT under verificationRateLimiter, so loading a screen can
+// never burn the budget the actual send/confirm calls need.
+authRouter.get("/verification-status", requireAuth, getVerificationStatus);
 authRouter.post("/verify-email/request", requireAuth, verificationRateLimiter, requestEmailVerification);
 authRouter.post("/verify-email/confirm", verificationRateLimiter, confirmEmailVerification);
 authRouter.post("/verify-phone/request", requireAuth, verificationRateLimiter, requestPhoneVerification);

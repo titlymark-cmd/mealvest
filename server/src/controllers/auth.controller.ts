@@ -245,6 +245,15 @@ export async function linkGoogle(req: AuthedRequest, res: Response, next: NextFu
 // Email / phone verification (H7 full, M3)
 // ---------------------------------------------------------------------------
 
+/** GET /api/auth/verification-status — requireAuth, any role. Drives the shared verification UI. */
+export async function getVerificationStatus(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    res.json(await verification.getVerificationStatus(req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** POST /api/auth/verify-email/request — requireAuth. Sends a one-time link to the account's own email. */
 export async function requestEmailVerification(req: AuthedRequest, res: Response, next: NextFunction) {
   try {

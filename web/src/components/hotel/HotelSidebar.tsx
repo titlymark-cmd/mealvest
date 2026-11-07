@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { NavLink, Link, useLocation } from "react-router-dom";
-import { TrendingUp, ShoppingBag, UtensilsCrossed, Users, User, LogOut, QrCode, Landmark, Ellipsis } from "lucide-react";
+import { TrendingUp, ShoppingBag, UtensilsCrossed, Users, User, LogOut, QrCode, Landmark, Ellipsis, UserCog, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { Modal } from "../ui/Modal";
@@ -21,10 +21,12 @@ const DESKTOP_ITEMS = [
   { to: "/hotel-owner/menu", label: "Menu", icon: UtensilsCrossed },
   { to: "/hotel-owner/earnings", label: "Earnings", icon: Landmark },
   { to: "/hotel-owner/students", label: "Students", icon: Users },
+  { to: "/hotel-owner/staff", label: "Staff", icon: UserCog },
   { to: "/hotel-owner/profile", label: "Profile", icon: User },
+  { to: "/hotel-owner/security", label: "Security", icon: ShieldCheck },
 ];
 
-const MORE_ITEMS = DESKTOP_ITEMS.filter((i) => ["Earnings", "Students", "Profile"].includes(i.label));
+const MORE_ITEMS = DESKTOP_ITEMS.filter((i) => ["Earnings", "Students", "Staff", "Profile", "Security"].includes(i.label));
 
 export function HotelSidebar() {
   const { logout } = useAuth();

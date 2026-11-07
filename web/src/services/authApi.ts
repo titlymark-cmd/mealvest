@@ -184,6 +184,20 @@ export async function resetPassword(token: string, newPassword: string): Promise
   if (!res.ok) return parseErrorOrThrow(res);
 }
 
+/** Sets or changes the signed-in user's 4-digit PIN. The server requires the current password as proof. */
+export async function changePin(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>,
+  pin: string,
+  currentPassword: string
+): Promise<void> {
+  const res = await authFetch("/api/auth/pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin, currentPassword }),
+  });
+  if (!res.ok) return parseErrorOrThrow(res);
+}
+
 export async function logoutRequest(refreshToken: string): Promise<void> {
   await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: "POST",
@@ -205,10 +219,38 @@ export async function confirmEmailVerification(token: string): Promise<void> {
   if (!res.ok) return parseErrorOrThrow(res);
 }
 
+/** What the server reports about the signed-in user's contact verification (any role). */
+export interface VerificationStatus {
+  email: string;
+  emailVerified: boolean;
+  emailVerifiedAt: string | null;
+  phoneNumber: string | null;
+  phoneVerified: boolean;
+  authProvider: "password" | "google";
+  /** False when the server can't currently deliver that kind of message (e.g. provider not configured). */
+  emailDeliveryAvailable: boolean;
+  smsDeliveryAvailable: boolean;
+  resendCooldownSeconds: number;
+}
+
+export interface VerificationRequestResult {
+  sent: boolean;
+  alreadyVerified: boolean;
+  resendAfterSeconds?: number;
+}
+
+export async function getVerificationStatus(
+  authFetch: (path: string, init?: RequestInit) => Promise<Response>
+): Promise<VerificationStatus> {
+  const res = await authFetch("/api/auth/verification-status");
+  if (!res.ok) return parseErrorOrThrow(res);
+  return res.json();
+}
+
 /** Sends a verification link to the signed-in user's own email. */
 export async function requestEmailVerification(
   authFetch: (path: string, init?: RequestInit) => Promise<Response>
-): Promise<{ sent: boolean; alreadyVerified: boolean }> {
+): Promise<VerificationRequestResult> {
   const res = await authFetch("/api/auth/verify-email/request", { method: "POST" });
   if (!res.ok) return parseErrorOrThrow(res);
   return res.json();
@@ -217,7 +259,7 @@ export async function requestEmailVerification(
 /** Sends a 6-digit code by SMS to the signed-in user's own phone. */
 export async function requestPhoneVerification(
   authFetch: (path: string, init?: RequestInit) => Promise<Response>
-): Promise<{ sent: boolean; alreadyVerified: boolean }> {
+): Promise<VerificationRequestResult> {
   const res = await authFetch("/api/auth/verify-phone/request", { method: "POST" });
   if (!res.ok) return parseErrorOrThrow(res);
   return res.json();

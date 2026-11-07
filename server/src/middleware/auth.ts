@@ -23,18 +23,21 @@ export interface AuthedRequest extends Request {
  * tokens can be obtained.
  */
 const STATUS_CACHE_MS = 15_000;
-const statusCache = new Map<string, { status: string; role: string; at: number }>();
+const statusCache = new Map<string, { status: string; role: string; staffActive: boolean; at: number }>();
 
 export function invalidateUserStatusCache(userId?: string): void {
   if (userId) statusCache.delete(userId);
   else statusCache.clear();
 }
 
-async function lookupAccount(userId: string): Promise<{ status: string; role: string } | null> {
+async function lookupAccount(userId: string): Promise<{ status: string; role: string; staffActive: boolean } | null> {
   const cached = statusCache.get(userId);
   if (cached && Date.now() - cached.at < STATUS_CACHE_MS) return cached;
-  const result = await pool.query<{ account_status: string; role: string }>(
-    "SELECT account_status, role FROM users WHERE id = $1",
+  // LEFT JOIN: only hotel_staff/hotel_owner users have a hotel_staff row; everyone else is "active".
+  const result = await pool.query<{ account_status: string; role: string; is_active: boolean | null }>(
+    `SELECT u.account_status, u.role, hs.is_active
+       FROM users u LEFT JOIN hotel_staff hs ON hs.user_id = u.id
+      WHERE u.id = $1`,
     [userId]
   );
   const row = result.rows[0];
@@ -42,7 +45,7 @@ async function lookupAccount(userId: string): Promise<{ status: string; role: st
     statusCache.delete(userId);
     return null;
   }
-  const entry = { status: row.account_status, role: row.role, at: Date.now() };
+  const entry = { status: row.account_status, role: row.role, staffActive: row.is_active !== false, at: Date.now() };
   if (statusCache.size > 10_000) statusCache.clear();
   statusCache.set(userId, entry);
   return entry;
@@ -72,6 +75,10 @@ export async function requireAuth(req: AuthedRequest, _res: Response, next: Next
     }
     if (account.status === "suspended") {
       next(new ApiError(403, "ACCOUNT_SUSPENDED", "This account has been suspended."));
+      return;
+    }
+    if (!account.staffActive) {
+      next(new ApiError(403, "ACCOUNT_DEACTIVATED", "Your access to this hotel has been removed. Contact the hotel owner."));
       return;
     }
   } catch (err) {

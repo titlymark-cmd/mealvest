@@ -2,13 +2,27 @@ import React from "react";
 import { COLORS } from "../styles/theme";
 
 /** Web equivalent of React Native's <Switch />. */
-export function Switch({ value, onValueChange }: { value: boolean; onValueChange: () => void }) {
+export function Switch({
+  value,
+  onValueChange,
+  disabled = false,
+  label,
+}: {
+  value: boolean;
+  onValueChange: () => void;
+  disabled?: boolean;
+  label?: string;
+}) {
   return (
     <button
       onClick={onValueChange}
       role="switch"
       aria-checked={value}
+      aria-label={label}
+      disabled={disabled}
       style={{
+        opacity: disabled ? 0.55 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
         width: 52,
         height: 30,
         borderRadius: 15,

@@ -560,10 +560,7 @@ export async function cyzoraWebhook(req: Request, res: Response) {
       // `payout_id` (docs.cyzora.co.ke, Webhooks); older shapes used `id`.
       const payoutId = resource?.id ?? resource?.payout_id ?? event?.payout_id;
       if (!payoutId) return webhookResponse(res, 400, { error: "payout event had no id" });
-      // Our own PO- reference (the Idempotency-Key we sent), if Cyzora echoes it,
-      // lets a payout whose send errored (no stored payout id) still be matched.
-      const echoedRef = resource?.reference ?? resource?.idempotency_key ?? resource?.metadata?.reference ?? event?.reference;
-      const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId), typeof echoedRef === "string" ? echoedRef : null);
+      const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId));
       if (!applied) return webhookResponse(res, 404, { error: "no matching payout yet" });
       return webhookResponse(res, 200, { received: true });
     }

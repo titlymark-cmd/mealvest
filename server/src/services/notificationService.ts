@@ -3,6 +3,7 @@ import { findUserById } from "../models/userModel";
 import { sendPushToDevice, isPushConfigured } from "./fcmService";
 import { sendSMS, isSmsConfigured } from "./smsService";
 import { pool } from "../config/db";
+import { homePathForRole } from "../lib/rolePaths";
 
 /**
  * Paid-channel cost controls (finding M2). SMS costs real money per
@@ -104,18 +105,27 @@ export async function notify(params: NotifyParams): Promise<void> {
   }
 }
 
+export interface PushOutcome {
+  status: "sent" | "skipped" | "failed";
+  /** Enabled devices we attempted. */
+  devices: number;
+  /** Devices FCM accepted the message for. */
+  delivered: number;
+  reason?: string;
+}
+
 async function dispatchPush(
   notificationId: string,
   userId: string,
   title: string,
   body: string,
   deepLink?: string
-): Promise<void> {
+): Promise<PushOutcome> {
   if (!isPushConfigured()) {
     await model
       .logDelivery({ notificationId, channel: "push", status: "skipped", error: "Push not configured" })
       .catch(() => {});
-    return;
+    return { status: "skipped", devices: 0, delivered: 0, reason: "Push not configured" };
   }
 
   const devices = await model.listEnabledDevicesForUser(userId);
@@ -123,13 +133,16 @@ async function dispatchPush(
     await model
       .logDelivery({ notificationId, channel: "push", status: "skipped", error: "No registered devices" })
       .catch(() => {});
-    return;
+    return { status: "skipped", devices: 0, delivered: 0, reason: "No registered devices" };
   }
 
+  let delivered = 0;
+  let lastError: string | undefined;
   for (const device of devices) {
     try {
       const result = await sendPushToDevice({ token: device.push_token, title, body, deepLink });
       if (result.ok == true) {
+        delivered += 1;
         await model.logDelivery({
           notificationId,
           channel: "push",
@@ -137,6 +150,7 @@ async function dispatchPush(
           providerMessageId: result.messageId,
         });
       } else {
+        lastError = result.error;
         await model.logDelivery({ notificationId, channel: "push", status: "failed", error: result.error });
         // A dead/unregistered token is expected over time (uninstalled
         // PWA, cleared browser data) — deactivate just that one device,
@@ -146,42 +160,52 @@ async function dispatchPush(
         }
       }
     } catch (err) {
+      lastError = err instanceof Error ? err.message : "Unknown push error";
       await model
         .logDelivery({
           notificationId,
           channel: "push",
           status: "failed",
-          error: err instanceof Error ? err.message : "Unknown push error",
+          error: lastError,
         })
         .catch(() => {});
     }
   }
+  return delivered > 0
+    ? { status: "sent", devices: devices.length, delivered }
+    : { status: "failed", devices: devices.length, delivered: 0, reason: lastError };
 }
 
 /**
- * Explicit user-initiated test — ignores category/channel preference
- * toggles entirely (the whole point is "does this actually reach my
- * device right now," independent of whatever the user has turned
- * on/off) but still records a real notification + delivery log rows,
- * same as any other event.
+ * Explicit user-initiated test — ignores the category toggles (the point is "does a
+ * push actually reach my device right now") but still records a real notification +
+ * delivery rows. It reports what REALLY happened, so the UI can say "not configured" /
+ * "no devices" / "delivered to 2 devices" instead of a blanket success.
+ *
+ * It is a PUSH test: a paid SMS goes out only if the user has SMS notifications switched
+ * on, so tapping "test" can never spend SMS credit for someone who opted out of SMS.
+ * The deep link is the caller's own role home, not a student route.
  */
-export async function sendTestNotification(userId: string): Promise<void> {
-  try {
-    const created = await model.createNotification({
-      userId,
-      type: "test",
-      title: "Test notification 🔔",
-      body: "If you can see this, MEALVEST notifications are working on this device.",
-      deepLink: "/student/home",
-      dedupeKey: null,
-    });
-    if (!created) return;
-    await model.logDelivery({ notificationId: created.id, channel: "in_app", status: "sent" });
-    await dispatchPush(created.id, userId, created.title, created.body, created.deep_link ?? undefined);
+export async function sendTestNotification(userId: string, role: string): Promise<{ push: PushOutcome; sms: "sent" | "skipped" | "failed" }> {
+  const created = await model.createNotification({
+    userId,
+    type: "test",
+    title: "Test notification 🔔",
+    body: "If you can see this, MEALVEST notifications are working on this device.",
+    deepLink: homePathForRole(role),
+    dedupeKey: null,
+  });
+  if (!created) return { push: { status: "failed", devices: 0, delivered: 0, reason: "Could not record the notification" }, sms: "skipped" };
+  await model.logDelivery({ notificationId: created.id, channel: "in_app", status: "sent" });
+  const push = await dispatchPush(created.id, userId, created.title, created.body, created.deep_link ?? undefined);
+
+  let sms: "sent" | "skipped" | "failed" = "skipped";
+  const prefs = await model.getOrCreatePreferences(userId);
+  if (prefs.sms_enabled) {
     await dispatchSms(created.id, userId, created.body);
-  } catch (err) {
-    console.error("[notificationService.sendTestNotification] failed:", err);
+    sms = "sent";
   }
+  return { push, sms };
 }
 
 async function dispatchSms(notificationId: string, userId: string, message: string): Promise<void> {

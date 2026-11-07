@@ -95,48 +95,6 @@ export async function refreshPayoutStatus(req: AuthedRequest, res: Response, nex
   }
 }
 
-/** POST /api/admin/payouts/:payoutId/retry — re-send an 'unknown' payout now, under the SAME reference (provider de-duplicates). */
-export async function retryPayout(req: AuthedRequest, res: Response, next: NextFunction) {
-  try {
-    const payout = await payoutService.retryUnknownPayout(req.params.payoutId);
-    res.json({ payout });
-  } catch (err) {
-    next(err);
-  }
-}
-
-const resolveSchema = z.object({
-  note: z.string().trim().min(3, "Add a short note on what you found in the provider dashboard.").max(300),
-  // The admin must tick "I checked the provider dashboard" — marking a payout
-  // failed releases its orders for a NEW payout, which double-pays if it actually went through.
-  confirmedInProviderDashboard: z.literal(true, { errorMap: () => ({ message: "Confirm that you checked the provider dashboard." }) }),
-  providerPayoutId: z.string().trim().min(1).max(100).optional(),
-});
-
-function resolveHandler(outcome: "failed" | "successful") {
-  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
-    try {
-      const parsed = resolveSchema.safeParse(req.body);
-      if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid request.");
-      const payout = await payoutService.resolvePayoutManually(
-        req.params.payoutId,
-        req.user!.id,
-        outcome,
-        parsed.data.note,
-        outcome === "successful" ? parsed.data.providerPayoutId : undefined
-      );
-      res.json({ payout });
-    } catch (err) {
-      next(err);
-    }
-  };
-}
-
-/** POST /api/admin/payouts/:payoutId/mark-failed — releases the orders; only for unknown/processing, after checking the provider. */
-export const markPayoutFailed = resolveHandler("failed");
-/** POST /api/admin/payouts/:payoutId/mark-paid — the provider shows it paid but our row never got the webhook. */
-export const markPayoutPaid = resolveHandler("successful");
-
 /** POST /api/admin/payouts/:payoutId/approve — review -> approved -> sent (same reference). */
 export async function approvePayout(req: AuthedRequest, res: Response, next: NextFunction) {
   try {

@@ -163,7 +163,14 @@ export const env = {
   // real delivery to Gmail/Outlook, which are stricter about it.
   // -----------------------------------------------------------------
   resendApiKey: process.env.RESEND_API_KEY || "",
+  // Override ONLY for tests / a proxy; production uses Resend's real API.
+  resendBaseUrl: process.env.RESEND_BASE_URL || "https://api.resend.com",
   emailFrom: process.env.EMAIL_FROM || "MEALVEST <onboarding@resend.dev>",
+  // Resend's shared onboarding@resend.dev sender only delivers to the Resend
+  // account owner's own address, so in production it is NOT treated as a usable
+  // sender (see emailService.isEmailConfigured). Set this to "true" ONLY to test
+  // with your own address before the sending domain is verified.
+  allowResendSandboxSender: process.env.ALLOW_RESEND_SANDBOX_SENDER === "true",
 
   // -----------------------------------------------------------------
   // Firebase Cloud Messaging (web push) — SERVER-SIDE credentials only,
@@ -184,7 +191,12 @@ export const env = {
   // Vercel's env var UI can't store real newlines reliably, so the
   // private key is stored with literal "\n" sequences and unescaped
   // here — a well-known gotcha with this exact credential shape.
-  firebasePrivateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+  // Also tolerates the value being pasted with surrounding quotes (common when
+  // copying "private_key" straight out of the service-account JSON).
+  firebasePrivateKey: (process.env.FIREBASE_PRIVATE_KEY || "")
+    .trim()
+    .replace(/^"([\s\S]*)"$/, "$1")
+    .replace(/\\n/g, "\n"),
 
   // -----------------------------------------------------------------
   // SMS — provider-agnostic (see smsService.ts's SmsProvider
@@ -201,6 +213,18 @@ export const env = {
   africasTalkingApiKey: process.env.AFRICASTALKING_API_KEY || "",
   africasTalkingUsername: process.env.AFRICASTALKING_USERNAME || "",
   africasTalkingSenderId: process.env.AFRICASTALKING_SENDER_ID || "",
+  // Override ONLY for tests; normally derived from the username (sandbox vs live host).
+  africasTalkingBaseUrl: process.env.AFRICASTALKING_BASE_URL || "",
+
+  // -----------------------------------------------------------------
+  // Verification enforcement (all OFF by default so no existing account is
+  // locked out; switch on once email/SMS delivery is confirmed working).
+  //   REQUIRE_VERIFIED_PHONE_FOR_WITHDRAWAL   savings withdrawals
+  //   REQUIRE_VERIFIED_EMAIL_FOR_SENSITIVE_OPS  withdrawals, linking Google,
+  //                                           and hotel staff management
+  // -----------------------------------------------------------------
+  requireVerifiedPhoneForWithdrawal: process.env.REQUIRE_VERIFIED_PHONE_FOR_WITHDRAWAL === "true",
+  requireVerifiedEmailForSensitiveOps: process.env.REQUIRE_VERIFIED_EMAIL_FOR_SENSITIVE_OPS === "true",
 
   // -----------------------------------------------------------------
   // Cron — Vercel automatically sends `Authorization: Bearer

@@ -18,6 +18,16 @@ import {
   deleteMenuItem,
   uploadImage,
 } from "../controllers/hotel.controller";
+import {
+  listStaff,
+  getStaffMember,
+  createStaff,
+  resendStaffInvite,
+  deactivateStaff,
+  reactivateStaff,
+} from "../controllers/hotelStaff.controller";
+import { staffManagementRateLimiter } from "../middleware/rateLimit";
+import { requireVerifiedEmailForSensitiveOps } from "../middleware/verification";
 
 // Memory storage — files are small (4MB cap, enforced here AND again
 // in storageService as defense in depth) and are streamed straight
@@ -60,3 +70,13 @@ hotelRouter.post("/upload-image", requireRole("hotel_owner"), upload.single("ima
 hotelRouter.post("/menu", requireRole("hotel_owner"), addMenuItem);
 hotelRouter.patch("/menu/:itemId", requireRole("hotel_owner"), updateMenuItem);
 hotelRouter.delete("/menu/:itemId", requireRole("hotel_owner"), deleteMenuItem);
+
+// Staff management — OWNER ONLY. Staff accounts can never reach any of these, and the hotel
+// is always resolved from the owner's own account (never from the request). Deactivation is
+// deliberately NOT behind the verified-email policy: removing someone's access must always work.
+hotelRouter.get("/staff", requireRole("hotel_owner"), listStaff);
+hotelRouter.post("/staff", requireRole("hotel_owner"), staffManagementRateLimiter, requireVerifiedEmailForSensitiveOps, createStaff);
+hotelRouter.get("/staff/:staffUserId", requireRole("hotel_owner"), getStaffMember);
+hotelRouter.post("/staff/:staffUserId/resend-invite", requireRole("hotel_owner"), staffManagementRateLimiter, requireVerifiedEmailForSensitiveOps, resendStaffInvite);
+hotelRouter.post("/staff/:staffUserId/deactivate", requireRole("hotel_owner"), staffManagementRateLimiter, deactivateStaff);
+hotelRouter.post("/staff/:staffUserId/reactivate", requireRole("hotel_owner"), staffManagementRateLimiter, requireVerifiedEmailForSensitiveOps, reactivateStaff);

@@ -12,6 +12,7 @@ import {
 } from "../../services/notificationsApi";
 import { onForegroundPush } from "../../services/pushNotifications";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { isSafeInAppPath } from "../../utils/safePath";
 import { NOTIFICATIONS_CHANGED_EVENT } from "./notificationMeta";
 
 /** Same breakpoint where the student nav switches from top bar to floating pill. */
@@ -112,7 +113,10 @@ export function NotificationBell({ mobileHref }: { mobileHref?: string } = {}) {
       setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, read: true } : i)));
       refreshCount();
     }
-    if (item.deep_link) window.location.href = item.deep_link;
+    if (isSafeInAppPath(item.deep_link)) {
+      setOpen(false);
+      navigate(item.deep_link);
+    }
   };
 
   const handleMarkAllRead = async () => {

@@ -116,9 +116,27 @@ export async function markAllNotificationsRead(authFetch: AuthFetch): Promise<vo
   await parseOrError(res, "Could not mark all notifications as read.");
 }
 
-export async function sendTestNotification(authFetch: AuthFetch): Promise<void> {
+/** What REALLY happened to a test push: the server reports delivery truthfully, not just "request accepted". */
+export interface TestNotificationResult {
+  /** True only when FCM accepted the push for at least one registered device. */
+  sent: boolean;
+  push: { status: "sent" | "skipped" | "failed"; devices: number; delivered: number; reason?: string };
+  sms: "sent" | "skipped" | "failed";
+}
+
+export async function sendTestNotification(authFetch: AuthFetch): Promise<TestNotificationResult> {
   const res = await authFetch("/api/notifications/test", { method: "POST" });
-  await parseOrError(res, "Could not send a test notification.");
+  return parseOrError<TestNotificationResult>(res, "Could not send a test notification.");
+}
+
+/** One plain sentence for a test result, used by every settings screen. */
+export function describeTestResult(r: TestNotificationResult): { ok: boolean; message: string } {
+  if (r.sent) {
+    return { ok: true, message: `Sent to ${r.push.delivered} device${r.push.delivered === 1 ? "" : "s"}. It should appear in a moment.` };
+  }
+  if (r.push.reason === "Push not configured") return { ok: false, message: "Push notifications aren't set up on the server yet. The test is in your notification list only." };
+  if (r.push.reason === "No registered devices") return { ok: false, message: "No device is registered for push yet. Turn on push notifications on this device first." };
+  return { ok: false, message: "We couldn't deliver the push just now. Check that notifications are allowed for this site and try again." };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { logIntegrationStatusOnce } from "./lib/integrationStatus";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -21,6 +22,7 @@ import { notificationsRouter } from "./routes/notifications.routes";
 import { cronRouter } from "./routes/cron.routes";
 
 export function createApp() {
+  logIntegrationStatusOnce();
   const app = express();
 
   // Vercel terminates TLS at the edge and forwards over its own

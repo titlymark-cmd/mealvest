@@ -3,6 +3,7 @@ import multer from "multer";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { MAX_IMAGE_BYTES } from "../services/storageService";
 import { financialActionRateLimiter } from "../middleware/rateLimit";
+import { requireVerifiedEmailForSensitiveOps, requireVerifiedPhoneForWithdrawal } from "../middleware/verification";
 import {
   getStudentProfile,
   updateStudentProfile,
@@ -36,7 +37,13 @@ studentRouter.post("/budget/transfer-to-next-day", transferToNextDay);
 studentRouter.post("/budget/rollover/confirm", confirmRollover);
 studentRouter.post("/budget/rollover/decline", declineRollover);
 studentRouter.get("/withdrawal-status", getWithdrawalStatus);
-studentRouter.post("/withdraw", financialActionRateLimiter, requestWithdrawal);
+studentRouter.post(
+  "/withdraw",
+  financialActionRateLimiter,
+  requireVerifiedPhoneForWithdrawal,
+  requireVerifiedEmailForSensitiveOps,
+  requestWithdrawal
+);
 studentRouter.get("/withdrawals", listMyWithdrawals);
 studentRouter.get("/payments", listMyPayments);
 // Frozen MVP2 feature — see requestHotelTransfer's own comment.

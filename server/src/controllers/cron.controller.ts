@@ -4,12 +4,10 @@ import { sendSMS } from "../services/smsService";
 import { Request, Response, NextFunction } from "express";
 import { env } from "../config/env";
 import { ApiError } from "../middleware/errorHandler";
-import * as model from "../models/notificationModel";
-import * as notificationEvents from "../services/notificationEvents";
+import { runMealReminders as runMealRemindersService } from "../services/mealReminderService";
 import { runReconciliation } from "../services/reconciliationService";
 import { runDailyPayouts } from "../services/dailyPayoutService";
 import { releaseExpiredReservations } from "../services/budgetService";
-import { businessDate } from "../lib/businessTime";
 
 /**
  * Guards every cron endpoint below. Vercel automatically sends
@@ -34,25 +32,17 @@ function requireCronSecret(req: Request): void {
 }
 
 /**
- * GET /api/cron/meal-reminders — triggered once daily by Vercel Cron
- * (see vercel.json; Hobby-plan accounts can't schedule more often than
- * daily). Reminds every opted-in student with an active plan. Fire-
- * and-forget + dedupeKeyed per user per day (see
- * notificationEvents.mealReminder), so a retried or duplicate cron
- * invocation can never double-send.
+ * GET /api/cron/meal-reminders — call every 5–15 minutes. Each call reminds the
+ * opted-in students with an active plan whose own reminder_time (Africa/Nairobi)
+ * has just arrived. Deduped per user per day, so retried, overlapping or
+ * duplicate invocations can never double-send. Vercel Hobby cron (daily at most)
+ * can't provide that cadence alone — see docs/PRODUCTION_SETUP.md.
  */
 export async function runMealReminders(req: Request, res: Response, next: NextFunction) {
   try {
     requireCronSecret(req);
-
-    const nairobiDateStr = businessDate();
-
-    const userIds = await model.listUsersDueForMealReminder();
-    for (const userId of userIds) {
-      notificationEvents.mealReminder(userId, nairobiDateStr);
-    }
-
-    res.json({ queued: userIds.length, nairobiDateStr });
+    // Honours each student's reminder_time; see services/mealReminderService.ts.
+    res.json(await runMealRemindersService());
   } catch (err) {
     next(err);
   }

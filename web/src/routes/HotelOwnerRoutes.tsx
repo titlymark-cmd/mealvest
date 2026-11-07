@@ -10,6 +10,9 @@ import HotelMenuManageScreen from "../pages/hotelOwner/HotelMenuManageScreen";
 import HotelStudentsScreen from "../pages/hotelOwner/HotelStudentsScreen";
 import HotelOwnerEarningsScreen from "../pages/hotelOwner/HotelOwnerEarningsScreen";
 import HotelProfileScreen from "../pages/hotelOwner/HotelProfileScreen";
+import HotelStaffManageScreen from "../pages/hotelOwner/HotelStaffManageScreen";
+import HotelSecurityScreen from "../pages/hotelOwner/HotelSecurityScreen";
+import { VerificationBanner } from "../components/account/VerificationBanner";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
 
 /** Same shell pattern as AdminRoutes.tsx's AdminShell — see that file for the rationale. */
@@ -30,6 +33,7 @@ function HotelOwnerShell({ children }: { children: React.ReactNode }) {
           paddingBottom: isMobile ? 96 : 0,
         }}
       >
+        <VerificationBanner skin="hotel" to="/hotel-owner/security" />
         {children}
       </div>
     </div>
@@ -46,7 +50,9 @@ export function HotelOwnerRoutes() {
       <Route path="/hotel-owner/menu" element={<HotelOwnerShell><HotelMenuManageScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/earnings" element={<HotelOwnerShell><HotelOwnerEarningsScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/students" element={<HotelOwnerShell><HotelStudentsScreen /></HotelOwnerShell>} />
+      <Route path="/hotel-owner/staff" element={<HotelOwnerShell><HotelStaffManageScreen /></HotelOwnerShell>} />
       <Route path="/hotel-owner/profile" element={<HotelOwnerShell><HotelProfileScreen /></HotelOwnerShell>} />
+      <Route path="/hotel-owner/security" element={<HotelOwnerShell><HotelSecurityScreen /></HotelOwnerShell>} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="*" element={<Navigate to="/hotel-owner/home" replace />} />
     </Routes>

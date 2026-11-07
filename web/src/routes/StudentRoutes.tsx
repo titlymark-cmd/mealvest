@@ -21,6 +21,7 @@ import { getActiveBudget } from "../services/budgetApi";
 import { COLORS } from "../styles/theme";
 import { Spinner } from "../components/Spinner";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
+import { VerificationBanner } from "../components/account/VerificationBanner";
 
 /**
  * Persistent student shell: sticky top bar (desktop nav + bell + account),
@@ -40,6 +41,7 @@ function StudentDashboardShell({ children }: { children: React.ReactNode }) {
       <div id="mv-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" }}>
         <StudentTopBar />
         <ComingSoonBadge />
+        <VerificationBanner skin="student" to="/student/profile" />
         <main key={pathname} className="mv-page mv-has-bottomnav mv-shell-main">
           {children}
         </main>

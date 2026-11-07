@@ -38,9 +38,6 @@ import {
   previewPayoutFee,
   approvePayout,
   cancelPayout,
-  retryPayout,
-  markPayoutFailed,
-  markPayoutPaid,
 } from "../controllers/hotelPayouts.controller";
 import { getPaymentVerification, verifyPaymentDetails } from "../controllers/hotelVerification.controller";
 import { adminNotificationRateLimiter, financialActionRateLimiter } from "../middleware/rateLimit";
@@ -82,8 +79,5 @@ adminRouter.get("/payouts/fee-preview", previewPayoutFee);
 adminRouter.get("/payouts", listPayoutHistory);
 adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
 adminRouter.post("/payouts/:payoutId/refresh", financialActionRateLimiter, refreshPayoutStatus);
-adminRouter.post("/payouts/:payoutId/retry", financialActionRateLimiter, retryPayout);
-adminRouter.post("/payouts/:payoutId/mark-failed", financialActionRateLimiter, markPayoutFailed);
-adminRouter.post("/payouts/:payoutId/mark-paid", financialActionRateLimiter, markPayoutPaid);
 adminRouter.post("/payouts/:payoutId/approve", financialActionRateLimiter, approvePayout);
 adminRouter.post("/payouts/:payoutId/cancel", financialActionRateLimiter, cancelPayout);

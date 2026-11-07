@@ -152,8 +152,9 @@ export async function markAllRead(req: AuthedRequest, res: Response, next: NextF
 
 export async function testNotification(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    await sendTestNotification(req.user!.id);
-    res.json({ sent: true });
+    const outcome = await sendTestNotification(req.user!.id, req.user!.role);
+    // Honest status: "sent" only when FCM actually accepted it for at least one device.
+    res.json({ sent: outcome.push.status === "sent", push: outcome.push, sms: outcome.sms });
   } catch (err) {
     next(err);
   }

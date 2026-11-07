@@ -158,3 +158,27 @@ export async function confirmPinFailure(
   const lockedUntil = row.locked_until && new Date(row.locked_until) > new Date() ? row.locked_until : null;
   return { attempts: row.attempts, lockedUntil };
 }
+
+/**
+ * Why (if at all) an account may not use the app right now.
+ *   suspended         — an admin action (users.account_status).
+ *   staff_deactivated — the hotel owner removed this staff member's access
+ *                       (hotel_staff.is_active = false, migration 052).
+ * Kept as one query so every entry point (middleware, login, PIN unlock,
+ * refresh) agrees on the answer.
+ */
+export type AccessBlock = "suspended" | "staff_deactivated";
+
+export async function findAccessBlock(userId: string): Promise<AccessBlock | null> {
+  const r = await pool.query<{ account_status: string; is_active: boolean | null }>(
+    `SELECT u.account_status, hs.is_active
+       FROM users u LEFT JOIN hotel_staff hs ON hs.user_id = u.id
+      WHERE u.id = $1`,
+    [userId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  if (row.account_status === "suspended") return "suspended";
+  if (row.is_active === false) return "staff_deactivated";
+  return null;
+}

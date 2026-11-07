@@ -14,7 +14,7 @@ const passwordSchema = z
     message: `Password must be at most ${PASSWORD_MAX_BYTES} bytes (about 72 plain characters).`,
   });
 
-const emailSchema = z.string().trim().max(254, "Email address is too long.").email("Enter a valid email address.");
+export const emailSchema = z.string().trim().max(254, "Email address is too long.").email("Enter a valid email address.");
 export const phoneSchema = z.string().trim().min(9, "Enter a valid phone number.").max(20, "Enter a valid phone number.");
 
 // Exactly 4 digits, nothing else — same "simple, non-aggressive" rule

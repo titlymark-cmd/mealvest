@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRoleBack } from "../../hooks/useRoleBack";
 import { ArrowLeft } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -20,7 +20,9 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 /** Shared by Hotel Staff and Hotel Owner — byte-identical originally. */
 export default function HotelOrdersScreen() {
   const { authFetch } = useAuth();
-  const navigate = useNavigate();
+  // Role-aware: back one step when there is in-app history, otherwise to this role's own home
+  // (navigate(-1) would leave the app when opened from a notification, bookmark or PWA relaunch).
+  const goBack = useRoleBack();
   const [orders, setOrders] = useState<HotelOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export default function HotelOrdersScreen() {
 
   return (
     <div style={styles.container}>
-      <button onClick={() => navigate(-1)} style={styles.backRow}>
+      <button onClick={goBack} style={styles.backRow}>
         <ArrowLeft size={16} color={COLORS.primary} />
         <span style={styles.backText}>Back</span>
       </button>

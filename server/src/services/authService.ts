@@ -21,6 +21,7 @@ import {
   resolveRefusedPinAttempt,
   releasePinReservationOnSuccess,
   confirmPinFailure,
+  findAccessBlock,
   UserRow,
 } from "../models/userModel";
 import { GoogleProfile } from "../lib/googleAuth";
@@ -49,6 +50,14 @@ async function issueTokens(
   const inserted = await insertRefreshToken({ userId, tokenHash: hash, expiresAt, familyId: rotation?.familyId ?? null });
   if (rotation) await setReplacedBy(rotation.previousId, inserted.id);
   return { accessToken, refreshToken, user: { id: userId, role, fullName, email } };
+}
+
+/**
+ * A hotel owner removed this staff member's access (hotel_staff.is_active = false).
+ * Distinct from ACCOUNT_SUSPENDED, which is an admin action an owner cannot undo.
+ */
+function deactivatedError(): ApiError {
+  return new ApiError(403, "ACCOUNT_DEACTIVATED", "Your access to this hotel has been removed. Contact the hotel owner.");
 }
 
 /** Window in which presenting a just-rotated token is treated as a benign concurrent refresh (two tabs), not theft. */
@@ -311,6 +320,9 @@ export async function login(input: LoginInput): Promise<LoginPendingResult> {
   const valid = await verifyPassword(input.password, user.password_hash);
   if (!valid) throw INVALID_CREDENTIALS;
 
+  // Checked only AFTER the password is proven, so deactivation is never an oracle for strangers.
+  if ((await findAccessBlock(user.id)) === "staff_deactivated") throw deactivatedError();
+
   const pendingToken = await createPendingLoginToken(user.id);
   return { status: "pending_pin", pendingToken, pinSet: Boolean(user.pin_hash) };
 }
@@ -364,6 +376,10 @@ export async function completeLoginWithPin(pendingToken: string, pin: string): P
   if (!user || user.account_status === "suspended") {
     throw new ApiError(401, "LOGIN_EXPIRED", "This login attempt has expired. Please log in again.");
   }
+  if ((await findAccessBlock(user.id)) === "staff_deactivated") {
+    await deletePendingLoginToken(pendingToken).catch(() => {});
+    throw deactivatedError();
+  }
   await verifyPinForUser(user, pin);
   await deletePendingLoginToken(pendingToken);
   const fullName = await lookupFullName(user);
@@ -385,6 +401,10 @@ export async function completeLoginWithNewPin(pendingToken: string, pin: string)
   }
   if (user.pin_hash) {
     throw new ApiError(400, "PIN_ALREADY_SET", "A PIN is already set for this account — enter it instead.");
+  }
+  if ((await findAccessBlock(user.id)) === "staff_deactivated") {
+    await deletePendingLoginToken(pendingToken).catch(() => {});
+    throw deactivatedError();
   }
   await deletePendingLoginToken(pendingToken);
   const pinHash = await hashPassword(pin);
@@ -503,6 +523,10 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
     await revokeFamily(stored.family_id, "account_unavailable");
     throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
   }
+  if ((await findAccessBlock(user.id)) === "staff_deactivated") {
+    await revokeFamily(stored.family_id, "staff_deactivated");
+    throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Your access to this hotel has been removed. Contact the hotel owner.");
+  }
 
   const fullName = await lookupFullName(user);
   return issueTokens(user.id, user.role, fullName, user.email, { familyId: stored.family_id, previousId: stored.id });
@@ -521,6 +545,35 @@ export function decodeAccessToken(token: string) {
 const PASSWORD_RESET_TTL_MINUTES = 30;
 
 /**
+ * Creates the single live password-setup token for a user (256-bit random,
+ * stored only as a hash). Used for forgot-password (30 min) and for hotel-staff
+ * invitations (longer window) — both are redeemed by the same atomic
+ * resetPassword(), so there is exactly one place that sets a password from a link.
+ * Only the newest token works: issuing again invalidates older ones.
+ */
+export async function issuePasswordSetupToken(userId: string, ttlMinutes: number): Promise<string> {
+  const token = generateRefreshToken().token;
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [userId]);
+    await client.query("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)", [
+      userId,
+      hashRefreshToken(token),
+      expiresAt,
+    ]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  return token;
+}
+
+/**
  * Step 1 — always resolves successfully regardless of whether the
  * identifier matches a real account (same anti-enumeration philosophy
  * as login's generic INVALID_CREDENTIALS): the caller only ever learns
@@ -535,8 +588,9 @@ const PASSWORD_RESET_TTL_MINUTES = 30;
  */
 export async function requestPasswordReset(identifier: string, resetBaseUrl: string | null): Promise<void> {
   const user = await findUserByEmailOrPhone(identifier);
-  if (!user || !user.password_hash || user.account_status === "suspended") {
+  if (!user || !user.password_hash || user.account_status === "suspended" || (await findAccessBlock(user.id)) !== null) {
     // Same visible outcome and similar work as a real request (anti-enumeration).
+    // Suspended and owner-deactivated accounts are treated exactly like "no match".
     await hashPassword(identifier).catch(() => {});
     return;
   }
@@ -547,16 +601,7 @@ export async function requestPasswordReset(identifier: string, resetBaseUrl: str
     return;
   }
 
-  const token = generateRefreshToken().token;
-  const tokenHash = hashRefreshToken(token);
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
-  // Only the newest link works: requesting again invalidates older ones.
-  await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [user.id]);
-  await pool.query("INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)", [
-    user.id,
-    tokenHash,
-    expiresAt,
-  ]);
+  const token = await issuePasswordSetupToken(user.id, PASSWORD_RESET_TTL_MINUTES);
 
   const resetUrl = `${resetBaseUrl.replace(/\/$/, "")}/reset-password?token=${token}`;
   // Sent after the response (similar latency for real and unknown accounts).
@@ -570,21 +615,75 @@ export async function requestPasswordReset(identifier: string, resetBaseUrl: str
  * the account, and revokes every existing session.
  */
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const invalid = new ApiError(400, "INVALID_RESET_TOKEN", "This reset link is invalid or has expired. Please request a new one.");
   const tokenHash = hashRefreshToken(token);
-  const result = await pool.query(
-    "DELETE FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now() RETURNING user_id",
-    [tokenHash]
-  );
-  if (result.rows.length === 0) {
-    throw new ApiError(400, "INVALID_RESET_TOKEN", "This reset link is invalid or has expired. Please request a new one.");
-  }
-  const userId = result.rows[0].user_id;
+
+  // Cheap pre-check so junk tokens don't cost a bcrypt hash. NOT the security
+  // boundary — the atomic claim inside the transaction below is.
+  const peek = await pool.query("SELECT 1 FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now()", [tokenHash]);
+  if (peek.rows.length === 0) throw invalid;
 
   const passwordHash = await hashPassword(newPassword);
-  await pool.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [passwordHash, userId]);
-  await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [userId]);
-  await revokeAllRefreshTokensForUser(userId, "password_reset");
-  notificationEvents.securityPasswordChanged(userId);
+
+  const client = await pool.connect();
+  let userId: string;
+  let firstActivation = false;
+  try {
+    await client.query("BEGIN");
+
+    // Atomic single-use claim: exactly one concurrent redemption can win.
+    const claimed = await client.query<{ user_id: string }>(
+      "DELETE FROM password_reset_tokens WHERE token_hash = $1 AND expires_at > now() RETURNING user_id",
+      [tokenHash]
+    );
+    if (claimed.rows.length === 0) {
+      await client.query("ROLLBACK");
+      throw invalid;
+    }
+    userId = claimed.rows[0].user_id;
+
+    // A suspended / owner-deactivated account can't be revived through a reset link.
+    const acct = await client.query<{ account_status: string; is_active: boolean | null }>(
+      `SELECT u.account_status, hs.is_active FROM users u LEFT JOIN hotel_staff hs ON hs.user_id = u.id WHERE u.id = $1 FOR UPDATE OF u`,
+      [userId]
+    );
+    const a = acct.rows[0];
+    if (!a || a.account_status === "suspended" || a.is_active === false) {
+      await client.query("ROLLBACK");
+      throw invalid;
+    }
+
+    // Everything below commits together or not at all: a failure can never leave the
+    // password changed while old sessions survive (or the reverse).
+    await client.query("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2", [passwordHash, userId]);
+    await client.query("DELETE FROM password_reset_tokens WHERE user_id = $1", [userId]);
+    await client.query("DELETE FROM pending_login_tokens WHERE user_id = $1", [userId]);
+    await client.query(
+      "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'password_reset' WHERE user_id = $1 AND revoked_at IS NULL",
+      [userId]
+    );
+
+    // First time an invited staff member sets a password: the emailed link proved they
+    // control the address, so activate the invite and mark the email verified.
+    const activated = await client.query(
+      "UPDATE hotel_staff SET activated_at = now() WHERE user_id = $1 AND activated_at IS NULL RETURNING user_id",
+      [userId]
+    );
+    if ((activated.rowCount ?? 0) > 0) {
+      firstActivation = true;
+      await client.query(
+        "UPDATE users SET email_verified = true, email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1 AND email_verified = false",
+        [userId]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (!firstActivation) notificationEvents.securityPasswordChanged(userId);
 }
 
 const PIN_MAX_ATTEMPTS = 4;
@@ -631,6 +730,10 @@ export async function verifyPinAndRefresh(refreshToken: string, pin: string): Pr
   const user = await findUserById(stored.user_id);
   if (!user || user.account_status === "suspended") {
     throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Session expired. Please log in again.");
+  }
+  if ((await findAccessBlock(user.id)) === "staff_deactivated") {
+    await revokeFamily(stored.family_id, "staff_deactivated");
+    throw new ApiError(401, "INVALID_REFRESH_TOKEN", "Your access to this hotel has been removed. Contact the hotel owner.");
   }
   // A wrong PIN never consumes the session (user can fall back to password login).
   await verifyPinForUser(user, pin);

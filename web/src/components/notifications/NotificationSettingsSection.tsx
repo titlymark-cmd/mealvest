@@ -2,7 +2,14 @@ import React, { useEffect, useState } from "react";
 import { BellRing, CreditCard, Wallet, Megaphone, ShieldAlert, UtensilsCrossed, Send } from "lucide-react";
 import { Switch } from "../Switch";
 import { useAuth } from "../../context/AuthContext";
-import { fetchPreferences, updatePreferences, sendTestNotification, NotificationPreferences } from "../../services/notificationsApi";
+import {
+  fetchPreferences,
+  updatePreferences,
+  sendTestNotification,
+  describeTestResult,
+  NotificationPreferences,
+} from "../../services/notificationsApi";
+import { usePushControl } from "../../hooks/usePushControl";
 
 const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; sub: string; Icon: React.ComponentType<{ size?: number }> }> = [
   { key: "meal_reminders", label: "Meal reminders", sub: "Reminders to use your meal pass", Icon: UtensilsCrossed },
@@ -13,25 +20,21 @@ const TOGGLE_ROWS: Array<{ key: keyof NotificationPreferences; label: string; su
 ];
 
 /**
- * Embedded in StudentProfileScreen — see that file for the surrounding
- * page. Renders as a grouped settings list (.sv-group rows).
+ * Embedded in StudentProfileScreen — renders as a grouped settings list (.sv-group rows).
  *
- * Push notifications need a Firebase project configured server-side
- * (see fcmService.ts) before they can actually send anything — until
- * that's set up, the toggle below is shown as "Coming soon" instead of
- * a live control (see ComingSoonBadge.tsx for the fuller explanation
- * surfaced elsewhere in the app). The backend is fully built and
- * wired — the ONLY thing missing is real Firebase credentials — so
- * re-enabling this is a one-line change (swap the chip back for a
- * <Switch> bound to prefs.push_enabled / pushNotifications.enablePush)
- * once those are set in Vercel.
+ * The push switch is real: it reflects whether THIS browser is actually subscribed (not a stored
+ * flag), asks for browser permission only when turned on, and explains plainly when push can't
+ * work here (blocked, iPhone browser tab, unsupported browser, or not configured on this
+ * deployment). The test button reports what really happened to the push.
  */
 export function NotificationSettingsSection() {
   const { authFetch } = useAuth();
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [testStatus, setTestStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [testStatus, setTestStatus] = useState<"idle" | "sending">("idle");
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const push = usePushControl();
 
   useEffect(() => {
     fetchPreferences(authFetch)
@@ -58,11 +61,12 @@ export function NotificationSettingsSection() {
 
   const handleTest = async () => {
     setTestStatus("sending");
+    setTestResult(null);
     try {
-      await sendTestNotification(authFetch);
-      setTestStatus("sent");
-      setTimeout(() => setTestStatus("idle"), 3000);
-    } catch {
+      setTestResult(describeTestResult(await sendTestNotification(authFetch)));
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : "Could not send a test notification." });
+    } finally {
       setTestStatus("idle");
     }
   };
@@ -82,13 +86,32 @@ export function NotificationSettingsSection() {
             <BellRing size={18} />
           </span>
           <span className="sv-row-main">
-            <span className="sv-row-label">Push notifications</span>
-            <span className="sv-row-sub">Get alerts on this device, even when the app is closed</span>
+            <span className="sv-row-label" id="pref-push">
+              Push notifications
+            </span>
+            <span className="sv-row-sub">
+              {push.explanation ?? (push.status === "on" ? "On for this device" : "Get alerts on this device, even when the app is closed")}
+            </span>
           </span>
-          <span className="sv-badge" data-tone="warn">
-            Coming soon
-          </span>
+          {push.status === "unavailable" || push.status === "blocked" ? (
+            <span className="sv-badge" data-tone="warn">
+              {push.status === "blocked" ? "Blocked" : "Unavailable"}
+            </span>
+          ) : (
+            <span aria-labelledby="pref-push" style={{ display: "inline-flex" }}>
+              <Switch
+                value={push.status === "on"}
+                disabled={push.busy || push.status === "checking"}
+                onValueChange={() => (push.status === "on" ? push.turnOff() : push.turnOn())}
+              />
+            </span>
+          )}
         </div>
+        {push.error && (
+          <div className="sv-toast" data-tone="bad" role="alert" style={{ margin: 12 }}>
+            {push.error}
+          </div>
+        )}
 
         {TOGGLE_ROWS.map(({ key, label, sub, Icon }) => (
           <div key={key} className="sv-row">
@@ -113,12 +136,17 @@ export function NotificationSettingsSection() {
           </span>
           <span className="sv-row-main">
             <span className="sv-row-label">
-              {testStatus === "sending" ? "Sending…" : testStatus === "sent" ? "Test sent" : "Send a test notification"}
+              {testStatus === "sending" ? "Sending…" : "Send a test notification"}
             </span>
             <span className="sv-row-sub">Check that alerts reach you</span>
           </span>
         </button>
       </div>
+      {testResult && (
+        <div className="sv-toast" data-tone={testResult.ok ? "ok" : "bad"} role={testResult.ok ? "status" : "alert"} style={{ marginTop: 10 }}>
+          {testResult.message}
+        </div>
+      )}
       {savingKey && (
         <span className="sv-meta" role="status" style={{ display: "block", marginTop: 8, marginLeft: 6 }}>
           Saving…

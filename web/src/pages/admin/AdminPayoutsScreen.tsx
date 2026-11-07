@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { formatPayoutTime12 } from "../../utils/payoutMode";
-import { Wallet, Send, RefreshCw, Check, X, RotateCw, Copy } from "lucide-react";
+import { Wallet, Send, RefreshCw, Check, X } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
@@ -10,9 +10,6 @@ import {
   fetchPayoutHistory,
   triggerPayout,
   refreshPayoutStatus,
-  retryPayout,
-  markPayoutFailed,
-  markPayoutPaid,
   approvePayout,
   cancelPayout,
   HotelPendingBalance,
@@ -33,7 +30,7 @@ const BLOCKED_REASON: Record<string, string> = {
   payout_pending: "a payout is waiting to be sent",
   payout_review: "a payout is awaiting approval",
   payout_approved: "a payout is approved and about to send",
-  payout_unknown: "a previous payout's outcome is unconfirmed — resolve it in Payout history below",
+  payout_unknown: "a previous payout's outcome is unconfirmed",
   failure_cooldown: "waiting after a recent failure",
   repeated_failures: "paused after repeated failures — retry manually",
 };
@@ -66,14 +63,6 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: COLORS.textFaint,
 };
 
-/** Provider text stored on the payout, minus our own "Outcome unknown:" prefix. */
-function providerMessage(p: HotelPayout): string | null {
-  if (!p.failure_reason) return null;
-  return p.failure_reason.replace(/^Outcome unknown:\s*/, "");
-}
-
-type Resolving = { id: string; outcome: "failed" | "paid" } | null;
-
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diffMs / 60000);
@@ -104,11 +93,6 @@ export default function AdminPayoutsScreen() {
   const [loading, setLoading] = useState(true);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [resolving, setResolving] = useState<Resolving>(null);
-  const [note, setNote] = useState("");
-  const [providerId, setProviderId] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
 
   // `silent` = background refresh: never flips the loading spinner or
   // replaces the screen's error with a transient network blip.
@@ -172,63 +156,6 @@ export default function AdminPayoutsScreen() {
     }
   };
 
-  const handleRetry = async (payoutId: string) => {
-    setError(null);
-    setNotice(null);
-    setActingOn(payoutId);
-    try {
-      const p = await retryPayout(authFetch, payoutId);
-      setNotice(
-        p.status === "unknown"
-          ? `Retried — the provider still hasn't confirmed this payout (attempt ${p.submission_attempts ?? "?"}). See its message below.`
-          : `Retried — payout is now ${p.status}.`
-      );
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not retry this payout.");
-    } finally {
-      setActingOn(null);
-    }
-  };
-
-  const openResolve = (id: string, outcome: "failed" | "paid") => {
-    setResolving({ id, outcome });
-    setNote("");
-    setProviderId("");
-    setConfirmed(false);
-  };
-
-  const submitResolve = async () => {
-    if (!resolving) return;
-    setError(null);
-    setNotice(null);
-    setActingOn(resolving.id);
-    try {
-      const input = { note: note.trim(), providerPayoutId: providerId.trim() };
-      if (resolving.outcome === "failed") {
-        await markPayoutFailed(authFetch, resolving.id, input);
-        setNotice("Marked as failed. Its orders are back in Pending payouts — use Pay out to send them again under a new reference.");
-      } else {
-        await markPayoutPaid(authFetch, resolving.id, input);
-        setNotice("Marked as paid.");
-      }
-      setResolving(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update this payout.");
-    } finally {
-      setActingOn(null);
-    }
-  };
-
-  const copyRef = (ref: string) => {
-    try {
-      void navigator.clipboard?.writeText(ref);
-    } catch {
-      /* clipboard unavailable — the reference is still shown on screen */
-    }
-  };
-
   const handleDecision = async (payoutId: string, decision: "approve" | "cancel") => {
     const p = history.find((x) => x.id === payoutId);
     const question =
@@ -271,7 +198,6 @@ export default function AdminPayoutsScreen() {
       </p>
 
       {error && <p style={styles.errorText}>{error}</p>}
-      {notice && <p style={styles.noticeText}>{notice}</p>}
 
       <Card style={styles.card}>
         <span style={styles.cardTitle}>Pending payouts</span>
@@ -330,128 +256,39 @@ export default function AdminPayoutsScreen() {
         {history.length > 0 && history.filter((p) => matchesFilter(p, filter)).length === 0 && (
           <p style={styles.emptyText}>No payouts match this filter.</p>
         )}
-        {history.filter((p) => matchesFilter(p, filter)).map((p) => {
-          const stuck = p.status === "unknown" || p.status === "processing";
-          const msg = providerMessage(p);
-          const providerName = p.provider === "cyzora" ? "Cyzora" : p.provider === "paystack" ? "Paystack" : p.provider;
-          const busy = actingOn === p.id;
-          const isResolving = resolving?.id === p.id;
-          return (
-            <div key={p.id} style={styles.rowWrap}>
-              <div style={styles.rowFlat}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={styles.rowTitle}>{p.hotel_name}</span>
-                  <span style={styles.rowSub}>
-                    {p.transfer_reference} · started {timeAgo(p.created_at)}
-                    {(p.status === "successful" || p.status === "failed" || p.status === "cancelled") && ` · ${p.status} ${timeAgo(p.updated_at)}`}
-                    {p.transfer_code && ` · provider ref ${p.transfer_code}`}
-                    {p.automated ? " · automatic" : ""}
-                    {p.needs_attention && p.status === "processing" && " — still processing; check the provider dashboard / webhook delivery"}
-                    {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
-                    {!stuck && p.failure_reason && ` — ${p.failure_reason}`}
-                  </span>
-                </div>
-                <span style={styles.amount}>KSh {Number(p.amount).toLocaleString()}</span>
-                <span style={{ ...styles.statusChip, backgroundColor: STATUS_COLOR[p.status] }}>{STATUS_LABEL[p.status] ?? p.status}</span>
-                {p.status === "review" && (
-                  <>
-                    <button onClick={() => handleDecision(p.id, "approve")} disabled={busy} style={styles.refreshBtn} aria-label="Approve and send">
-                      <Check size={14} color={COLORS.success} />
-                    </button>
-                    <button onClick={() => handleDecision(p.id, "cancel")} disabled={busy} style={styles.refreshBtn} aria-label="Cancel payout">
-                      <X size={14} color={COLORS.danger} />
-                    </button>
-                  </>
-                )}
-                {stuck && (
-                  <button onClick={() => handleRefresh(p.id)} disabled={busy} style={styles.refreshBtn} aria-label="Refresh status">
-                    <RefreshCw size={13} color={COLORS.primary} />
-                  </button>
-                )}
-              </div>
-
-              {stuck && (
-                <div style={styles.detailBox}>
-                  {msg && (
-                    <p style={styles.detailLine}>
-                      <strong>{providerName} message:</strong> {msg}
-                    </p>
-                  )}
-                  <p style={styles.detailLine}>
-                    <strong>Send attempts:</strong> {p.submission_attempts ?? 0}
-                    {p.last_reconciled_at ? ` · last checked ${timeAgo(p.last_reconciled_at)}` : " · not re-checked yet"}
-                  </p>
-                  <p style={styles.detailHint}>
-                    {p.status === "unknown"
-                      ? `${providerName} may or may not have this payout. Search the ${providerName} dashboard for ${p.transfer_reference} before choosing: Retry if it isn't there, Mark paid if it shows Paid, Mark failed if it shows Failed.`
-                      : `Accepted by ${providerName} but not finalised. If the dashboard already shows Paid or Failed and this screen doesn't update, resolve it by hand.`}
-                  </p>
-                  <div style={styles.actionRow}>
-                    {p.status === "unknown" && (
-                      <button onClick={() => handleRetry(p.id)} disabled={busy} style={styles.actionBtn}>
-                        <RotateCw size={12} color={COLORS.primary} /> {busy ? "Retrying…" : "Retry payout"}
-                      </button>
-                    )}
-                    <button onClick={() => openResolve(p.id, "failed")} disabled={busy} style={{ ...styles.actionBtn, borderColor: COLORS.danger, color: COLORS.dangerText }}>
-                      <X size={12} color={COLORS.danger} /> Mark failed
-                    </button>
-                    <button onClick={() => openResolve(p.id, "paid")} disabled={busy} style={{ ...styles.actionBtn, borderColor: COLORS.success, color: COLORS.successText }}>
-                      <Check size={12} color={COLORS.success} /> Mark paid
-                    </button>
-                    <button onClick={() => copyRef(p.transfer_reference)} style={styles.actionBtn} aria-label="Copy reference">
-                      <Copy size={12} color={COLORS.textMuted} /> Copy reference
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {p.status === "failed" && (
-                <div style={styles.detailBox}>
-                  <p style={styles.detailHint}>
-                    This payout's orders are back in Pending payouts. Fix the cause (e.g. the hotel's settlement details, or {providerName}'s status) and use Pay out there — it sends under a new reference.
-                  </p>
-                </div>
-              )}
-
-              {isResolving && resolving && (
-                <div style={styles.resolvePanel}>
-                  <span style={styles.resolveTitle}>{resolving.outcome === "failed" ? "Mark this payout as failed" : "Mark this payout as paid"}</span>
-                  <label style={styles.fieldLabel} htmlFor={`note-${p.id}`}>What did you see in the {providerName} dashboard?</label>
-                  <input
-                    id={`note-${p.id}`}
-                    style={styles.input}
-                    value={note}
-                    maxLength={300}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder={resolving.outcome === "failed" ? "e.g. Failed — paybill rejected" : "e.g. Paid at 14:02"}
-                  />
-                  {resolving.outcome === "paid" && (
-                    <>
-                      <label style={styles.fieldLabel} htmlFor={`pid-${p.id}`}>{providerName} payout id (optional)</label>
-                      <input id={`pid-${p.id}`} style={styles.input} value={providerId} maxLength={100} onChange={(e) => setProviderId(e.target.value)} />
-                    </>
-                  )}
-                  <label style={styles.checkLabel}>
-                    <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                    <span>
-                      {resolving.outcome === "failed"
-                        ? `I checked ${p.transfer_reference} in the ${providerName} dashboard and no money was sent. I understand its orders return to Pending payouts, and paying again will send money twice if it actually went through.`
-                        : `I checked ${p.transfer_reference} in the ${providerName} dashboard and it shows as paid.`}
-                    </span>
-                  </label>
-                  <div style={styles.actionRow}>
-                    <button onClick={submitResolve} disabled={busy || !confirmed || note.trim().length < 3} style={{ ...styles.payBtn, opacity: confirmed && note.trim().length >= 3 ? 1 : 0.4 }}>
-                      <span style={styles.payBtnText}>{busy ? "Saving…" : "Confirm"}</span>
-                    </button>
-                    <button onClick={() => setResolving(null)} disabled={busy} style={styles.actionBtn}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+        {history.filter((p) => matchesFilter(p, filter)).map((p) => (
+          <div key={p.id} style={styles.row}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={styles.rowTitle}>{p.hotel_name}</span>
+              <span style={styles.rowSub}>
+                {p.transfer_reference} · started {timeAgo(p.created_at)}
+                {(p.status === "successful" || p.status === "failed" || p.status === "cancelled") && ` · ${p.status} ${timeAgo(p.updated_at)}`}
+                {p.transfer_code && ` · provider ref ${p.transfer_code}`}
+                {p.automated ? " · automatic" : ""}
+                {p.needs_attention && p.status === "processing" && " — still processing; check the provider dashboard / webhook delivery"}
+                {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
+                {p.failure_reason && ` — ${p.failure_reason}`}
+              </span>
             </div>
-          );
-        })}
+            <span style={styles.amount}>KSh {Number(p.amount).toLocaleString()}</span>
+            <span style={{ ...styles.statusChip, backgroundColor: STATUS_COLOR[p.status] }}>{STATUS_LABEL[p.status] ?? p.status}</span>
+            {p.status === "review" && (
+              <>
+                <button onClick={() => handleDecision(p.id, "approve")} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Approve and send">
+                  <Check size={14} color={COLORS.success} />
+                </button>
+                <button onClick={() => handleDecision(p.id, "cancel")} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Cancel payout">
+                  <X size={14} color={COLORS.danger} />
+                </button>
+              </>
+            )}
+            {(p.status === "processing" || p.status === "unknown") && (
+              <button onClick={() => handleRefresh(p.id)} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Refresh status">
+                <RefreshCw size={13} color={COLORS.primary} />
+              </button>
+            )}
+          </div>
+        ))}
       </Card>
     </div>
   );
@@ -501,24 +338,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   refreshBtn: { padding: 6, flexShrink: 0 },
-  rowWrap: { borderTop: `1px solid ${COLORS.borderSoft}` },
-  rowFlat: { display: "flex", flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 12, paddingBottom: 12 },
-  noticeText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.success, marginBottom: 12 },
-  detailBox: { backgroundColor: "rgba(44,22,16,0.05)", borderRadius: 10, padding: "8px 10px", marginBottom: 10 },
-  detailLine: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.text, margin: "2px 0" },
-  detailHint: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, margin: "4px 0" },
-  actionRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
-  actionBtn: {
-    display: "flex", flexDirection: "row", alignItems: "center", gap: 5,
-    fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.primary,
-    borderWidth: 1, borderStyle: "solid", borderColor: COLORS.borderSoft, borderRadius: RADIUS.pill,
-    padding: "5px 10px", backgroundColor: "transparent",
-  },
-  resolvePanel: { border: `1px solid ${COLORS.borderSoft}`, borderRadius: 8, padding: 12, marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 },
-  resolveTitle: { fontFamily: FONTS.displaySemibold, fontWeight: 700, fontSize: 13, color: COLORS.text },
-  fieldLabel: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted },
-  input: { fontFamily: FONTS.body, fontSize: 13, padding: "7px 9px", borderRadius: 6, border: `1px solid ${COLORS.borderSoft}`, color: COLORS.text, backgroundColor: "transparent" },
-  checkLabel: { display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 8, fontFamily: FONTS.body, fontSize: 11, color: COLORS.text, marginTop: 4 },
   filterRow: { display: "flex", flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8 },
   filterChip: {
     fontFamily: FONTS.bodySemibold,

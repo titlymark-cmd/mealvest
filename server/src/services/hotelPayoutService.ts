@@ -326,19 +326,9 @@ async function applySendResult(
  */
 export async function applyCyzoraPayoutWebhook(
   eventName: string,
-  cyzoraPayoutId: string,
-  reference?: string | null
+  cyzoraPayoutId: string
 ): Promise<model.HotelPayoutRow | null> {
-  let payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
-  if (!payout && reference && reference.startsWith("PO-")) {
-    // The send errored before we ever saw Cyzora's payout id, so the row has
-    // no transfer_code to match on. Fall back to OUR reference (also the
-    // Idempotency-Key) and record the id so this and later events match.
-    const byRef = await model.getPayoutByReference(reference);
-    if (byRef && byRef.provider === "cyzora" && !byRef.transfer_code) {
-      payout = (await model.attachProviderPayoutId(byRef.id, cyzoraPayoutId)) ?? byRef;
-    }
-  }
+  const payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
   if (!payout) {
     // A payout this app never created, or the webhook beat our own
     // transfer_code write — null makes the controller answer 404 and
@@ -387,7 +377,7 @@ export async function applyCyzoraPayoutWebhook(
  * reference AND the grace period has passed (and then only with the
  * same reference/idempotency key, which the provider deduplicates).
  */
-export async function verifyPayout(payoutId: string, opts: { force?: boolean } = {}): Promise<model.HotelPayoutRow | null> {
+export async function verifyPayout(payoutId: string): Promise<model.HotelPayoutRow | null> {
   const payout = await model.getPayoutById(payoutId);
   if (!payout) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
   if (payout.status !== "processing" && payout.status !== "unknown") return payout;
@@ -401,7 +391,7 @@ export async function verifyPayout(payoutId: string, opts: { force?: boolean } =
       await model.touchReconciled(payout.id);
       return payout;
     }
-    if (!opts.force && !graceElapsed(payout)) return payout;
+    if (!graceElapsed(payout)) return payout;
     const hotel = await model.getHotelPaymentDetails(payout.hotel_id);
     let destination: cyzoraPayouts.CyzoraDestination;
     try {
@@ -426,7 +416,7 @@ export async function verifyPayout(payoutId: string, opts: { force?: boolean } =
 
   if (!verified) {
     // Paystack has no transfer with our reference.
-    if (payout.status !== "unknown" || (!opts.force && !graceElapsed(payout))) return payout;
+    if (payout.status !== "unknown" || !graceElapsed(payout)) return payout;
     const recipientCode = payout.recipient_code ?? (await model.getHotelPaymentDetails(payout.hotel_id))?.paystack_recipient_code ?? null;
     if (!recipientCode) {
       return (await model.recordUnknownOutcome(payout.id, "Cannot re-send: no Paystack recipient on file")) ?? payout;
@@ -450,51 +440,6 @@ export async function verifyPayout(payoutId: string, opts: { force?: boolean } =
   });
   notifyFinal(result);
   return result ?? (await model.getPayoutById(payout.id));
-}
-
-/**
- * Admin "Retry": re-sends an 'unknown' payout NOW (skipping the grace wait)
- * under its OWN reference / Idempotency-Key, so the provider returns the
- * original payout if it exists or creates it exactly once. Never a new
- * reference, so it cannot pay twice.
- */
-export async function retryUnknownPayout(payoutId: string): Promise<model.HotelPayoutRow> {
-  const payout = await model.getPayoutById(payoutId);
-  if (!payout) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
-  if (payout.status !== "unknown") {
-    throw new ApiError(409, "INVALID_TRANSITION", `This payout is ${payout.status}; only a payout with an unconfirmed outcome can be retried.`);
-  }
-  return (await verifyPayout(payoutId, { force: true })) ?? payout;
-}
-
-/**
- * Admin resolution of a payout the provider never settled for us
- * ('unknown' or 'processing'), after the admin checked the provider's
- * dashboard. 'failed' releases the orders back to the unpaid pool (so
- * the hotel can be paid again under a NEW reference); 'successful'
- * keeps them claimed. The admin id and note are stored on the row and the
- * request is also written to admin_audit_log by the admin router.
- */
-export async function resolvePayoutManually(
-  payoutId: string,
-  adminUserId: string,
-  outcome: "failed" | "successful",
-  note: string,
-  providerPayoutId?: string | null
-): Promise<model.HotelPayoutRow> {
-  const row = await model.transitionToFinal(payoutId, outcome, ["unknown", "processing"], {
-    adminId: adminUserId,
-    failureReason: outcome === "failed" ? `Marked failed by an administrator after checking the provider dashboard: ${note}` : null,
-    transferCode: providerPayoutId || null,
-  });
-  if (!row) {
-    const current = await model.getPayoutById(payoutId);
-    if (!current) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
-    throw new ApiError(409, "INVALID_TRANSITION", `This payout is ${current.status}; only an unconfirmed or processing payout can be resolved by hand.`);
-  }
-  console.warn("[hotelPayoutService] payout resolved MANUALLY", { payoutId, outcome, adminUserId, note });
-  notifyFinal(row);
-  return row;
 }
 
 function graceElapsed(payout: model.HotelPayoutRow): boolean {

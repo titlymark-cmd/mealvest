@@ -52,6 +52,27 @@ export type SendPushResult =
  * the caller (notificationService) uses `invalidToken` to deactivate
  * just that one device row without touching the user's other devices.
  */
+const FCM_TIMEOUT_MS = 10_000;
+
+/**
+ * Decides whether an FCM error means THIS DEVICE TOKEN is permanently dead (so the
+ * row should be disabled) as opposed to a payload bug, quota, outage or credentials
+ * problem (which say nothing about the token and must never disable a device).
+ *
+ * FCM v1 reports status INVALID_ARGUMENT for BOTH a malformed token and a malformed
+ * payload, so that status alone is not evidence — only the specific token wording is.
+ */
+export function isDeadTokenError(error: { status?: string; message?: string; details?: Array<{ errorCode?: string }> } | undefined): boolean {
+  if (!error) return false;
+  const codes = (error.details ?? []).map((d) => d.errorCode).filter(Boolean);
+  if (codes.includes("UNREGISTERED") || codes.includes("SENDER_ID_MISMATCH")) return true;
+  if (error.status === "NOT_FOUND") return true; // v1 uses 404 NOT_FOUND for an unregistered token
+  if (error.status === "INVALID_ARGUMENT" && /registration token/i.test(error.message ?? "")) return true;
+  return false;
+}
+
+let warnedAuth = false;
+
 export async function sendPushToDevice(params: SendPushParams): Promise<SendPushResult> {
   const auth = getAuth();
 
@@ -67,21 +88,36 @@ export async function sendPushToDevice(params: SendPushParams): Promise<SendPush
           notification: { title: params.title, body: params.body },
           webpush: {
             notification: { icon: "/logo192.png" },
-            fcm_options: params.deepLink ? { link: params.deepLink } : undefined,
+            // A stale push (phone off for a day) is worse than none.
+            headers: { TTL: "86400" },
+            // NOTE: no fcm_options.link. FCM only accepts an absolute https:// URL there and
+            // rejects a relative app path with INVALID_ARGUMENT. Navigation is handled by the
+            // service worker's notificationclick using data.deepLink (a same-origin path).
           },
           data: params.deepLink ? { deepLink: params.deepLink } : undefined,
         },
       },
-      { headers: { Authorization: `Bearer ${accessToken.token}`, "Content-Type": "application/json" } }
+      {
+        headers: { Authorization: `Bearer ${accessToken.token}`, "Content-Type": "application/json" },
+        timeout: FCM_TIMEOUT_MS,
+      }
     );
 
     return { ok: true, messageId: res.data.name };
   } catch (err) {
     if (axios.isAxiosError(err)) {
-      const status = err.response?.data?.error?.status;
-      const invalidToken = status === "NOT_FOUND" || status === "UNREGISTERED" || status === "INVALID_ARGUMENT";
-      return { ok: false, invalidToken, error: err.response?.data?.error?.message || err.message };
+      const fcmError = err.response?.data?.error;
+      const httpStatus = err.response?.status;
+      if ((httpStatus === 401 || httpStatus === 403) && !warnedAuth) {
+        warnedAuth = true;
+        console.error(
+          `[fcm] HTTP ${httpStatus}: the service account was rejected. Check FIREBASE_PROJECT_ID matches the key's project, ` +
+            "the 'Firebase Cloud Messaging API (V1)' is enabled, and the account has the Firebase Cloud Messaging Admin role."
+        );
+      }
+      return { ok: false, invalidToken: isDeadTokenError(fcmError), error: fcmError?.message || err.message };
     }
+    // Includes failures minting the access token (bad private key format, network).
     return { ok: false, invalidToken: false, error: err instanceof Error ? err.message : "Unknown push error" };
   }
 }

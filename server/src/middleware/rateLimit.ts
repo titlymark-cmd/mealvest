@@ -203,6 +203,16 @@ export const financialActionRateLimiter = makeLimiter({
   keyGenerator: userOrIpKey,
 });
 
+/** Owner staff-management actions (invite, resend, deactivate, reactivate) — keyed by the authenticated owner. */
+export const staffManagementRateLimiter = makeLimiter({
+  name: "staff-mgmt",
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  critical: true,
+  message: "Too many staff changes. Please wait a few minutes and try again.",
+  keyGenerator: userOrIpKey,
+});
+
 /** Self-service "Test Notification" and device registration churn. */
 export const notificationActionRateLimiter = makeLimiter({
   name: "notify",

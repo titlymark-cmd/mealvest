@@ -21,6 +21,9 @@ export interface NotificationDeviceRow {
  * Re-registering the same token (a token refresh returning the same
  * value, or the same device re-enabling) just refreshes that one row.
  */
+/** Most devices/browsers that may receive push for one account at a time. */
+export const MAX_ENABLED_DEVICES_PER_USER = 10;
+
 export async function registerDevice(params: {
   userId: string;
   pushToken: string;
@@ -40,6 +43,13 @@ export async function registerDevice(params: {
        last_seen_at = now()
      RETURNING *`,
     [params.userId, params.pushToken, params.platform, params.browser, params.deviceLabel]
+  );
+  // Bound fan-out per user: keep the most recently seen devices, quietly retire the rest.
+  await pool.query(
+    `UPDATE notification_devices SET enabled = false
+      WHERE user_id = $1 AND enabled = true
+        AND id NOT IN (SELECT id FROM notification_devices WHERE user_id = $1 AND enabled = true ORDER BY last_seen_at DESC LIMIT ${MAX_ENABLED_DEVICES_PER_USER})`,
+    [params.userId]
   );
   return result.rows[0];
 }
@@ -229,14 +239,37 @@ export async function markAllRead(userId: string): Promise<number> {
  * matching here, without another schema change. A reminder to someone
  * with no active plan would be noise, so that's excluded too.
  */
-export async function listUsersDueForMealReminder(): Promise<string[]> {
+export async function listUsersDueForMealReminder(window: {
+  /** Exclusive lower bound, "HH:MM:SS" in the business timezone. */
+  from: string;
+  /** Inclusive upper bound ("now"), "HH:MM:SS" in the business timezone. */
+  to: string;
+  /** Today's reminder dedupe key — users who already have it are skipped. */
+  dedupeKey: string;
+}): Promise<string[]> {
+  // Honours each user's own reminder_time: only those whose chosen time has just arrived
+  // (inside the catch-up window) are due. Suspended accounts and anyone already reminded
+  // today are excluded.
   const result = await pool.query(
     `SELECT DISTINCT np.user_id
-     FROM notification_preferences np
-     JOIN budgets b ON b.user_id = np.user_id AND b.status = 'active'
-     WHERE np.meal_reminders = true`
+       FROM notification_preferences np
+       JOIN budgets b ON b.user_id = np.user_id AND b.status = 'active'
+       JOIN users u ON u.id = np.user_id AND u.account_status <> 'suspended'
+      WHERE np.meal_reminders = true
+        AND np.reminder_time >  $1::time
+        AND np.reminder_time <= $2::time
+        AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = np.user_id AND n.dedupe_key = $3)`,
+    [window.from, window.to, window.dedupeKey]
   );
   return result.rows.map((r) => r.user_id);
+}
+
+/** Housekeeping: devices FCM declared dead (or users switched off) a month ago are just clutter. */
+export async function purgeStaleDevices(): Promise<number> {
+  const r = await pool.query(
+    "DELETE FROM notification_devices WHERE enabled = false AND updated_at < now() - interval '30 days'"
+  );
+  return r.rowCount ?? 0;
 }
 
 export async function logDelivery(params: {

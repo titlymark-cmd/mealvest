@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { COLORS } from "../styles/theme";
 import { Spinner } from "../components/Spinner";
@@ -14,6 +14,9 @@ import DemoScreen from "../pages/demo/DemoScreen";
 import { PinGateScreen } from "../pages/PinGateScreen";
 import { PinUnlockScreen } from "../pages/PinUnlockScreen";
 import TermsScreen from "../pages/TermsScreen";
+import { ResetPasswordScreen } from "../pages/ResetPasswordScreen";
+import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
+import { onNotificationNavigate } from "../services/pushNotifications";
 
 /**
  * /install is matched here, before anything else in the app — no
@@ -25,9 +28,34 @@ import TermsScreen from "../pages/TermsScreen";
  */
 export function RootGate() {
   return (
+    <>
+      <NotificationNavigationBridge />
+      <RootRoutes />
+    </>
+  );
+}
+
+/**
+ * When a push notification is clicked while the app is already open, the service worker asks this
+ * window to navigate (instead of hard-reloading it and losing state). Only same-origin paths are
+ * accepted — see isSafeInAppPath. Closed-app clicks open the deep link directly instead.
+ */
+function NotificationNavigationBridge() {
+  const navigate = useNavigate();
+  React.useEffect(() => onNotificationNavigate((path) => navigate(path)), [navigate]);
+  return null;
+}
+
+function RootRoutes() {
+  return (
     <Routes>
       <Route path="/install" element={<InstallScreen />} />
       <Route path="/demo" element={<DemoScreen />} />
+      {/* Emailed links. Public for the same reason as /terms, and because the TOKEN is the proof:
+          they must open correctly whether or not someone is signed in on this device, whatever
+          their role, and even behind the PIN lock or a half-finished login. */}
+      <Route path="/reset-password" element={<ResetPasswordScreen />} />
+      <Route path="/verify-email" element={<VerifyEmailScreen />} />
       {/* Public, same as /install: readable before registering, from the
           plan disclaimer, and from the withdrawal screen while signed in. */}
       <Route path="/terms" element={<TermsScreen />} />

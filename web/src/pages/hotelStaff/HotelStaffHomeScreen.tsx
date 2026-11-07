@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { QrCode, LogOut, ChevronRight, ClipboardList, DollarSign } from "lucide-react";
+import { QrCode, ChevronRight, ClipboardList, DollarSign } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
 import { COLORS, FONTS, RADIUS, GRADIENT } from "../../styles/theme";
@@ -8,7 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import { fetchHotelDashboard, HotelDashboard } from "../../services/hotelStaffApi";
 
 export default function HotelStaffHomeScreen() {
-  const { logout, authFetch } = useAuth();
+  const { authFetch } = useAuth();
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState<HotelDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,9 +36,6 @@ export default function HotelStaffHomeScreen() {
           <span style={styles.greeting}>Hotel dashboard</span>
           <h1 style={styles.title}>{dashboard?.hotel.name || "—"}</h1>
         </div>
-        <button onClick={() => logout()} style={styles.logoutBtn}>
-          <LogOut size={16} color={COLORS.danger} />
-        </button>
       </div>
 
       <button

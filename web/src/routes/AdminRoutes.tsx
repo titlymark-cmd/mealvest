@@ -11,7 +11,11 @@ import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
 import AdminPaymentsScreen from "../pages/admin/AdminPaymentsScreen";
 import AdminNotificationsScreen from "../pages/admin/AdminNotificationsScreen";
 import AdminPayoutsScreen from "../pages/admin/AdminPayoutsScreen";
+import AdminSecurityScreen from "../pages/admin/AdminSecurityScreen";
+import { VerificationBanner } from "../components/account/VerificationBanner";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
+import { Link } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 
 /**
  * The sidebar (desktop) / tab bar (mobile) is always position:fixed —
@@ -31,7 +35,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
       <AdminSidebar />
-      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60 }}>
+      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 60, display: "flex", alignItems: "center", gap: 8 }}>
+        <Link to="/admin/security" aria-label="Account and security" className="hd-iconbtn" title="Account & security">
+          <ShieldCheck size={18} aria-hidden="true" />
+        </Link>
         <NotificationBell />
       </div>
       <div
@@ -43,6 +50,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           paddingBottom: isMobile ? 96 : 0,
         }}
       >
+        <VerificationBanner skin="hotel" to="/admin/security" />
         {children}
       </div>
     </div>
@@ -61,6 +69,7 @@ export function AdminRoutes() {
       <Route path="/admin/payments" element={<AdminShell><AdminPaymentsScreen /></AdminShell>} />
       <Route path="/admin/notifications" element={<AdminShell><AdminNotificationsScreen /></AdminShell>} />
       <Route path="/admin/payouts" element={<AdminShell><AdminPayoutsScreen /></AdminShell>} />
+      <Route path="/admin/security" element={<AdminShell><AdminSecurityScreen /></AdminShell>} />
       <Route path="/verify-email" element={<VerifyEmailScreen />} />
       <Route path="*" element={<Navigate to="/admin/home" replace />} />
     </Routes>

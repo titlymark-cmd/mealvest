@@ -1,3 +1,4 @@
+import { ApiError } from "../middleware/errorHandler";
 /**
  * Provider-agnostic SMS interface, same shape this codebase already
  * uses for PaymentProvider (paymentProvider.ts) — one concrete
@@ -12,6 +13,26 @@ export interface SendSmsParams {
 export interface SendSmsResult {
   providerMessageId: string;
   raw: unknown;
+  /** True when the provider's sandbox accepted it — NOT delivered to a real handset. */
+  sandbox?: boolean;
+}
+
+/** Why an SMS was not delivered. `invalid_number` is the only reason the end user can act on. */
+export type SmsFailureReason =
+  | "invalid_number"
+  | "insufficient_balance"
+  | "invalid_sender"
+  | "blocked"
+  | "auth"
+  | "provider"
+  | "network";
+
+export class SmsDeliveryError extends ApiError {
+  reason: SmsFailureReason;
+  constructor(reason: SmsFailureReason, message: string) {
+    super(reason === "invalid_number" ? 400 : 502, "SMS_SEND_FAILED", message);
+    this.reason = reason;
+  }
 }
 
 export interface SmsProvider {

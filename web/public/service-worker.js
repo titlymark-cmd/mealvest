@@ -41,9 +41,20 @@ self.addEventListener("fetch", (event) => {
  * shape below (`notification`/`data`) is exactly what fcmService.ts
  * sends server-side via FCM's HTTP v1 API, so this just reads it
  * directly rather than pulling in Firebase's own SW wrapper — one
- * plain service worker, no second competing one, no extra bundle size
- * for the install/cache-shell logic above.
+ * plain service worker, no second competing one.
+ *
+ * Because Firebase's own worker isn't in play, the Firebase SDK's
+ * onMessage never fires in the page. So after showing the notification
+ * this tells every open window "a push arrived" (the bell badge listens
+ * for it), and on click it asks an open window to navigate IN-APP rather
+ * than hard-reloading it.
  */
+
+/** Only same-origin app paths are ever followed: "/x/y" yes; "//evil.com", "https://…", "javascript:" no. */
+function safePath(value) {
+  return typeof value === "string" && /^\/(?![/\\])[^\s]*$/.test(value) ? value : "/";
+}
+
 self.addEventListener("push", (event) => {
   if (!event.data) return;
 
@@ -61,33 +72,41 @@ self.addEventListener("push", (event) => {
     body: notification.body || "",
     icon: "/logo192.png",
     badge: "/logo192.png",
-    data: { deepLink: data.deepLink || "/" },
+    data: { deepLink: safePath(data.deepLink) },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    (async () => {
+      // Every push must produce a visible notification (userVisibleOnly), whether or not the app is open.
+      await self.registration.showNotification(title, options);
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of windows) client.postMessage({ type: "mealvest:push-received" });
+    })()
+  );
 });
 
 /**
- * Notification click — focuses an already-open MEALVEST tab if one
- * exists (navigating it to the deep link), or opens a new one. Every
- * deep link used server-side (notificationEvents.ts) is a real,
- * existing route in this app, not an assumed one.
+ * Notification click.
+ *  - App already open: focus that window and ask it to navigate in-app (no reload, no lost state).
+ *  - App closed: open a new window straight at the deep link.
+ * Every deep link used server-side (notificationEvents.ts, rolePaths.ts) is a real route in this app.
  */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const deepLink = (event.notification.data && event.notification.data.deepLink) || "/";
+  const deepLink = safePath(event.notification.data && event.notification.data.deepLink);
 
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ("focus" in client) {
-          client.navigate(deepLink).catch(() => {});
-          return client.focus();
-        }
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const existing = windows.find((client) => "focus" in client);
+      if (existing) {
+        await existing.focus();
+        existing.postMessage({ type: "mealvest:navigate", path: deepLink });
+        return;
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(deepLink);
+        await self.clients.openWindow(new URL(deepLink, self.location.origin).href);
       }
-    })
+    })()
   );
 });

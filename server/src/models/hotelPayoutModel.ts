@@ -335,19 +335,6 @@ export async function getPayoutByProviderId(provider: string, providerPayoutId: 
   return result.rows[0] ?? null;
 }
 
-/**
- * Saves the provider's own payout id on a row that never recorded one (the
- * send errored before we saw a response), so later payout.* webhooks can
- * match it. Only fills an empty transfer_code — never overwrites one.
- */
-export async function attachProviderPayoutId(payoutId: string, providerPayoutId: string): Promise<HotelPayoutRow | null> {
-  const result = await pool.query<HotelPayoutRow>(
-    "UPDATE hotel_payouts SET transfer_code = $2 WHERE id = $1 AND transfer_code IS NULL RETURNING *",
-    [payoutId, providerPayoutId]
-  );
-  return result.rows[0] ?? null;
-}
-
 export async function getPayoutById(payoutId: string): Promise<HotelPayoutRow | null> {
   const result = await pool.query<HotelPayoutRow>("SELECT * FROM hotel_payouts WHERE id = $1", [payoutId]);
   return result.rows[0] ?? null;

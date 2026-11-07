@@ -4,7 +4,7 @@ import { CheckCircle2, MailWarning } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { Spinner } from "../components/Spinner";
 import { COLORS, FONTS, RADIUS } from "../styles/theme";
-import { confirmEmailVerification } from "../services/authApi";
+import { confirmEmailVerification, ApiError } from "../services/authApi";
 
 /**
  * Landing page for the one-time email-verification link (security fix
@@ -34,7 +34,13 @@ export function VerifyEmailScreen() {
       .then(() => setState("done"))
       .catch((err: unknown) => {
         setState("failed");
-        setMessage(err instanceof Error ? err.message : "This verification link is invalid or has expired.");
+        if (err instanceof ApiError && err.code === "VERIFICATION_LINK_USED") {
+          setMessage("This link was already used or replaced by a newer one. If you've already confirmed your email you're all set; otherwise use the latest email we sent.");
+        } else if (err instanceof ApiError && err.code === "VERIFICATION_LINK_EXPIRED") {
+          setMessage("This link has expired.");
+        } else {
+          setMessage(err instanceof Error ? err.message : "This verification link is invalid or has expired.");
+        }
       });
   }, [searchParams]);
 

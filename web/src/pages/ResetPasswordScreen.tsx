@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, KeyRound, CheckCircle2 } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { COLORS, FONTS, RADIUS } from "../styles/theme";
 import { resetPassword, ApiError } from "../services/authApi";
+import { useAuth } from "../context/AuthContext";
 
 /**
  * Reached via the link emailed by ForgotPasswordScreen's flow
@@ -13,8 +14,24 @@ import { resetPassword, ApiError } from "../services/authApi";
  */
 export function ResetPasswordScreen() {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
+  // Captured ONCE, then removed from the address bar, so the secret doesn't linger in browser
+  // history, screenshots or a shared screen. (Reloading therefore needs the emailed link again.)
+  const [token] = useState(() => searchParams.get("token"));
+  // Staff invitations reuse this screen with &invite=1 — same secure mechanism, friendlier wording.
+  const [isInvite] = useState(() => searchParams.get("invite") === "1");
+  const [linkDead, setLinkDead] = useState(false);
+
+  useEffect(() => {
+    if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
+    // Never leak the page URL to anything the page might load.
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "no-referrer";
+    document.head.appendChild(meta);
+    return () => meta.remove();
+  }, []);
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -28,8 +45,10 @@ export function ResetPasswordScreen() {
       <div style={styles.container}>
         <div style={styles.card}>
           <Logo size="md" dark />
-          <h1 style={styles.title}>Invalid reset link</h1>
-          <p style={styles.subtitle}>This link is missing its reset token. Request a new one from the sign-in screen.</p>
+          <h1 style={styles.title}>Invalid link</h1>
+          <p style={styles.subtitle}>
+            This page needs the link from your email — open it again from the email. If you reloaded this page, that's why.
+          </p>
           <button onClick={() => navigate("/forgot-password")} style={styles.backLink}>
             <span style={styles.backLinkText}>Request a new link</span>
           </button>
@@ -49,7 +68,10 @@ export function ResetPasswordScreen() {
     try {
       await resetPassword(token, newPassword);
       setDone(true);
+      // The server has just signed out every session for this account; make this device agree.
+      if (user) logout().catch(() => {});
     } catch (err) {
+      if (err instanceof ApiError && err.code === "INVALID_RESET_TOKEN") setLinkDead(true);
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
@@ -67,16 +89,27 @@ export function ResetPasswordScreen() {
 
         {done ? (
           <>
-            <h1 style={styles.title}>Password reset</h1>
-            <p style={styles.subtitle}>Your password has been changed. Any other signed-in devices have been logged out for your security.</p>
+            <h1 style={styles.title}>{isInvite ? "Password set" : "Password reset"}</h1>
+            <p style={styles.subtitle}>
+              {isInvite
+                ? "You're all set. Sign in with your email and this password — you'll then create a 4-digit PIN."
+                : "Your password has been changed. Any other signed-in devices have been logged out for your security."}
+            </p>
             <PrimaryButton onPress={() => navigate("/login")} showArrow={false} style={{ marginTop: 18 }}>
               Sign in
             </PrimaryButton>
           </>
         ) : (
           <>
-            <h1 style={styles.title}>Choose a new password</h1>
+            <h1 style={styles.title}>{isInvite ? "Set your password" : "Choose a new password"}</h1>
             <p style={styles.subtitle}>Must be at least 8 characters.</p>
+            {linkDead && (
+              <p style={styles.subtitle}>
+                {isInvite
+                  ? "This invitation has expired or was already used. Ask the hotel owner to resend it."
+                  : "This reset link has expired or was already used."}
+              </p>
+            )}
 
             <form style={styles.form} onSubmit={submit}>
               <div style={styles.passwordRow}>
@@ -106,8 +139,13 @@ export function ResetPasswordScreen() {
               />
               {error && <p style={styles.error}>{error}</p>}
               <PrimaryButton onPress={() => {}} loading={loading} showArrow={false} style={{ marginTop: 6 }}>
-                Reset password
+                {isInvite ? "Set password" : "Reset password"}
               </PrimaryButton>
+              {linkDead && !isInvite && (
+                <button type="button" onClick={() => navigate("/forgot-password")} style={styles.backLink}>
+                  <span style={styles.backLinkText}>Request a new link</span>
+                </button>
+              )}
             </form>
           </>
         )}
