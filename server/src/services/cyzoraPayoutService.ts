@@ -7,7 +7,7 @@ import { isCyzoraConfigured, cyzoraGet, cyzoraPost, kesToCents, centsToKes, mapC
  * Cyzora payouts — sends money FROM the MEALVEST Cyzora balance to a
  * hotel's registered settlement destination via POST /payouts. The
  * Cyzora counterpart of paystackTransferService.ts, called only from
- * hotelPayoutService.triggerPayout (admin-only, server-side): a secret
+ * hotelPayoutService's server-side payout flow: a secret
  * key can send money anywhere, so nothing here is reachable from a
  * student/hotel route or the browser.
  *

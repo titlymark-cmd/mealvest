@@ -31,6 +31,7 @@ import { revokeAllRefreshTokensForUser } from "../models/refreshTokenModel";
 import { sendPasswordResetEmail } from "./emailService";
 import * as notificationEvents from "./notificationEvents";
 import { runInBackground } from "../lib/background";
+import { cloneDefaultMenuForHotel } from "./defaultMenuService";
 
 interface AuthResult {
   accessToken: string;
@@ -249,8 +250,8 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
         plan.onboarding_fee,
         plan.commission_percent,
         plan.settlement_schedule,
-        input.payout?.mode ?? "instant",
-        input.payout?.mode === "daily" ? input.payout.payoutTime : null,
+        "daily",
+        input.payout?.payoutTime ?? "18:00",
       ]
     );
     const hotel = hotelResult.rows[0];
@@ -266,6 +267,8 @@ export async function registerHotel(input: RegisterHotelInput): Promise<AuthResu
        VALUES ($1, $2, $3, $4)`,
       [hotel.id, userId, input.settlement.method, JSON.stringify(input.settlement)]
     );
+
+    await cloneDefaultMenuForHotel(hotel.id, client);
 
     await client.query("COMMIT");
     notificationEvents.welcomeHotel(userId, input.hotelName);

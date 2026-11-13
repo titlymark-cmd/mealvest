@@ -10,7 +10,7 @@ import { imageUrlSchema } from "../schemas/hotelLocationSchema";
 import { toHotelOrderView } from "../lib/hotelOrderView";
 import { env } from "../config/env";
 import { getUnpaidBalance, autoPayoutBlockReason } from "../models/hotelPayoutModel";
-import { effectiveCommissionSql } from "../lib/hotelCommission";
+import { PAYOUT_FEE_PERCENT } from "../lib/hotelCommission";
 import { zone as businessTimezone } from "../lib/businessTime";
 
 /** Upper bound for a single menu item (M9) — far above any real meal, well inside NUMERIC(10,2). */
@@ -74,16 +74,9 @@ async function resolveHotelId(req: AuthedRequest): Promise<string> {
  * revenue, net earnings, and contract/status info — all computed live
  * from `orders`/`hotels`, never hardcoded numbers.
  *
- * MEALVEST's commission (the platform's own cut) is a business term
- * between MEALVEST and the hotel, not something the hotel's own
- * dashboard displays — hotel_owner/hotel_staff callers get
- * `revenue_today`/`net_earnings` computed from orders.hotel_amount
- * (what the hotel actually receives), with commission_percent,
- * commission_owed, and gross_revenue all omitted entirely (not just
- * hidden in the UI — showing gross next to net would let a hotel back
- * out the exact commission by subtraction, so gross never reaches this
- * response for them). mealvest_admin, viewing a specific hotel via
- * ?hotelId= for oversight, still gets the full figure set unchanged.
+ * The owner dashboard shows gross meal sales, the fixed payout fee, and
+ * net hotel earnings together so each settlement can be reconciled.
+ * Admins also receive the fixed fee percentage for oversight.
  */
 export async function getHotelDashboard(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -100,7 +93,7 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
         // excluded: kra_pin, business_registration_number, contact_id_number,
         // commission, paystack_recipient_code, application/review internals.
         `SELECT id, name, status, location, address, settlement_schedule, contract_start_date, contract_end_date,
-                ${isAdminView ? `${effectiveCommissionSql("hotels")}::numeric(5,2) AS commission_percent, (commission_override_percent IS NOT NULL) AS commission_is_override,` : ""}
+                ${isAdminView ? `${PAYOUT_FEE_PERCENT}::numeric(5,2) AS payout_fee_percent,` : ""}
                 payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time,
                 registration_fee, payment_method, payment_details,
                 payment_verification_status,
@@ -117,8 +110,10 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
                COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
                COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
-               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
-               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS commission_owed,
+               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS gross_revenue_today,
+               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS payout_fee_today,
+               COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
+               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS payout_fee_owed,
                COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
              FROM orders WHERE hotel_id = $1`,
             [hotelId]
@@ -129,7 +124,11 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
                COUNT(*) FILTER (WHERE status = 'paid') AS pending_orders,
                COUNT(*) FILTER (WHERE status = 'redeemed') AS redeemed_orders,
                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_orders,
+               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS gross_revenue_today,
+               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS payout_fee_today,
                COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed' AND redeemed_at::date = CURRENT_DATE), 0) AS revenue_today,
+               COALESCE(SUM(amount) FILTER (WHERE status = 'redeemed'), 0) AS gross_revenue,
+               COALESCE(SUM(commission_amount) FILTER (WHERE status = 'redeemed'), 0) AS payout_fee_owed,
                COALESCE(SUM(hotel_amount) FILTER (WHERE status = 'redeemed'), 0) AS net_earnings
              FROM orders WHERE hotel_id = $1`,
             [hotelId]
@@ -155,10 +154,8 @@ export async function getHotelDashboard(req: AuthedRequest, res: Response, next:
  * day has zero orders (generate_series, not just grouping existing
  * rows) so the frontend can plot a full week without gaps.
  *
- * Sums orders.hotel_amount (net, after MEALVEST's commission), not the
- * gross order amount — this chart is "the hotel's own revenue," and
- * gross would only invite back-calculating the commission against
- * net_earnings elsewhere on the same dashboard.
+ * Sums orders.hotel_amount (net after the payout fee); the earnings
+ * dashboard separately displays gross and payout-fee totals.
  */
 export async function getHotelWeeklyRevenue(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -240,18 +237,19 @@ export async function getHotelPayouts(req: AuthedRequest, res: Response, next: N
         : Promise.resolve(null),
       pool.query(
         `SELECT COALESCE(SUM(amount) FILTER (WHERE status = 'successful'), 0) AS paid_out_total,
+                COALESCE(SUM(gross_amount) FILTER (WHERE status = 'successful'), 0) AS paid_out_gross_total,
+                COALESCE(SUM(payout_fee_amount) FILTER (WHERE status = 'successful'), 0) AS paid_out_fee_total,
                 MAX(updated_at) FILTER (WHERE status = 'successful') AS last_paid_at
          FROM hotel_payouts WHERE hotel_id = $1`,
         [hotelId]
       ),
       pool.query(
-        `SELECT id, amount, status, transfer_reference AS reference,
+        `SELECT id, gross_amount, payout_fee_amount, amount, status, transfer_reference AS reference,
                 (initiated_by_admin_id IS NULL) AS automated, created_at, updated_at
          FROM hotel_payouts WHERE hotel_id = $1 ORDER BY created_at DESC LIMIT 50`,
         [hotelId]
       ),
-      // The hotel's own payout schedule (mode + time). Never the commission:
-      // like the dashboard, nothing here lets a hotel back out MEALVEST's rate.
+      // The hotel's configured daily schedule.
       pool.query("SELECT payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time FROM hotels WHERE id = $1", [hotelId]),
     ]);
     // The engine's internal block reasons are collapsed to three hotel-safe categories.
@@ -266,12 +264,14 @@ export async function getHotelPayouts(req: AuthedRequest, res: Response, next: N
     res.json({
       summary: {
         pending_amount: unpaid.total,
+        pending_gross_amount: unpaid.gross,
+        pending_payout_fee_amount: unpaid.payoutFee,
         pending_order_count: String(unpaid.orderCount),
         ...totals.rows[0],
         auto_enabled: env.autoPayoutsEnabled,
         threshold: String(env.autoPayoutThresholdKes),
         auto_hold: autoHold,
-        payout_mode: modeRow.rows[0]?.payout_mode ?? "instant",
+        payout_mode: modeRow.rows[0]?.payout_mode ?? "daily",
         payout_time: modeRow.rows[0]?.payout_time ?? null,
         payout_timezone: businessTimezone(),
       },

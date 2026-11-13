@@ -12,6 +12,7 @@ import {
   fetchPaymentVerification,
   verifyHotelPaymentDetails,
   PaymentVerification,
+  initializeDefaultMenuForHotel,
 } from "../../services/adminApi";
 
 function fmtDate(v: string | null): string {
@@ -59,6 +60,7 @@ export function HotelDetailModal({
   const [confirming, setConfirming] = useState(false);
   const [verification, setVerification] = useState<PaymentVerification | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [initializingMenu, setInitializingMenu] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -109,6 +111,22 @@ export function HotelDetailModal({
     }
   };
 
+  const handleInitializeMenu = async () => {
+    setInitializingMenu(true);
+    setError(null);
+    try {
+      const result = await initializeDefaultMenuForHotel(authFetch, hotelId);
+      if (result.initialized) {
+        setData((prev) => prev ? { ...prev, counts: { ...prev.counts, menu_count: String(Number(prev.counts.menu_count) + result.cloned) } } : prev);
+      }
+      setError(result.initialized ? `Default menu initialized: ${result.cloned} item${result.cloned === 1 ? "" : "s"}.` : result.reason === "already_populated" ? "Skipped: this hotel already has menu items." : "Skipped: no default items available.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not initialize the default menu.");
+    } finally {
+      setInitializingMenu(false);
+    }
+  };
+
   const h = data?.hotel;
 
   return (
@@ -153,8 +171,8 @@ export function HotelDetailModal({
               <span style={{ ...styles.sectionLabel, marginTop: 18 }}>Commercial</span>
               <Row label="Settlement method" value={<span style={{ textTransform: "capitalize" }}>{(h.payment_method || "—").replace(/_/g, " ")}</span>} />
               <Row label="Registration fee" value={formatKsh(h.registration_fee)} />
-              <Row label="Payout mode" value={h.payout_mode === "daily" ? `Daily at ${formatPayoutTime12(h.payout_time)} (EAT)` : "Instant"} />
-              <Row label="Commission" value={`${h.commission_percent}% · ${h.commission_is_override ? "admin override" : "default"}`} />
+              <Row label="Payout schedule" value={`Daily at ${formatPayoutTime12(h.payout_time)} (EAT)`} />
+              <Row label="MEALVEST payout fee" value={`${h.payout_fee_percent}% (fixed)`} />
               <Row label="Loyalty incentive" value={`${h.loyalty_incentive_percent}%`} />
               <Row label="Contract" value={`${fmtDate(h.contract_start_date)} → ${fmtDate(h.contract_end_date)}`} />
               <Row label="Terms accepted" value={h.terms_accepted ? fmtDate(h.terms_accepted_at) : "No"} />
@@ -193,6 +211,12 @@ export function HotelDetailModal({
               <Row label="Gross redeemed" value={formatKsh(data.stats.gross_redeemed)} />
               <Row label="Staff" value={data.counts.staff_count} />
               <Row label="Menu items" value={data.counts.menu_count} />
+              {Number(data.counts.menu_count) === 0 && (
+                <button style={styles.initializeMenuBtn} onClick={handleInitializeMenu} disabled={initializingMenu}>
+                  <ShieldCheck size={14} color="#fff" />
+                  <span style={styles.removeText}>{initializingMenu ? "Initializing…" : "Initialize default menu"}</span>
+                </button>
+              )}
 
               {/* Danger zone */}
               <div style={styles.dangerZone}>
@@ -325,6 +349,21 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: RADIUS.sm,
     padding: "11px 12px",
     border: "none",
+    cursor: "pointer",
+  },
+  initializeMenuBtn: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    width: "100%",
+    background: "linear-gradient(135deg, #4a2b25 0%, #2f1c1a 100%)",
+    borderRadius: RADIUS.sm,
+    padding: "12px 14px",
+    marginTop: 8,
+    border: `1px solid rgba(99, 62, 52, 0.9)`,
+    boxShadow: "0 10px 18px rgba(48, 31, 27, 0.18)",
     cursor: "pointer",
   },
   verifyBtn: {

@@ -14,7 +14,7 @@ import { fetchRevenueAnalytics, RevenueAnalytics, RevenueDailyPoint, AnalyticsRa
 // other, so this chart borrows the two leading slots of the skill's
 // validated default categorical palette instead of forcing an unsafe
 // pair — orange for the "top line" metric fits the warm brand best,
-// blue for commission reads as clearly distinct.
+// blue for the payout-fee series reads as clearly distinct.
 const COLOR_GROSS = "#eb6834";
 const COLOR_COMMISSION = "#2a78d6";
 
@@ -57,7 +57,7 @@ function StatTile({ icon, label, value, sub }: { icon: React.ReactNode; label: s
 }
 
 /**
- * Line chart: gross meal revenue vs MEALVEST commission over the
+ * Line chart: gross meal revenue vs MEALVEST payout fees over the
  * selected window. Follows the dataviz skill's mark spec — 2px lines,
  * round caps, >=8px end markers with a surface ring, hairline
  * recessive gridlines, a legend (two series), and a hover
@@ -132,7 +132,7 @@ function RevenueLineChart({ daily }: { daily: RevenueDailyPoint[] }) {
         </span>
         <span style={styles.legendItem}>
           <span style={{ ...styles.legendSwatch, backgroundColor: COLOR_COMMISSION }} />
-          MEALVEST commission
+          MEALVEST payout fee
         </span>
       </div>
 
@@ -216,7 +216,7 @@ function RevenueLineChart({ daily }: { daily: RevenueDailyPoint[] }) {
           </div>
           <div style={styles.tooltipRow}>
             <span style={{ ...styles.legendSwatch, backgroundColor: COLOR_COMMISSION }} />
-            <span style={styles.tooltipLabel}>Commission</span>
+            <span style={styles.tooltipLabel}>Payout fee</span>
             <span style={styles.tooltipValue}>{formatKsh(hovered.commission)}</span>
           </div>
         </div>
@@ -311,8 +311,8 @@ export default function AdminAnalyticsScreen() {
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <div>
-          <h1 style={styles.title}>Revenue &amp; Commission</h1>
-          <p style={styles.subtitle}>How much MEALVEST is making from hotel commissions, over time.</p>
+          <h1 style={styles.title}>Revenue &amp; Payout Fees</h1>
+          <p style={styles.subtitle}>Payout fees earned from redeemed meals, over time.</p>
         </div>
         <div style={styles.rangeCol}>
           <div style={styles.rangeRow}>
@@ -365,7 +365,7 @@ export default function AdminAnalyticsScreen() {
           <div style={styles.statsGrid}>
             <StatTile
               icon={<TrendingUp size={16} color={COLORS.success} />}
-              label="Total commission earned"
+              label="Total payout fees"
               value={formatKsh(data.lifetime.total_commission)}
               sub="All-time"
             />
@@ -383,15 +383,15 @@ export default function AdminAnalyticsScreen() {
             />
             <StatTile
               icon={<Receipt size={16} color={COLORS.primaryDark} />}
-              label="Effective commission rate"
+              label="Effective payout fee rate"
               value={effectiveRate !== null ? `${effectiveRate}%` : "—"}
-              sub="Commission ÷ gross, all-time"
+              sub="Payout fee ÷ gross, all-time"
             />
           </div>
 
           <div style={styles.statsGrid}>
             <StatTile icon={<DollarSign size={16} color={COLORS.primary} />} label="Gross in this period" value={formatKsh(data.window.gross)} sub={`${data.window.orders_count} meals redeemed · ${windowLabel}`} />
-            <StatTile icon={<TrendingUp size={16} color={COLORS.success} />} label="Commission in this period" value={formatKsh(data.window.commission)} sub={windowLabel} />
+            <StatTile icon={<TrendingUp size={16} color={COLORS.success} />} label="Payout fees in this period" value={formatKsh(data.window.commission)} sub={windowLabel} />
             <StatTile icon={<Wallet size={16} color={COLORS.accent} />} label="Plans collected in this period" value={formatKsh(data.window.plans_amount)} sub={windowLabel} />
           </div>
 
@@ -405,11 +405,11 @@ export default function AdminAnalyticsScreen() {
 
           <Card style={styles.panelCard}>
             <div style={styles.panelHeaderRow}>
-              <span style={styles.panelTitle}>Top hotels by commission generated</span>
+              <span style={styles.panelTitle}>Top hotels by payout fees generated</span>
               <span style={styles.panelSubtitle}>{windowLabel}</span>
             </div>
             {byHotelRows.length === 0 ? (
-              <p style={styles.emptyText}>No commission has been earned in this window yet.</p>
+              <p style={styles.emptyText}>No payout fees have been earned in this window yet.</p>
             ) : (
               <CommissionByHotelChart rows={byHotelRows} />
             )}

@@ -4,9 +4,16 @@ import { auditAdminMutations } from "../services/auditLog";
 import {
   getAdminOverview,
   createHotel,
+  listDefaultMenuCatalogue,
+  createDefaultMenuCategory,
+  updateDefaultMenuCategory,
+  deleteDefaultMenuCategory,
+  createDefaultMenuItem,
+  updateDefaultMenuItem,
+  deleteDefaultMenuItem,
+  initializeEmptyHotelMenuForAdmin,
   suspendHotel,
   reactivateHotel,
-  updateHotelCommission,
   updateHotelPayoutSettings,
   listHotels,
   listAllOrders,
@@ -33,7 +40,7 @@ import { adminBroadcast, adminTestSend } from "../controllers/notifications.cont
 import {
   listPendingPayouts,
   listPayoutHistory,
-  triggerPayout,
+  retryFailedPayout,
   refreshPayoutStatus,
   previewPayoutFee,
   approvePayout,
@@ -53,13 +60,20 @@ adminRouter.get("/analytics/revenue", getRevenueAnalytics);
 adminRouter.get("/hotels/top", getTopHotels);
 adminRouter.get("/students", listStudents);
 adminRouter.get("/students/:userId", getStudentDetail);
+adminRouter.get("/default-menu", listDefaultMenuCatalogue);
+adminRouter.post("/default-menu/categories", createDefaultMenuCategory);
+adminRouter.patch("/default-menu/categories/:categoryId", updateDefaultMenuCategory);
+adminRouter.delete("/default-menu/categories/:categoryId", deleteDefaultMenuCategory);
+adminRouter.post("/default-menu/items", createDefaultMenuItem);
+adminRouter.patch("/default-menu/items/:itemId", updateDefaultMenuItem);
+adminRouter.delete("/default-menu/items/:itemId", deleteDefaultMenuItem);
+adminRouter.post("/hotels/:hotelId/default-menu/init", initializeEmptyHotelMenuForAdmin);
 adminRouter.get("/hotels", listHotels);
 adminRouter.post("/hotels", createHotel);
 adminRouter.get("/hotels/:hotelId", getHotelDetail);
 adminRouter.delete("/hotels/:hotelId", deleteHotel);
 adminRouter.patch("/hotels/:hotelId/suspend", suspendHotel);
 adminRouter.patch("/hotels/:hotelId/reactivate", reactivateHotel);
-adminRouter.patch("/hotels/:hotelId/commission", updateHotelCommission);
 adminRouter.patch("/hotels/:hotelId/payout-settings", updateHotelPayoutSettings);
 adminRouter.get("/hotels/:hotelId/payment-verification", getPaymentVerification);
 adminRouter.patch("/hotels/:hotelId/payment-verification/verify", financialActionRateLimiter, verifyPaymentDetails);
@@ -77,7 +91,7 @@ adminRouter.post("/notifications/test-send", adminNotificationRateLimiter, admin
 adminRouter.get("/payouts/pending", listPendingPayouts);
 adminRouter.get("/payouts/fee-preview", previewPayoutFee);
 adminRouter.get("/payouts", listPayoutHistory);
-adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
+adminRouter.post("/payouts/:payoutId/retry", financialActionRateLimiter, retryFailedPayout);
 adminRouter.post("/payouts/:payoutId/refresh", financialActionRateLimiter, refreshPayoutStatus);
 adminRouter.post("/payouts/:payoutId/approve", financialActionRateLimiter, approvePayout);
 adminRouter.post("/payouts/:payoutId/cancel", financialActionRateLimiter, cancelPayout);

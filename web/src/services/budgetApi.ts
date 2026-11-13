@@ -17,6 +17,18 @@ export interface Budget {
   last_spend_date: string | null;
   /** Money held by meal passes not yet scanned; returns to the plan if unscanned. */
   reserved_amount?: string;
+  /**
+   * Server-calculated figures (budgetService.toBudgetView). The UI displays these
+   * and never recomputes them:
+   *   available_today   = daily_allowance + carry-forward - spent today - held
+   *   free_plan_balance = remaining_amount - held
+   */
+  available_today: number;
+  free_plan_balance: number;
+  carried_forward_amount: number;
+  held_amount: number;
+  /** Fixed daily allowance + carry-forward (the pool the "% spent" ring measures against). */
+  today_total: number;
 }
 
 /**
@@ -34,47 +46,6 @@ export async function getActiveBudget(
   if (res.status === 404) return null;
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.message || "Could not load your meal plan.");
-  return data.budget;
-}
-
-/**
- * The real backend call behind "transfer to next day" — moves
- * whatever's left of today's available amount into a holding pool
- * that only becomes spendable when a real day actually passes (see
- * budgetService.transferRemainingToNextDay). Throws with a clear
- * message if there's nothing left to transfer, which the screen
- * shows instead of the confirm-dialog succeeding silently.
- */
-export async function transferToNextDay(
-  authFetch: (path: string, init?: RequestInit) => Promise<Response>
-): Promise<Budget> {
-  const res = await authFetch("/api/student/budget/transfer-to-next-day", { method: "POST" });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || "Could not transfer your balance.");
-  return data.budget;
-}
-
-/**
- * The student's "yes, carry it over" answer to budget.pending_rollover_amount
- * (see RolloverPrompt) — moves it into banked_amount, where it becomes
- * spendable today.
- */
-export async function confirmRollover(
-  authFetch: (path: string, init?: RequestInit) => Promise<Response>
-): Promise<Budget> {
-  const res = await authFetch("/api/student/budget/rollover/confirm", { method: "POST" });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || "Could not confirm the carry-over.");
-  return data.budget;
-}
-
-/** The student's "no, don't carry it over" answer — forfeits it permanently. */
-export async function declineRollover(
-  authFetch: (path: string, init?: RequestInit) => Promise<Response>
-): Promise<Budget> {
-  const res = await authFetch("/api/student/budget/rollover/decline", { method: "POST" });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || "Could not decline the carry-over.");
   return data.budget;
 }
 

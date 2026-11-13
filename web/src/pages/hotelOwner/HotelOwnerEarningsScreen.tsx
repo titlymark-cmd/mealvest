@@ -99,7 +99,7 @@ export default function HotelOwnerEarningsScreen() {
             <div style={{ fontSize: "clamp(28px, 8vw, 40px)", fontWeight: 800, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{whole(pendingAmount)}</div>
             <p className="hd-sub">
               {Number(summary.pending_order_count) > 0
-                ? `From ${Number(summary.pending_order_count)} redeemed meal${Number(summary.pending_order_count) === 1 ? "" : "s"} not yet paid out.`
+                ? `Gross ${whole(summary.pending_gross_amount)} - payout fee ${whole(summary.pending_payout_fee_amount)} = net ${whole(pendingAmount)} from ${Number(summary.pending_order_count)} redeemed meal${Number(summary.pending_order_count) === 1 ? "" : "s"}.`
                 : "Everything redeemed so far has been included in a payout."}
             </p>
           </div>
@@ -114,7 +114,7 @@ export default function HotelOwnerEarningsScreen() {
             </div>
           </dl>
         </div>
-        {summary.auto_enabled && (summary.payout_mode === "daily" ? <DailyPayoutNote summary={summary} pendingAmount={pendingAmount} /> : <AutoPayoutNote summary={summary} pendingAmount={pendingAmount} />)}
+        {summary.auto_enabled && <DailyPayoutNote summary={summary} pendingAmount={pendingAmount} />}
         {verificationMeta && (
           <div style={{ marginTop: 14 }}>
             <StatusPill tone={verificationMeta.tone} onDark>
@@ -125,8 +125,10 @@ export default function HotelOwnerEarningsScreen() {
       </Panel>
 
       <section className="hd-stats" aria-label="Earnings summary">
-        <StatTile icon={<Wallet size={17} color="#c93a22" />} label="Revenue today" value={whole(stats.revenue_today)} />
-        <StatTile icon={<Receipt size={17} color="#c93a22" />} label="Total earned" value={whole(stats.net_earnings)} sub={`${Number(stats.redeemed_orders)} meals redeemed`} />
+        <StatTile icon={<Wallet size={17} color="#c93a22" />} label="Gross meal sales" value={whole(stats.gross_revenue)} sub={`${Number(stats.redeemed_orders)} meals redeemed`} />
+        <StatTile icon={<Receipt size={17} color="#c93a22" />} label="Payout fee" value={whole(stats.payout_fee_owed)} />
+        <StatTile icon={<Receipt size={17} color="#c93a22" />} label="Net earned" value={whole(stats.net_earnings)} />
+        <StatTile icon={<Wallet size={17} color="#c93a22" />} label="Revenue today (net)" value={whole(stats.revenue_today)} />
         <StatTile
           icon={<BadgeCheck size={17} color="#3f7d2c" />}
           label="Paid out to date"
@@ -151,11 +153,16 @@ export default function HotelOwnerEarningsScreen() {
                     <div className="hd-row-main">
                       <span className="hd-row-title">
                         {whole(p.amount)}
-                        {p.automated && <span className="hd-row-meta" style={{ display: "inline", marginLeft: 8 }}>Automatic</span>}
+                        {p.automated && <span className="hd-row-meta" style={{ display: "inline", marginLeft: 8 }}>Daily payout</span>}
                       </span>
                       <span className="hd-row-meta">
                         {formatDateTime(p.created_at)} · Ref {p.reference}
                       </span>
+                      {p.gross_amount !== null && p.payout_fee_amount !== null && (
+                        <span className="hd-row-meta">
+                          Gross {whole(p.gross_amount)} · fee {whole(p.payout_fee_amount)} · net {whole(p.amount)}
+                        </span>
+                      )}
                       {p.status === "failed" && <span className="hd-row-meta" style={{ color: "#b83420", fontWeight: 600 }}>This payout didn't go through. Contact MEALVEST support with the reference.</span>}
                     </div>
                     <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
@@ -193,7 +200,7 @@ export default function HotelOwnerEarningsScreen() {
 
 const HOLD_MESSAGE: Record<string, string> = {
   payout_in_progress: "A payout is still being confirmed. Your next automatic payout starts once it settles.",
-  failed_recently: "Your last payout didn't go through. MEALVEST will retry shortly.",
+  failed_recently: "Your next scheduled daily run will retry the failed payout.",
   needs_support: "Automatic payouts are paused after repeated failures. Please contact MEALVEST support.",
 };
 
@@ -218,28 +225,3 @@ function DailyPayoutNote({ summary, pendingAmount }: { summary: HotelEarnings["s
   );
 }
 
-/** Explains the automatic-payout rule using the server's real threshold and state. */
-function AutoPayoutNote({ summary, pendingAmount }: { summary: HotelEarnings["summary"]; pendingAmount: number }) {
-  const threshold = Number(summary.threshold);
-  const reached = pendingAmount >= threshold;
-  const pct = threshold > 0 ? Math.min(100, (pendingAmount / threshold) * 100) : 100;
-  return (
-    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-      <p className="hd-sub" style={{ margin: 0 }}>
-        {reached
-          ? `You've reached the ${whole(threshold)} minimum, so your earnings are sent automatically.`
-          : `Earnings are sent automatically once they reach ${whole(threshold)}. ${whole(threshold - pendingAmount)} to go.`}
-      </p>
-      {!reached && (
-        <div className="hd-meter" role="img" aria-label={`${Math.round(pct)}% of the ${whole(threshold)} payout minimum`}>
-          <span style={{ width: `${pct}%` }} />
-        </div>
-      )}
-      {summary.auto_hold && (
-        <p className="hd-sub" style={{ margin: 0, color: "#ffd68a", fontWeight: 600 }}>
-          {HOLD_MESSAGE[summary.auto_hold]}
-        </p>
-      )}
-    </div>
-  );
-}

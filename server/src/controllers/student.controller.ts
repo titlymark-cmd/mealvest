@@ -305,15 +305,24 @@ export async function listMyPayments(req: AuthedRequest, res: Response, next: Ne
   }
 }
 
-export async function transferToNextDay(req: AuthedRequest, res: Response, next: NextFunction) {
-  try {
-    const budget = await budgetService.transferRemainingToNextDay(req.user!.id);
-    res.json({ budget });
-  } catch (err) {
-    next(err);
-  }
+/**
+ * RETIRED (Stage 1 financial repair). Unused money now carries forward
+ * automatically and additively, so a manual "move to tomorrow" would be a second,
+ * competing rollover mechanism (and was the source of double-counted carry-over).
+ * The route answers 410 so an old cached client gets a clear message; no balance
+ * is touched.
+ */
+export async function transferToNextDay(_req: AuthedRequest, _res: Response, next: NextFunction) {
+  next(
+    new ApiError(
+      410,
+      "FEATURE_RETIRED",
+      "Unused money now carries over to the next day automatically, so moving it manually is no longer needed."
+    )
+  );
 }
 
+/** Idempotent read: carry-forward is automatic, there is nothing left to confirm. */
 export async function confirmRollover(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const budget = await budgetService.confirmRollover(req.user!.id);
@@ -323,13 +332,13 @@ export async function confirmRollover(req: AuthedRequest, res: Response, next: N
   }
 }
 
-export async function declineRollover(req: AuthedRequest, res: Response, next: NextFunction) {
-  try {
-    const budget = await budgetService.declineRollover(req.user!.id);
-    res.json({ budget });
-  } catch (err) {
-    next(err);
-  }
+/**
+ * RETIRED (Stage 1). Declining used to forfeit unused money; under the approved
+ * rules remaining student funds are never erased, so this answers 410 and changes
+ * nothing.
+ */
+export async function declineRollover(_req: AuthedRequest, _res: Response, next: NextFunction) {
+  next(new ApiError(410, "FEATURE_RETIRED", "Unused money carries over automatically and can't be forfeited."));
 }
 
 /**

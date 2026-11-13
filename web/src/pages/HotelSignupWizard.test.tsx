@@ -29,7 +29,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-test("the payout-mode screen appears immediately AFTER the settlement screen", () => {
+test("the daily payout schedule appears immediately AFTER the settlement screen", () => {
   render(<HotelSignupWizard onSwitchToLogin={() => {}} />);
   next(); type(/business name/i, "X"); next();
   type(/owner's full name/i, "O"); type(/email address/i, "o@example.com"); type(/^phone number/i, "0712345678"); next();
@@ -39,18 +39,15 @@ test("the payout-mode screen appears immediately AFTER the settlement screen", (
   expect(screen.getByText(/Step 5 of 7/i)).toBeInTheDocument();
 });
 
-test("Instant is the default, shows its 15% default and hides the time selector", () => {
+test("daily payout is the only schedule and the fixed payout fee is disclosed", () => {
   reachPayoutStep();
-  expect(screen.getByRole("radio", { name: /instant payout/i })).toHaveAttribute("aria-checked", "true");
-  expect(screen.getByText(/Default MEALVEST commission: 15%/)).toBeInTheDocument();
-  expect(screen.getByText(/Default MEALVEST commission: 10%/)).toBeInTheDocument();
-  expect(screen.queryByLabelText(/daily payout time/i)).not.toBeInTheDocument();
+  expect(screen.getByLabelText(/daily payout time/i)).toHaveValue("18:00");
+  expect(screen.getByText(/fixed 10% payout fee/i)).toBeInTheDocument();
 });
 
-test("Daily requires a valid time before continuing", () => {
+test("daily payouts require a valid time before continuing", () => {
   reachPayoutStep();
-  fireEvent.click(screen.getByRole("radio", { name: /daily payout/i }));
-  expect(screen.getByLabelText(/daily payout time/i)).toBeInTheDocument();
+  type(/daily payout time/i, "");
   next();
   expect(screen.getByRole("alert")).toHaveTextContent(/choose the time/i);
   expect(screen.getByRole("heading", { name: /when do you want to be paid/i })).toBeInTheDocument();
@@ -70,7 +67,6 @@ async function finish() {
 test("registration sends the daily config (and no commission) and keeps the settlement", async () => {
   mockRegisterHotel.mockResolvedValue(undefined);
   reachPayoutStep();
-  fireEvent.click(screen.getByRole("radio", { name: /daily payout/i }));
   type(/daily payout time/i, "21:00");
   next();
   await finish();
@@ -81,19 +77,18 @@ test("registration sends the daily config (and no commission) and keeps the sett
   expect(body.settlement).toMatchObject({ method: "mpesa_till", tillNumber: "123456" });
 });
 
-test("Instant registration sends no payout time", async () => {
+test("registration submits the default daily schedule", async () => {
   mockRegisterHotel.mockResolvedValue(undefined);
   reachPayoutStep();
   next();
   await finish();
   await waitFor(() => expect(mockRegisterHotel).toHaveBeenCalledTimes(1));
-  expect(mockRegisterHotel.mock.calls[0][0].payout).toEqual({ mode: "instant" });
+  expect(mockRegisterHotel.mock.calls[0][0].payout).toEqual({ mode: "daily", payoutTime: "18:00" });
 });
 
 test("a failed submission shows the error, keeps everything, and can be retried", async () => {
   mockRegisterHotel.mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce(undefined);
   reachPayoutStep();
-  fireEvent.click(screen.getByRole("radio", { name: /daily payout/i }));
   type(/daily payout time/i, "08:30");
   next();
   await finish();

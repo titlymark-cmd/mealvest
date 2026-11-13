@@ -88,10 +88,9 @@ export default function StudentPaymentsScreen() {
     );
   }
 
-  const dailyCredit = budget ? Number(budget.daily_allowance) : 0;
-  const banked = budget ? Number(budget.banked_amount) : 0;
-  const spentToday = budget ? Number(budget.spent_today) : 0;
-  const availableToday = Math.max(0, dailyCredit + banked - spentToday);
+  // Server-calculated figures (budgetService.toBudgetView) — displayed, never re-derived.
+  const banked = budget ? budget.carried_forward_amount : 0;
+  const availableToday = budget ? budget.available_today : 0;
   const daysTotal = budget?.number_of_days ?? 0;
   const daysLeft = budget ? budget.remainingDays ?? budget.number_of_days : 0;
 

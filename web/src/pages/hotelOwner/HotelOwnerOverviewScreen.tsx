@@ -256,7 +256,7 @@ export default function HotelOwnerOverviewScreen() {
           icon={<TrendingUp size={17} color="#c93a22" />}
           label="Total earned"
           value={whole(stats.net_earnings)}
-          sub={hotel.payout_mode || hotel.settlement_schedule ? `Payout: ${payoutScheduleLabel(hotel)}` : undefined}
+          sub={`Gross ${whole(stats.gross_revenue)} · payout fee ${whole(stats.payout_fee_owed)}`}
         />
       </section>
 

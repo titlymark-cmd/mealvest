@@ -28,7 +28,8 @@ type LoadState =
  * The student's OWN assigned hotel's menu, reached from the dashboard nav or
  * "Order today's meal". Ordering is unchanged: "Order" navigates to
  * /student/meal-pass with the same router state as before, and that screen
- * runs the real createOrder -> payOrder -> QR pipeline.
+ * creates/reserves the order before confirming it. The QR is revealed later
+ * from the matching active order.
  *
  * Discovery is built only from fields the API really returns (name,
  * description, price, category, availability, image). There is no "featured"
@@ -60,10 +61,8 @@ export default function StudentMenuScreen() {
         setState({ kind: "no-plan", message: "Your plan isn't linked to a hotel yet — contact Customer Care for help." });
         return;
       }
-      const dailyCredit = Number(budget.daily_allowance);
-      const banked = Number(budget.banked_amount);
-      const spentToday = Number(budget.spent_today);
-      setSpendableToday(Math.max(0, dailyCredit + banked - spentToday));
+      // Server-calculated (fixed allowance + carry-forward - spent today - held); never re-derived here.
+      setSpendableToday(budget.available_today);
 
       const data = await fetchHotelMenu(budget.hotel_id);
       setHotel(data.hotel);

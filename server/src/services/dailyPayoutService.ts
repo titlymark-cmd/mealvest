@@ -16,8 +16,8 @@ import { evaluateScheduledPayout, AutoPayoutOutcome } from "./hotelPayoutService
  *      hotel+day) — so overlapping/duplicate invocations evaluate a hotel
  *      once; a crashed run's lease expires and is re-claimed;
  *   2. calls evaluateScheduledPayout — the SAME balance → threshold →
- *      reservation (orders.payout_id under the hotel row lock) → send path
- *      the instant mode uses, carrying the FULL unreserved balance in ONE
+ *      reservation (orders.payout_id under the hotel row lock) → send path,
+ *      carrying the FULL unreserved balance in ONE
  *      payout. Orders redeemed after that reservation simply stay
  *      unreserved for the next payout;
  *   3. records the outcome. Below the KSh threshold nothing is reserved:
@@ -85,8 +85,7 @@ export async function runDailyPayouts(opts: { now?: Date; deps?: Partial<DailyPa
     errors: 0,
     notClaimed: 0,
   };
-  // Same master switch as instant payouts: nothing moves (and no run is
-  // recorded) until AUTO_PAYOUTS_ENABLED=true.
+  // Nothing moves (and no run is recorded) until AUTO_PAYOUTS_ENABLED=true.
   if (!env.autoPayoutsEnabled) return out;
 
   const due = await deps.listDue(localDate, localTime, opts.batch ?? DAILY_RUN_BATCH);

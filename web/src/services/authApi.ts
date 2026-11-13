@@ -73,8 +73,8 @@ export async function registerHotel(input: {
   location?: string;
   contactFullName: string;
   settlement: SettlementInput;
-  /** Payout mode; never carries a commission — the server derives that. */
-  payout?: { mode: "instant" | "daily"; payoutTime?: string };
+  /** Daily payout time; the server applies the fixed payout fee. */
+  payout?: { mode: "daily"; payoutTime: string };
 }): Promise<AuthResult & { applicationId: string }> {
   const res = await fetch(`${API_BASE_URL}/api/auth/register/hotel`, {
     method: "POST",

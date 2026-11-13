@@ -2,9 +2,8 @@ import { z } from "zod";
 
 /**
  * Payout-mode configuration shared by hotel registration and the admin
- * payout-settings endpoint. Deliberately contains NO commission field:
- * a hotel can never supply its own rate (the backend derives it from the
- * mode, plus any admin override).
+ * payout-settings endpoint. Daily is the only supported mode. The fixed
+ * 10% payout fee is not configurable through this schema.
  *
  * payoutTime is a wall-clock "HH:MM" (24h) in the business timezone
  * (Africa/Nairobi); seconds are not accepted.
@@ -15,7 +14,7 @@ export const payoutTimeSchema = z.string().trim().regex(PAYOUT_TIME_PATTERN, "En
 
 export const payoutConfigSchema = z
   .object({
-    mode: z.enum(["instant", "daily"], { errorMap: () => ({ message: "Payout mode must be 'instant' or 'daily'." }) }),
+    mode: z.literal("daily", { errorMap: () => ({ message: "Only daily payouts are supported." }) }),
     payoutTime: payoutTimeSchema.optional().nullable(),
   })
   .strict()
@@ -24,7 +23,7 @@ export const payoutConfigSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["payoutTime"], message: "Choose the time your daily payout should run." });
     }
   })
-  .transform((v) => ({ mode: v.mode, payoutTime: v.mode === "daily" ? (v.payoutTime as string) : null }));
+  .transform((v) => ({ mode: v.mode, payoutTime: v.payoutTime as string }));
 
 export type PayoutConfigInput = z.infer<typeof payoutConfigSchema>;
 

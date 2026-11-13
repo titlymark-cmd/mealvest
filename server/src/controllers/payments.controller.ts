@@ -137,7 +137,7 @@ export const initializeBoostSchema = z.object({
 
 /**
  * Meal Boost — top up the student's EXISTING active plan (raises
- * remaining_amount, which raises daily_allowance on the next read)
+ * remaining_amount and raises the FIXED daily_allowance by boost / days left)
  * rather than starting a new one. Reuses the same Paystack
  * initialize/verify/webhook path as a fresh plan purchase — the only
  * difference is which transaction type gets recorded and what

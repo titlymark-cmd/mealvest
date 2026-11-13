@@ -6,6 +6,7 @@ import { useWindowSize } from "../hooks/useWindowSize";
 import AdminOverviewScreen from "../pages/admin/AdminOverviewScreen";
 import AdminAnalyticsScreen from "../pages/admin/AdminAnalyticsScreen";
 import AdminHotelsScreen from "../pages/admin/AdminHotelsScreen";
+import AdminDefaultMenuScreen from "../pages/admin/AdminDefaultMenuScreen";
 import AdminStudentsScreen from "../pages/admin/AdminStudentsScreen";
 import AdminOrdersScreen from "../pages/admin/AdminOrdersScreen";
 import AdminPaymentsScreen from "../pages/admin/AdminPaymentsScreen";
@@ -64,6 +65,7 @@ export function AdminRoutes() {
       <Route path="/admin/home" element={<AdminShell><AdminOverviewScreen /></AdminShell>} />
       <Route path="/admin/analytics" element={<AdminShell><AdminAnalyticsScreen /></AdminShell>} />
       <Route path="/admin/hotels" element={<AdminShell><AdminHotelsScreen /></AdminShell>} />
+      <Route path="/admin/default-menu" element={<AdminShell><AdminDefaultMenuScreen /></AdminShell>} />
       <Route path="/admin/students" element={<AdminShell><AdminStudentsScreen /></AdminShell>} />
       <Route path="/admin/orders" element={<AdminShell><AdminOrdersScreen /></AdminShell>} />
       <Route path="/admin/payments" element={<AdminShell><AdminPaymentsScreen /></AdminShell>} />

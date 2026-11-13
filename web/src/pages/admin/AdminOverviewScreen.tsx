@@ -78,7 +78,7 @@ function RevenueTrendBlock({
     <div style={styles.trendBlock}>
       <span style={styles.trendBlockLabel}>{label}</span>
       <span style={styles.trendBlockValue}>{formatKsh(totalRevenue)}</span>
-      <span style={styles.trendBlockSub}>{formatKsh(totalCommission)} commission</span>
+      <span style={styles.trendBlockSub}>{formatKsh(totalCommission)} payout fee</span>
       <div style={styles.trendSparkline}>
         <Sparkline values={values} color={COLORS.primary} />
       </div>
@@ -309,7 +309,7 @@ export default function AdminOverviewScreen() {
         {ledger && (
           <StatCard
             icon={<TrendingUp size={16} color={COLORS.success} />}
-            label="Commission today"
+            label="Payout fee today"
             value={formatKsh(ledger.commissionEarned.amount)}
           />
         )}
@@ -330,7 +330,7 @@ export default function AdminOverviewScreen() {
             <div>
               <span style={styles.panelTitle}>Revenue trend</span>
               <span style={styles.panelSubtitle}>
-                Gross meal revenue, with commission earned · full breakdown on the Analytics tab
+                Gross meal revenue, with payout fees earned · full breakdown on the Analytics tab
               </span>
             </div>
           </div>

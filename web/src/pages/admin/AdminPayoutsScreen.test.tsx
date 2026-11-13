@@ -66,7 +66,7 @@ describe("Admin payouts monitoring", () => {
       hotels: [{ hotel_id: "h9", hotel_name: "Small Hotel", payment_method: "send_money", payment_details: null, pending_amount: "27.00", pending_order_count: "2", payout_supported: true, below_threshold: true, auto_payout_blocked_reason: null }],
     });
     render(<AdminPayoutsScreen />);
-    expect(await screen.findByText(/accumulating; pays automatically at KSh 40/)).toBeInTheDocument();
+    expect(await screen.findByText(/below KSh 40, carries forward/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pay out/i })).toBeDisabled();
   });
 });

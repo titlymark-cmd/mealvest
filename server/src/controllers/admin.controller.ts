@@ -11,11 +11,11 @@ import { pinSchema } from "../schemas/authSchemas";
 import { settlementMethodSchema } from "../schemas/settlementMethodSchema";
 import { payoutConfigSchema, formatPayoutTime } from "../schemas/payoutModeSchema";
 import {
-  effectiveCommissionSql,
-  effectiveCommissionPercent,
-  MIN_COMMISSION_OVERRIDE_PERCENT,
-  MAX_COMMISSION_OVERRIDE_PERCENT,
+  PAYOUT_FEE_PERCENT,
+  payoutFeeSql,
 } from "../lib/hotelCommission";
+import { imageUrlSchema } from "../schemas/hotelLocationSchema";
+import { cloneDefaultMenuForHotel, DEFAULT_CATEGORY_SLUGS, initializeEmptyHotelMenu } from "../services/defaultMenuService";
 
 const TERMS_VERSION = "2026-01-mealvest-hotel-partnership-v1";
 
@@ -60,23 +60,14 @@ export async function getAdminOverview(_req: AuthedRequest, res: Response, next:
 // (POST /api/auth/register/hotel, authService.registerHotel). Unlike
 // self-registration (which starts pending_verification and gets
 // assigned a commercial plan), an admin-created hotel goes live
-// immediately with commercial terms (registration fee, commission)
+// immediately with commercial terms (registration fee, fixed payout fee)
 // and a login username the admin sets directly — real fields the
 // public flow has no equivalent for. Everything else (business type,
 // PIN, settlement method) reuses the exact same shared schemas as the
 // public flow so the two forms collect the same real data.
 // -----------------------------------------------------------------
-const COMMISSION_OVERRIDE_RANGE_MESSAGE = `Commission must be between ${MIN_COMMISSION_OVERRIDE_PERCENT}% and ${MAX_COMMISSION_OVERRIDE_PERCENT}%.`;
-const commissionOverrideSchema = z
-  .number({ invalid_type_error: "Commission must be a number." })
-  .min(MIN_COMMISSION_OVERRIDE_PERCENT, COMMISSION_OVERRIDE_RANGE_MESSAGE)
-  .max(MAX_COMMISSION_OVERRIDE_PERCENT, COMMISSION_OVERRIDE_RANGE_MESSAGE)
-  .refine((n) => Math.round(n * 100) / 100 === n, "Commission can have at most 2 decimal places.");
-
-/** Columns every admin hotel read returns for payout/commission state (effective rate computed in ONE place). */
-const HOTEL_PAYOUT_COLUMNS = `${effectiveCommissionSql("hotels")}::numeric(5,2) AS commission_percent,
-              commission_override_percent,
-              (commission_override_percent IS NOT NULL) AS commission_is_override,
+/** Columns every admin hotel read returns for the fixed payout-fee policy. */
+const HOTEL_PAYOUT_COLUMNS = `${payoutFeeSql()}::numeric(5,2) AS payout_fee_percent,
               payout_mode, to_char(payout_time, 'HH24:MI') AS payout_time`;
 
 const createHotelSchema = z.object({
@@ -95,9 +86,6 @@ const createHotelSchema = z.object({
   pin: pinSchema,
   payment: settlementMethodSchema,
   registrationFee: z.number().min(0).max(10000),
-  // Optional: omitted = no override (the payout-mode default applies);
-  // present = an explicit administrator override.
-  commissionPercent: commissionOverrideSchema.optional(),
   payout: payoutConfigSchema.optional(),
   loyaltyIncentivePercent: z.number().min(0).max(100).optional().default(0),
   termsAccepted: z.literal(true, {
@@ -107,13 +95,8 @@ const createHotelSchema = z.object({
 });
 
 /**
- * Higher registration fee -> admin is expected to set a LOWER
- * commission (per spec section 7's intent) — this is not enforced
- * mechanically (the two are independently admin-configured, since
- * the exact tradeoff curve is a business decision, not a formula),
- * but the commission override range (0-30%, migration 051) and max fee
- * (10,000) are both hard DB-level CHECK constraints, so neither can be
- * bypassed regardless of what this endpoint does.
+ * The payout fee is fixed by MEALVEST policy and is not configurable
+ * through hotel registration.
  */
 export async function createHotel(req: AuthedRequest, res: Response, next: NextFunction) {
   const client = await pool.connect();
@@ -137,10 +120,10 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
     const hotelResult = await client.query(
       `INSERT INTO hotels
          (name, location, address, business_type, contact_phone, contact_email, owner_contact_name, admin_username,
-          payment_method, payment_details, registration_fee, commission_override_percent, loyalty_incentive_percent,
+          payment_method, payment_details, registration_fee, loyalty_incentive_percent,
           terms_accepted, terms_accepted_at, terms_version, contract_start_date, contract_end_date, status,
           payout_mode, payout_time)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,now(),$14,$15,$16,'active',$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,now(),$13,$14,$15,'active',$16,$17)
        RETURNING *`,
       [
         d.name,
@@ -154,13 +137,12 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
         d.payment.method,
         JSON.stringify(d.payment),
         d.registrationFee,
-        d.commissionPercent ?? null,
         d.loyaltyIncentivePercent,
         TERMS_VERSION,
         startDate.toISOString().slice(0, 10),
         endDate.toISOString().slice(0, 10),
-        d.payout?.mode ?? "instant",
-        d.payout?.mode === "daily" ? d.payout.payoutTime : null,
+        "daily",
+        d.payout?.payoutTime ?? "18:00",
       ]
     );
     const hotel = hotelResult.rows[0];
@@ -179,12 +161,15 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
       [userId, hotel.id, d.ownerContactName]
     );
 
+    await cloneDefaultMenuForHotel(hotel.id, client);
+
     await client.query("COMMIT");
 
     // Never echo the password hash back, even to the admin who just set it.
     delete hotel.payment_details_raw;
-    // The legacy commission_percent column is no longer authoritative; report the effective rate.
-    hotel.commission_percent = effectiveCommissionPercent(hotel.payout_mode, hotel.commission_override_percent);
+    hotel.payout_fee_percent = PAYOUT_FEE_PERCENT;
+    delete hotel.commission_percent;
+    delete hotel.commission_override_percent;
     hotel.payout_time = formatPayoutTime(hotel.payout_time);
     res.status(201).json({ hotel, loginUsername: d.adminUsername, loginEmail: d.email });
   } catch (err) {
@@ -196,6 +181,175 @@ export async function createHotel(req: AuthedRequest, res: Response, next: NextF
     next(err);
   } finally {
     client.release();
+  }
+}
+
+const defaultMenuCategorySchema = z.object({
+  slug: z.string().trim().min(1).max(40).regex(/^[a-z0-9_-]+$/),
+  label: z.string().trim().min(1).max(80),
+  sortOrder: z.number().int().min(0).max(999).optional().default(0),
+  isActive: z.boolean().optional().default(true),
+});
+
+const defaultMenuItemSchema = z.object({
+  category: z.enum([...DEFAULT_CATEGORY_SLUGS]).default("other"),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(300).optional(),
+  price: z.number().positive().max(10_000, "Price can't exceed KSh 10000.").finite(),
+  imageUrl: imageUrlSchema.optional(),
+  sortOrder: z.number().int().min(0).max(999).optional().default(0),
+  isActive: z.boolean().optional().default(true),
+});
+
+export async function listDefaultMenuCatalogue(_req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const [categories, items] = await Promise.all([
+      pool.query(`SELECT * FROM default_menu_categories WHERE is_active = TRUE ORDER BY sort_order, label, slug`),
+      pool.query(`SELECT * FROM default_menu_items WHERE is_active = TRUE ORDER BY category, sort_order, name`),
+    ]);
+    res.json({ categories: categories.rows, items: items.rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createDefaultMenuCategory(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = defaultMenuCategorySchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid default menu category.");
+    const d = parsed.data;
+
+    const existing = await pool.query("SELECT id FROM default_menu_categories WHERE slug = $1", [d.slug]);
+    if (existing.rows.length > 0) throw new ApiError(409, "CATEGORY_EXISTS", "A default menu category with that slug already exists.");
+
+    const result = await pool.query(
+      `INSERT INTO default_menu_categories (slug, label, sort_order, is_active)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [d.slug, d.label, d.sortOrder, d.isActive]
+    );
+    res.status(201).json({ category: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateDefaultMenuCategory(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = defaultMenuCategorySchema.partial().safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid default menu category update.");
+    const d = parsed.data;
+    const result = await pool.query(
+      `UPDATE default_menu_categories
+       SET label = COALESCE($1, label),
+           sort_order = COALESCE($2, sort_order),
+           is_active = COALESCE($3, is_active),
+           updated_at = now()
+       WHERE id = $4
+       RETURNING *`,
+      [d.label, d.sortOrder, d.isActive, req.params.categoryId]
+    );
+    if (result.rows.length === 0) throw new ApiError(404, "CATEGORY_NOT_FOUND", "Default menu category not found.");
+    res.json({ category: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteDefaultMenuCategory(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const inUse = await pool.query("SELECT COUNT(*)::int AS count FROM default_menu_items WHERE category = (SELECT slug FROM default_menu_categories WHERE id = $1)", [req.params.categoryId]);
+    if (Number(inUse.rows[0].count) > 0) {
+      throw new ApiError(409, "CATEGORY_IN_USE", "This category still has default items. Remove or reassign those items before deleting it.");
+    }
+    const result = await pool.query("DELETE FROM default_menu_categories WHERE id = $1 RETURNING id", [req.params.categoryId]);
+    if (result.rows.length === 0) throw new ApiError(404, "CATEGORY_NOT_FOUND", "Default menu category not found.");
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createDefaultMenuItem(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = defaultMenuItemSchema.safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid default menu item.");
+    const d = parsed.data;
+
+    const categoryExists = await pool.query("SELECT 1 FROM default_menu_categories WHERE slug = $1 AND is_active = TRUE", [d.category]);
+    if (categoryExists.rows.length === 0) throw new ApiError(404, "CATEGORY_NOT_FOUND", "Please create the default category before adding items to it.");
+
+    const result = await pool.query(
+      `INSERT INTO default_menu_items (category, name, description, price, image_url, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [d.category, d.name, d.description ?? null, d.price, d.imageUrl ?? null, d.sortOrder, d.isActive]
+    );
+    res.status(201).json({ item: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateDefaultMenuItem(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const parsed = defaultMenuItemSchema.partial().safeParse(req.body);
+    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid default menu item update.");
+    const d = parsed.data;
+
+    if (d.category) {
+      const categoryExists = await pool.query("SELECT 1 FROM default_menu_categories WHERE slug = $1 AND is_active = TRUE", [d.category]);
+      if (categoryExists.rows.length === 0) throw new ApiError(404, "CATEGORY_NOT_FOUND", "Default menu category not found.");
+    }
+
+    const result = await pool.query(
+      `UPDATE default_menu_items
+       SET category = COALESCE($1, category),
+           name = COALESCE($2, name),
+           description = COALESCE($3, description),
+           price = COALESCE($4, price),
+           image_url = COALESCE($5, image_url),
+           sort_order = COALESCE($6, sort_order),
+           is_active = COALESCE($7, is_active),
+           updated_at = now()
+       WHERE id = $8
+       RETURNING *`,
+      [d.category, d.name, d.description, d.price, d.imageUrl, d.sortOrder, d.isActive, req.params.itemId]
+    );
+    if (result.rows.length === 0) throw new ApiError(404, "ITEM_NOT_FOUND", "Default menu item not found.");
+    res.json({ item: result.rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteDefaultMenuItem(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const result = await pool.query("DELETE FROM default_menu_items WHERE id = $1 RETURNING id", [req.params.itemId]);
+    if (result.rows.length === 0) throw new ApiError(404, "ITEM_NOT_FOUND", "Default menu item not found.");
+    res.json({ deleted: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function initializeEmptyHotelMenuForAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const { hotelId } = req.params;
+    const result = await initializeEmptyHotelMenu(hotelId);
+    res.json({
+      hotelId,
+      initialized: result.initialized,
+      cloned: result.cloned,
+      reason: result.reason,
+      skipped: !result.initialized,
+    });
+  } catch (err) {
+    if ((err as Error).message === "HOTEL_NOT_FOUND") {
+      next(new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found."));
+      return;
+    }
+    next(err);
   }
 }
 
@@ -227,51 +381,10 @@ export async function reactivateHotel(req: AuthedRequest, res: Response, next: N
   }
 }
 
-// commissionPercent: a number sets an explicit override; null CLEARS the
-// override (back to the payout-mode default); omitted leaves it untouched.
-// Only this admin-guarded route can write it — hotels have no endpoint
-// that accepts a commission value.
-const updateCommissionSchema = z
-  .object({
-    registrationFee: z.number().min(0).max(10000).optional(),
-    commissionPercent: commissionOverrideSchema.nullable().optional(),
-    loyaltyIncentivePercent: z.number().min(0).max(100).optional(),
-  })
-  .strict();
-
-export async function updateHotelCommission(req: AuthedRequest, res: Response, next: NextFunction) {
-  try {
-    const { hotelId } = req.params;
-    const parsed = updateCommissionSchema.safeParse(req.body);
-    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", parsed.error.errors[0]?.message || "Invalid request.");
-    const d = parsed.data;
-
-    // Only orders redeemed AFTER this change use the new rate: the rate
-    // is frozen onto each order at redemption (orders.commission_amount).
-    const result = await pool.query(
-      `UPDATE hotels SET
-         registration_fee = COALESCE($1, registration_fee),
-         commission_override_percent = CASE WHEN $5::boolean THEN $2::numeric ELSE commission_override_percent END,
-         loyalty_incentive_percent = COALESCE($3, loyalty_incentive_percent),
-         updated_at = now()
-       WHERE id = $4
-       RETURNING id, name, registration_fee, loyalty_incentive_percent, ${HOTEL_PAYOUT_COLUMNS}`,
-      [d.registrationFee, d.commissionPercent ?? null, d.loyaltyIncentivePercent, hotelId, d.commissionPercent !== undefined]
-    );
-    if (result.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
-    res.json({ hotel: result.rows[0] });
-  } catch (err) {
-    next(err);
-  }
-}
-
 /**
- * PATCH /api/admin/hotels/:hotelId/payout-settings — change a hotel's payout
- * mode / daily time. Admin-only (hotels cannot change their own mode after
- * registration). Deliberately does NOT touch commission_override_percent
- * (an explicit override survives any mode change) nor any order/payout row:
- * unpaid earnings stay unpaid and are simply paid under the new mode's
- * rules; funds already reserved by a payout stay with that payout.
+ * PATCH /api/admin/hotels/:hotelId/payout-settings — change a hotel's
+ * daily payout time. Unpaid earnings and reserved payout amounts are
+ * untouched.
  * The UPDATE takes the hotel row lock the payout claim also uses, so it
  * serialises with an in-flight reservation.
  */
@@ -283,10 +396,10 @@ export async function updateHotelPayoutSettings(req: AuthedRequest, res: Respons
     const d = parsed.data;
 
     const result = await pool.query(
-      `UPDATE hotels SET payout_mode = $1, payout_time = $2::time, updated_at = now()
-       WHERE id = $3
+      `UPDATE hotels SET payout_time = $1::time, updated_at = now()
+       WHERE id = $2
        RETURNING id, name, ${HOTEL_PAYOUT_COLUMNS}`,
-      [d.mode, d.payoutTime, hotelId]
+      [d.payoutTime, hotelId]
     );
     if (result.rows.length === 0) throw new ApiError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
     res.json({ hotel: result.rows[0] });

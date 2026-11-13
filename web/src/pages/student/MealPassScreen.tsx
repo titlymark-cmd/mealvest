@@ -1,54 +1,53 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { ShieldCheck, ArrowLeft } from "lucide-react";
+import { CircleCheck, ShieldCheck, ArrowLeft } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Spinner } from "../../components/Spinner";
+import { Modal } from "../../components/ui/Modal";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
-import { createOrder, payOrder, cancelOrder, Order } from "../../services/ordersApi";
+import { createOrder, payOrder, getOrder, Order } from "../../services/ordersApi";
 
-type Stage = "creating" | "paying" | "ready" | "error";
+type Stage = "creating" | "paying" | "created" | "loading-order" | "show-order" | "error";
+
+interface MealPassRouteState {
+  orderId?: string;
+  hotelId?: string;
+  hotelName?: string;
+  itemId?: string;
+  itemPrice?: string | number;
+}
 
 /**
- * The ONLY screen that ever displays a meal QR code, and it never
- * generates one itself — `order.qr_token` comes back from
- * `payOrder()`, which is the backend's HMAC-signed value. This
- * component just renders whatever string the backend gave it as a
- * scannable image; it has no ability to produce a valid token on
- * its own, by design (see server/src/lib/qr.ts).
+ * Creates and reserves an order when entered from a menu. Existing orders
+ * are loaded from the backend when entered from Orders; this screen never
+ * creates a QR token or a second reservation while revealing a meal pass.
  */
 export default function MealPassScreen() {
   const { authFetch } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const { hotelId, hotelName, itemId, itemName, itemPrice } = (location.state as any) || {};
-
-  const [stage, setStage] = useState<Stage>("creating");
+  const { orderId, hotelId, hotelName, itemId, itemPrice } = (location.state as MealPassRouteState | null) ?? {};
+  const [stage, setStage] = useState<Stage>(orderId ? "loading-order" : "creating");
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const refreshInFlight = useRef(false);
 
-  // Holds the latest paid-but-unscanned pass so we can release its hold when
-  // the student leaves without the hotel scanning it (money reorganizes back).
-  // The backend keeps an already-scanned pass redeemed, so this is a no-op then.
-  const heldOrderRef = useRef<Order | null>(null);
-  const releasedRef = useRef(false);
-
-  // A stable key per (hotel, item) order attempt, persisted across
-  // remounts of this screen — a retry after a failed payOrder (or the
-  // student navigating back and re-selecting the same item) reuses the
-  // SAME key, so the backend returns the one order it already created
-  // instead of inserting another "Pending Payment" row (see migration
-  // 035 + orderService.createOrder). Cleared only once payment actually
-  // succeeds, so the NEXT time this item is ordered — a new attempt,
-  // not a retry — gets its own fresh order.
+  // Keep the same idempotent retry behavior for the actual create-and-reserve
+  // operation. Revealing an existing order never reads or writes this key.
   const idempotencyStorageKey = `mealvest_order_key:${hotelId}:${itemId}`;
 
   const runFlow = useCallback(async () => {
     setStage("creating");
     setError(null);
     try {
+      if (!hotelId || !itemId) {
+        throw new Error("This meal selection is incomplete. Return to the menu and choose it again.");
+      }
+
       let idempotencyKey = sessionStorage.getItem(idempotencyStorageKey);
       if (!idempotencyKey) {
         idempotencyKey = crypto.randomUUID();
@@ -58,38 +57,72 @@ export default function MealPassScreen() {
       const created = await createOrder(authFetch, hotelId, [{ itemId, quantity: 1 }], idempotencyKey);
       setStage("paying");
       const paid = await payOrder(authFetch, created.id);
-      heldOrderRef.current = paid;
       setOrder(paid);
-      setStage("ready");
+      setStage("created");
       sessionStorage.removeItem(idempotencyStorageKey);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setStage("error");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authFetch, hotelId, itemId, idempotencyStorageKey]);
+  }, [authFetch, hotelId, idempotencyStorageKey, itemId]);
 
   useEffect(() => {
-    runFlow();
-    // On leave: release the hold on a pass that was never scanned, so the money
-    // returns to the plan. Best-effort; the timed server sweep is the backstop.
+    if (!orderId) {
+      runFlow();
+      return;
+    }
+
+    let active = true;
+    getOrder(authFetch, orderId)
+      .then((found) => {
+        if (!active) return;
+        setOrder(found);
+        setStage("show-order");
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : "Could not load this meal pass.");
+        setStage("error");
+      });
     return () => {
-      const held = heldOrderRef.current;
-      if (held && !releasedRef.current && (held.status === "paid" || held.status === "ready")) {
-        releasedRef.current = true;
-        cancelOrder(authFetch, held.id).catch(() => {
-          /* backstopped by the server-side hold sweep */
-        });
+      active = false;
+    };
+  }, [authFetch, orderId, runFlow]);
+
+  useEffect(() => {
+    if (!orderId || stage !== "show-order" || (order?.status !== "paid" && order?.status !== "ready")) return;
+
+    let active = true;
+    const refresh = async () => {
+      if (refreshInFlight.current || document.visibilityState !== "visible") return;
+      refreshInFlight.current = true;
+      try {
+        const latest = await getOrder(authFetch, orderId);
+        if (active) {
+          setOrder(latest);
+          setRefreshError(null);
+        }
+      } catch (err) {
+        if (active) setRefreshError(err instanceof Error ? err.message : "Could not refresh this meal pass.");
+      } finally {
+        refreshInFlight.current = false;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const timer = window.setInterval(refresh, 5000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [authFetch, order?.status, orderId, stage]);
 
-  if (stage === "creating" || stage === "paying") {
+  if (stage === "creating" || stage === "paying" || stage === "loading-order") {
+    const message = stage === "creating" ? "Placing your order…" : stage === "paying" ? "Reserving your meal…" : "Loading your meal pass…";
     return (
       <div style={styles.center}>
         <Spinner size="large" color={COLORS.primary} />
-        <p style={styles.statusText}>{stage === "creating" ? "Placing your order…" : "Paying from your meal plan…"}</p>
+        <p style={styles.statusText}>{message}</p>
       </div>
     );
   }
@@ -105,50 +138,92 @@ export default function MealPassScreen() {
             Set up a plan
           </PrimaryButton>
         ) : (
-          <button onClick={() => navigate(-1)} style={{ marginTop: 20 }}>
-            <span style={styles.link}>Back to menu</span>
-          </button>
+          <PrimaryButton
+            type="button"
+            showArrow={false}
+            variant="secondary"
+            onPress={() => {
+              if (orderId) navigate("/student/orders");
+              else navigate(-1);
+            }}
+            style={{ marginTop: 20, width: 220 }}
+          >
+            {orderId ? "Back to orders" : "Back to menu"}
+          </PrimaryButton>
         )}
       </div>
     );
   }
 
-  // stage === "ready" — order is real, paid, and has a real qr_token
+  if (stage === "created") {
+    return (
+      <div style={styles.center}>
+        <Modal
+          open
+          title="Order placed successfully!"
+          icon={<CircleCheck size={24} color={COLORS.primary} aria-hidden />}
+          onClose={() => navigate("/student/orders", { replace: true })}
+          actions={
+            <PrimaryButton type="button" showArrow={false} onPress={() => navigate("/student/orders", { replace: true })}>
+              Got it
+            </PrimaryButton>
+          }
+        >
+          Your meal is reserved. When you're ready to redeem your meal, open your order and reveal your QR code. The hotel will scan it to confirm your meal.
+        </Modal>
+      </div>
+    );
+  }
+
+  const isEligible = order?.status === "paid" || order?.status === "ready";
+  const statusMessage =
+    order?.status === "redeemed"
+      ? `This meal was redeemed${order.redeemed_at ? ` on ${new Date(order.redeemed_at).toLocaleString()}` : ""}.`
+      : order?.status === "cancelled" || order?.status === "refunded"
+        ? "This order is no longer available for redemption."
+        : "This order is not ready for redemption yet.";
+
   return (
     <div style={styles.container}>
-      <button onClick={() => navigate("/student")} style={styles.backRow}>
+      <button type="button" onClick={() => navigate("/student/orders")} style={styles.backRow}>
         <ArrowLeft size={16} color={COLORS.primary} />
-        <span style={styles.backText}>Back to hotels</span>
+        <span style={styles.backText}>Back to orders</span>
       </button>
 
       <h1 style={styles.title}>Your Meal Pass</h1>
-      <p style={styles.subtitle}>Show this to {hotelName} to redeem your meal</p>
+      <p style={styles.subtitle}>Show this to {hotelName || "the hotel"} when you're ready to redeem your meal</p>
 
       <Card style={styles.qrCard}>
-        <span style={styles.itemName}>{itemName}</span>
-        <span style={styles.itemPrice}>KSh {Number(itemPrice).toLocaleString()}</span>
+        {order?.items.map((item, index) => (
+          <span key={`${item.itemId}-${index}`} style={styles.itemName}>
+            {item.quantity > 1 ? `${item.quantity}× ` : ""}{item.name}
+          </span>
+        ))}
+        <span style={styles.itemPrice}>KSh {Number(order?.amount ?? itemPrice ?? 0).toLocaleString()}</span>
 
-        {order?.qr_token ? (
+        {isEligible && order?.qr_token ? (
           <div style={styles.qrWrap}>
             <QRCodeSVG value={order.qr_token} size={200} bgColor="#fff" fgColor={COLORS.text} />
           </div>
         ) : (
-          <span style={styles.qrMissingText}>No QR code was returned for this order.</span>
+          <span style={styles.qrMissingText}>{statusMessage}</span>
         )}
 
-        <div style={styles.verifiedRow}>
-          <ShieldCheck size={14} color={COLORS.success} />
-          <span style={styles.verifiedText}>Signed and verified by Mealvest</span>
-        </div>
+        {isEligible && order?.qr_token && (
+          <div style={styles.verifiedRow}>
+            <ShieldCheck size={14} color={COLORS.success} />
+            <span style={styles.verifiedText}>Signed and verified by Mealvest</span>
+          </div>
+        )}
       </Card>
 
-      <p style={styles.hint}>
-        Your money is only taken when {hotelName} scans this code. If it isn’t scanned and you leave,
-        the amount goes straight back into your plan.
-      </p>
-
-      <PrimaryButton onPress={() => navigate("/student")} style={{ marginTop: 24 }}>
-        Done
+      {refreshError && (
+        <p role="status" style={styles.refreshWarning}>
+          Redemption status update failed: {refreshError}. This pass remains in its last confirmed status.
+        </p>
+      )}
+      <PrimaryButton type="button" showArrow={false} onPress={() => navigate("/student/orders")} style={{ marginTop: 24 }}>
+        Back to orders
       </PrimaryButton>
     </div>
   );
@@ -161,7 +236,7 @@ const styles: Record<string, React.CSSProperties> = {
   errorTitle: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 17, color: COLORS.textOnDark, marginBottom: 8, textAlign: "center" },
   errorBody: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textOnDarkMuted, textAlign: "center" },
   qrMissingText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textMuted, textAlign: "center" },
-  link: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 14, color: COLORS.primary },
+  refreshWarning: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textOnDarkMuted, textAlign: "center", marginTop: 14 },
   backRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 20 },
   backText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.primary },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 20, color: COLORS.textOnDark, textAlign: "center", margin: 0 },
@@ -172,5 +247,4 @@ const styles: Record<string, React.CSSProperties> = {
   qrWrap: { padding: 14, backgroundColor: "#fff", borderRadius: RADIUS.sm, display: "flex" },
   verifiedRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 },
   verifiedText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 11, color: COLORS.success },
-  hint: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textOnDarkMuted, textAlign: "center", marginTop: 16 },
 };

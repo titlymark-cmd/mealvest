@@ -7,12 +7,8 @@ async function parseOrError<T>(res: Response, fallback: string): Promise<T> {
 }
 
 /**
- * commission_percent/commission_owed/gross_revenue are deliberately
- * NOT in this type — the backend (hotel.controller.ts getHotelDashboard)
- * never sends them to a hotel_owner/hotel_staff caller, only to
- * mealvest_admin viewing a hotel for oversight. revenue_today/
- * net_earnings here are already net (after MEALVEST's commission) —
- * this IS the hotel's own revenue.
+ * The dashboard now returns gross meal sales, the fixed payout fee, and
+ * the resulting net amount together for transparent reconciliation.
  */
 export interface HotelDashboard {
   hotel: {
@@ -23,7 +19,7 @@ export interface HotelDashboard {
     address: string | null;
     settlement_schedule: string | null;
     /** Authoritative payout mode/time from the server (absent on an older server). */
-    payout_mode?: "instant" | "daily";
+    payout_mode?: "daily";
     payout_time?: string | null;
     registration_fee: string;
     payment_method: string | null;
@@ -57,6 +53,10 @@ export interface HotelDashboard {
     /** Returned by GET /api/hotel/dashboard but previously undeclared/unused. */
     cancelled_orders?: string;
     revenue_today: string;
+    gross_revenue_today: string;
+    payout_fee_today: string;
+    gross_revenue: string;
+    payout_fee_owed: string;
     net_earnings: string;
     menu_item_count: string;
   };
@@ -119,6 +119,8 @@ export interface HotelOrder {
   // (server/src/lib/hotelOrderView.ts) and were not previously typed or shown.
   /** The hotel's own net for this order — set once the order is redeemed. */
   hotel_amount?: string | null;
+  /** The fixed payout fee applied to this redeemed order. */
+  payout_fee_amount?: string | null;
   updated_at?: string;
   redeemed?: boolean;
   redeemed_at?: string | null;
@@ -300,6 +302,8 @@ export type HotelPayoutStatus =
 
 export interface HotelPayoutRecord {
   id: string;
+  gross_amount: string | null;
+  payout_fee_amount: string | null;
   amount: string;
   status: HotelPayoutStatus;
   reference: string;
@@ -311,10 +315,14 @@ export interface HotelPayoutRecord {
 
 export interface HotelEarnings {
   summary: {
-    /** Redeemed-but-not-yet-paid-out earnings. */
+    /** Redeemed-but-not-yet-paid-out amounts, shown gross, fee, and net. */
     pending_amount: string;
+    pending_gross_amount: string;
+    pending_payout_fee_amount: string;
     pending_order_count: string;
     paid_out_total: string;
+    paid_out_gross_total: string;
+    paid_out_fee_total: string;
     last_paid_at: string | null;
     /** Automatic payouts master switch (server AUTO_PAYOUTS_ENABLED). */
     auto_enabled: boolean;
@@ -322,8 +330,8 @@ export interface HotelEarnings {
     threshold: string;
     /** Why the next automatic payout is waiting — hotel-safe categories only. */
     auto_hold: "payout_in_progress" | "failed_recently" | "needs_support" | null;
-    payout_mode?: "instant" | "daily";
-    /** "HH:MM", East Africa Time; daily mode only. */
+    payout_mode?: "daily";
+    /** "HH:MM", East Africa Time. */
     payout_time?: string | null;
     payout_timezone?: string;
   };

@@ -18,6 +18,7 @@ const ERROR_COPY: Record<string, string> = {
   FORBIDDEN: "This meal belongs to a different hotel.",
   NOT_PAID: "This order hasn't been paid for.",
   ALREADY_REDEEMED: "This meal has already been redeemed.",
+  ORDER_EXPIRED: "This meal pass has expired and cannot be redeemed.",
   HOTEL_SUSPENDED: "Your hotel account is not currently active.",
 };
 

@@ -3,9 +3,7 @@ import { ApiError } from "../middleware/errorHandler";
 import { reserveFromBudgetInTx, settleReservationInTx, releaseReservationInTx } from "./budgetService";
 import { generateOrderQrPayload, verifyOrderQrPayload } from "../lib/qr";
 import * as notificationEvents from "./notificationEvents";
-import * as hotelPayoutService from "./hotelPayoutService";
-import { runInBackground } from "../lib/background";
-import { effectiveCommissionSql, splitOrderAmount } from "../lib/hotelCommission";
+import { splitOrderAmount } from "../lib/hotelCommission";
 
 export interface CartLine {
   itemId: string;
@@ -16,6 +14,12 @@ interface PricedLine extends CartLine {
   name: string;
   unitPrice: number;
   lineTotal: number;
+}
+
+function reservationExpired(order: { reserved_at?: string | Date | null }): boolean {
+  if (!order.reserved_at) return false;
+  const ttlMinutes = Number(process.env.ORDER_HOLD_TTL_MINUTES) || 30;
+  return new Date(order.reserved_at).getTime() < Date.now() - ttlMinutes * 60 * 1000;
 }
 
 /**
@@ -115,9 +119,12 @@ export async function getOrderById(orderId: string) {
 }
 
 export async function getOrdersForUser(userId: string) {
-  const result = await pool.query("SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50", [
-    userId,
-  ]);
+  const result = await pool.query(
+    `SELECT o.*, h.name AS hotel_name
+     FROM orders o LEFT JOIN hotels h ON h.id = o.hotel_id
+     WHERE o.user_id = $1 ORDER BY o.created_at DESC LIMIT 50`,
+    [userId]
+  );
   return result.rows;
 }
 
@@ -217,9 +224,8 @@ export async function payOrderFromBudget(orderId: string, userId: string) {
  *     an order that was placed before suspension)
  *   - payment status check (must be 'paid')
  *   - double-redemption check (must not already be 'redeemed')
- *   - commission calculation, frozen onto the order at this exact
- *     moment using the hotel's CURRENT effective commission (admin
- *     override, else the payout-mode default; lib/hotelCommission.ts)
+ *   - the fixed 10% payout fee, frozen onto the order at this exact
+ *     moment (lib/hotelCommission.ts)
  *   - the state flip, via SELECT...FOR UPDATE so two hotel devices
  *     scanning the same QR in true parallel can't both win.
  */
@@ -240,12 +246,7 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
       throw new ApiError(403, "FORBIDDEN", "This meal belongs to a different hotel.");
     }
 
-    // The effective rate comes from the single authoritative derivation
-    // (override, else the payout-mode default) — see lib/hotelCommission.ts.
-    const hotelResult = await client.query(
-      `SELECT status, ${effectiveCommissionSql("hotels")} AS commission_percent FROM hotels WHERE id = $1`,
-      [hotelId]
-    );
+    const hotelResult = await client.query("SELECT status FROM hotels WHERE id = $1", [hotelId]);
     const hotel = hotelResult.rows[0];
     if (!hotel || hotel.status !== "active") {
       throw new ApiError(403, "HOTEL_SUSPENDED", "This hotel account is not currently active.");
@@ -258,16 +259,18 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
     if (order.status !== "paid" && order.status !== "ready") {
       throw new ApiError(409, "NOT_PAID", "This order has not been paid for.");
     }
+    if (reservationExpired(order)) {
+      throw new ApiError(409, "ORDER_EXPIRED", "This meal pass has expired.");
+    }
 
-    const commissionPercent = Number(hotel.commission_percent);
     const amount = Number(order.amount);
-    const { commissionAmount, hotelAmount } = splitOrderAmount(amount, commissionPercent);
+    const { payoutFeeAmount, hotelAmount } = splitOrderAmount(amount);
 
     const updated = await client.query(
       `UPDATE orders SET status = 'redeemed', redeemed = TRUE, redeemed_at = now(),
               redeemed_by_hotel_user_id = $1, commission_amount = $2, hotel_amount = $3, updated_at = now()
        WHERE id = $4 RETURNING *`,
-      [redeemedByUserId, commissionAmount, hotelAmount, orderId]
+      [redeemedByUserId, payoutFeeAmount, hotelAmount, orderId]
     );
 
     // THE scan is the moment money actually leaves the student: settle the
@@ -287,15 +290,6 @@ export async function redeemOrderByQr(qrPayload: string, hotelId: string, redeem
     const hotelName = hotelNameResult.rows[0]?.name || "the hotel";
     notificationEvents.mealRedeemed(redeemedOrder.user_id, hotelName, Number(redeemedOrder.amount));
     notificationEvents.hotelMealRedeemed(hotelId, hotelAmount, redeemedOrder.id);
-
-    // Automated payout evaluation. Runs only after the redemption has
-    // COMMITTED (so earnings exist exactly once: a repeated scan fails
-    // above with ALREADY_REDEEMED and never reaches this line), in the
-    // background so the hotel's scan response never waits on — or fails
-    // because of — a payout. evaluateAutoPayout never throws, is a no-op
-    // unless AUTO_PAYOUTS_ENABLED=true, and the reconciliation sweep
-    // re-evaluates if this task is ever lost.
-    runInBackground("auto-payout", () => hotelPayoutService.evaluateAutoPayout(hotelId));
 
     return redeemedOrder;
   } catch (err) {
@@ -328,6 +322,9 @@ export async function verifyOrderQr(qrPayload: string, hotelId: string) {
   }
   if (order.status !== "paid" && order.status !== "ready") {
     throw new ApiError(409, "NOT_PAID", "This order has not been paid for.");
+  }
+  if (reservationExpired(order)) {
+    throw new ApiError(409, "ORDER_EXPIRED", "This meal pass has expired.");
   }
 
   return order;

@@ -7,6 +7,7 @@ export interface Order {
   id: string;
   user_id: string;
   hotel_id: string;
+  hotel_name?: string | null;
   items: Array<{ itemId: string; quantity: number; name: string; unitPrice: number; lineTotal: number }>;
   amount: string;
   status: "pending_payment" | "paid" | "ready" | "redeemed" | "cancelled" | "refunded";
@@ -14,6 +15,7 @@ export interface Order {
   commission_amount: string | null;
   hotel_amount: string | null;
   created_at: string;
+  redeemed_at?: string | null;
 }
 
 type AuthFetch = (path: string, init?: RequestInit) => Promise<Response>;

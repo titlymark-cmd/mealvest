@@ -1,5 +1,4 @@
 import { Response, NextFunction } from "express";
-import { z } from "zod";
 import { AuthedRequest } from "../middleware/auth";
 import { ApiError } from "../middleware/errorHandler";
 import * as model from "../models/hotelPayoutModel";
@@ -48,7 +47,7 @@ export async function listPendingPayouts(_req: AuthedRequest, res: Response, nex
   }
 }
 
-/** GET /api/admin/payouts/fee-preview?amount=<KSh> — Cyzora's processing fee for a payout of this size (recorded separately from MEALVEST commission, never netted into it). */
+/** GET /api/admin/payouts/fee-preview?amount=<KSh> — Cyzora's processing fee for a payout of this size (recorded separately from the MEALVEST payout fee, never netted into it). */
 export async function previewPayoutFee(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     if (payoutService.activePayoutProvider() !== "cyzora") {
@@ -72,14 +71,9 @@ export async function listPayoutHistory(_req: AuthedRequest, res: Response, next
   }
 }
 
-const triggerPayoutSchema = z.object({ hotelId: z.string().uuid() });
-
-export async function triggerPayout(req: AuthedRequest, res: Response, next: NextFunction) {
+export async function retryFailedPayout(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const parsed = triggerPayoutSchema.safeParse(req.body);
-    if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", "hotelId is required.");
-
-    const payout = await payoutService.triggerPayout(parsed.data.hotelId, req.user!.id);
+    const payout = await payoutService.retryFailedPayout(req.params.payoutId, req.user!.id);
     res.status(201).json({ payout });
   } catch (err) {
     next(err);

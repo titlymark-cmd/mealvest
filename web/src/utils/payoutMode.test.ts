@@ -11,13 +11,11 @@ describe("payoutMode helpers", () => {
     expect(formatPayoutTime12("12:00")).toBe("12:00 PM");
     expect(formatPayoutTime12("")).toBe("—");
   });
-  test("instant sends no time; daily sends it", () => {
-    expect(payoutConfigPayload("instant", "21:00")).toEqual({ mode: "instant" });
-    expect(payoutConfigPayload("daily", "21:00")).toEqual({ mode: "daily", payoutTime: "21:00" });
+  test("payout configuration always selects daily settlement", () => {
+    expect(payoutConfigPayload("21:00")).toEqual({ mode: "daily", payoutTime: "21:00" });
   });
-  test("schedule label prefers the server's mode and falls back to legacy text", () => {
+  test("schedule label uses the server time and falls back to legacy text", () => {
     expect(payoutScheduleLabel({ payout_mode: "daily", payout_time: "21:00" })).toBe("Daily at 9:00 PM (EAT)");
-    expect(payoutScheduleLabel({ payout_mode: "instant" })).toMatch(/Instant/);
     expect(payoutScheduleLabel({ settlement_schedule: "Daily at 12:00 PM" })).toBe("Daily at 12:00 PM");
   });
 });

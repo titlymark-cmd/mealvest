@@ -229,9 +229,9 @@ export const env = {
   // -----------------------------------------------------------------
   // Cron — Vercel automatically sends `Authorization: Bearer
   // <CRON_SECRET>` on requests it triggers for a path listed under
-  // "crons" in vercel.json, when CRON_SECRET is set. The meal-reminder
-  // endpoint (routes/cron.routes.ts) checks the incoming header against
-  // this value so the endpoint can't be triggered by an arbitrary
+  // "crons" in vercel.json, when CRON_SECRET is set. Cron endpoints
+  // (routes/cron.routes.ts) check the incoming header against this value
+  // so they can't be triggered by arbitrary
   // public request — never set in REQUIRED_VARS since the server boots
   // fine without scheduled reminders configured yet.
   // -----------------------------------------------------------------
@@ -248,18 +248,18 @@ export const env = {
   payoutDailyLimitKes: positiveNumberEnv("PAYOUT_DAILY_LIMIT_KES", 200_000),
 
   // -----------------------------------------------------------------
-  // Automated hotel payouts. Evaluated after every QR redemption (see
-  // orderService.redeemOrderByQr -> hotelPayoutService.evaluateAutoPayout).
+  // Scheduled hotel payouts. The daily cron is the only automatic
+  // settlement path; explicit admin retries are restricted to failed payouts.
   //   AUTO_PAYOUTS_ENABLED          master switch, OFF unless exactly
-  //                                 "true" — enable only after the Cyzora
-  //                                 payout webhook is confirmed working.
+  //                                 "true" — enable only after the active
+  //                                 provider and reconciliation are verified.
   //   AUTO_PAYOUT_THRESHOLD_KES     minimum accumulated unpaid hotel
   //                                 earnings (>=) before a payout is sent.
-  //                                 Also applied to manual admin payouts.
+  //                                 Also applied to admin retries.
   //   AUTO_PAYOUT_MAX_CONSECUTIVE_FAILURES / _FAILURE_COOLDOWN_MINUTES
   //                                 stop automatic retry loops after
   //                                 definitive failures; an admin can
-  //                                 still trigger manually.
+  //                                 retry a confirmed failure.
   //   PAYOUT_STALE_PROCESSING_MINUTES
   //                                 a 'processing' payout older than this
   //                                 is flagged for admin attention.

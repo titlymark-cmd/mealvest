@@ -2,7 +2,7 @@ import { pool } from "../config/db";
 import { activatePaymentIfNeeded, PendingTransactionLookup } from "./paymentService";
 import { verifyTransactionRow } from "./paymentVerification";
 import * as payoutModel from "../models/hotelPayoutModel";
-import { verifyPayout, submitPayout, sweepAutoPayouts } from "./hotelPayoutService";
+import { verifyPayout, submitPayout } from "./hotelPayoutService";
 
 /**
  * Reconciliation (findings H1 + H3). Second safety net behind
@@ -26,7 +26,7 @@ export const PAYOUT_BATCH = 10;
 
 export interface ReconcileSummary {
   payments: { examined: number; activated: number; stillPending: number; failed: number; errors: number; review: number };
-  payouts: { examined: number; resolved: number; stillOpen: number; errors: number; sentStalePending: number; sweepInitiated: number };
+  payouts: { examined: number; resolved: number; stillOpen: number; errors: number; sentStalePending: number };
 }
 
 export async function claimUnactivatedPayments(limit: number): Promise<PendingTransactionLookup[]> {
@@ -77,7 +77,7 @@ export async function reconcilePayments(limit = PAYMENT_BATCH): Promise<Reconcil
 }
 
 export async function reconcilePayouts(limit = PAYOUT_BATCH): Promise<ReconcileSummary["payouts"]> {
-  const out = { examined: 0, resolved: 0, stillOpen: 0, errors: 0, sentStalePending: 0, sweepInitiated: 0 };
+  const out = { examined: 0, resolved: 0, stillOpen: 0, errors: 0, sentStalePending: 0 };
 
   // 'pending' = claimed but never sent (process died after the claim).
   // No provider call has been made for these, so sending is safe; the
@@ -104,13 +104,6 @@ export async function reconcilePayouts(limit = PAYOUT_BATCH): Promise<ReconcileS
     }
   }
 
-  // Catch-all for balances at/above the threshold that no trigger paid.
-  try {
-    out.sweepInitiated = (await sweepAutoPayouts(limit)).initiated;
-  } catch (err) {
-    out.errors++;
-    console.error("[reconcilePayouts] auto-payout sweep failed", { error: (err as Error).message });
-  }
   return out;
 }
 

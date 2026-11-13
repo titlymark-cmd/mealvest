@@ -17,6 +17,7 @@ beforeEach(() => {
     id: "b1", hotel_id: "h1", total_amount: "5000", remaining_amount: "2450.00", amount_spent: "2550",
     daily_allowance: "350", number_of_days: 14, start_date: "", end_date: "", status: "active", remainingDays: 7,
     spent_today: "100", banked_amount: "75", pending_tomorrow_amount: "0", pending_rollover_amount: "0", last_spend_date: null,
+    available_today: 325, free_plan_balance: 2450, carried_forward_amount: 75, held_amount: 0, today_total: 425,
   });
   budget.getWithdrawalStatus.mockResolvedValue({ locked: true, reason: "CONTRACT_ACTIVE", feePercent: 10, latestWithdrawal: null });
   budget.listMyWithdrawals.mockResolvedValue([]);

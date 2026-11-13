@@ -130,6 +130,8 @@ SUPABASE_URL=https://wsfgwvmxyendrobapvsn.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<from you — see note below>
 NODE_ENV=production
 ALLOWED_ORIGINS=https://<your-project>.vercel.app
+CRON_SECRET=<long random secret shared by Vercel and any external scheduler>
+AUTO_PAYOUTS_ENABLED=false
 ```
 
 `PAYSTACK_CALLBACK_URL` is optional — when unset, the payment-initialize
@@ -182,6 +184,27 @@ endpoint `https://<your-project>.vercel.app/api/webhooks/cyzora` with
 its `whsec_` secret, and the frontend domain added as an allowed
 redirect domain if your account restricts them. Live payouts also need
 the business verified on Cyzora's side.
+
+### Daily hotel payout scheduler
+
+`vercel.json` schedules `GET /api/cron/daily-payouts` every 10 minutes.
+Deployments need a Vercel plan that supports sub-daily Cron Jobs (Pro or
+higher). If the plan does not support that cadence, configure an external
+scheduler to call the same URL every 10 minutes with
+`Authorization: Bearer <CRON_SECRET>`.
+
+Set `CRON_SECRET` as a server environment variable in Vercel; Vercel Cron
+Jobs send it as the bearer token. For an external scheduler, configure the
+same secret in its authorization header. Never put this value in the
+frontend or commit it to the repository.
+
+Keep `AUTO_PAYOUTS_ENABLED=false` until the active payout provider, its
+webhook, and reconciliation have been verified with a test payout. Change it
+to `true` only when ready to enable daily hotel payouts. The scheduler checks
+hotels after their configured Africa/Nairobi payout time; the KSh 40
+minimum balance carries forward when unmet. New redeemed meals use the fixed
+10% payout fee; provider transfer fees are separate. See
+`server/AUTOMATED_PAYOUTS.md` for lifecycle and retry safeguards.
 
 ## 7. Accessing each dashboard securely
 

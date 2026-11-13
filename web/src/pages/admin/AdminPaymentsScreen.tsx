@@ -205,7 +205,7 @@ export default function AdminPaymentsScreen() {
               <LedgerTile icon={<Wallet size={16} color={COLORS.accent} />} label="Plans collected" amount={ledger.plansCollected.amount} count={ledger.plansCollected.count} />
               <LedgerTile icon={<CheckCircle2 size={16} color={COLORS.success} />} label="Meals redeemed" amount={ledger.mealsRedeemed.amount} count={ledger.mealsRedeemed.count} />
               <LedgerTile icon={<XCircle size={16} color={COLORS.danger} />} label="Failed payments" amount={ledger.failedPayments.amount} count={ledger.failedPayments.count} />
-              <LedgerTile icon={<TrendingUp size={16} color={COLORS.primary} />} label="Commission earned" amount={ledger.commissionEarned.amount} count={ledger.commissionEarned.count} />
+              <LedgerTile icon={<TrendingUp size={16} color={COLORS.primary} />} label="Payout fees earned" amount={ledger.commissionEarned.amount} count={ledger.commissionEarned.count} />
             </div>
           )}
         </Card>

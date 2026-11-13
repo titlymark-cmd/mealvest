@@ -12,7 +12,18 @@ import { useAuth } from "../../context/AuthContext";
 const json = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body } as Response);
 
 const HOTEL = { id: "h1", name: "Mercy's", status: "active", settlement_schedule: "Daily", payment_method: "mpesa_till", payment_verification_status: "verified" };
-const STATS = { today_orders: "2", pending_orders: "1", redeemed_orders: "5", cancelled_orders: "1", revenue_today: "300", net_earnings: "4500" };
+const STATS = {
+  today_orders: "2",
+  pending_orders: "1",
+  redeemed_orders: "5",
+  cancelled_orders: "1",
+  revenue_today: "270",
+  gross_revenue_today: "300",
+  payout_fee_today: "30",
+  gross_revenue: "5000",
+  payout_fee_owed: "500",
+  net_earnings: "4500",
+};
 
 const ORDER = (over: object = {}) => ({
   id: "aaaaaaaa-0000-0000-0000-00000000abc1",
@@ -140,16 +151,17 @@ describe("Earnings screen", () => {
 
   const earningsMock = (summary: object) => (p: string) => {
     if (p === "/api/hotel/dashboard") return json(200, { hotel: HOTEL, stats: STATS });
-    if (p === "/api/hotel/payouts") return json(200, { summary: { pending_amount: "15.00", pending_order_count: "2", paid_out_total: "0", last_paid_at: null, auto_enabled: true, threshold: "40", auto_hold: null, ...summary }, payouts: [] });
+    if (p === "/api/hotel/payouts") return json(200, { summary: { pending_amount: "15.00", pending_gross_amount: "16.67", pending_payout_fee_amount: "1.67", pending_order_count: "2", paid_out_total: "0", paid_out_gross_total: "0", paid_out_fee_total: "0", last_paid_at: null, auto_enabled: true, threshold: "40", auto_hold: null, payout_mode: "daily", payout_time: "21:00", ...summary }, payouts: [] });
     return json(200, { orders: [] });
   };
 
-  it("explains the payout minimum and how far away it is, when automatic payouts are on", async () => {
+  it("explains the daily payout minimum and gross-fee-net balance", async () => {
     mount(<HotelOwnerEarningsScreen />, earningsMock({}));
-    expect(await screen.findByText(/once they reach KSh 40\. KSh 25 to go/)).toBeInTheDocument();
+    expect(await screen.findByText(/stays here and is checked again the next day/)).toBeInTheDocument();
+    expect(screen.getByText(/Gross KSh 16\.67.*payout fee KSh 1\.67.*net KSh 15/i)).toBeInTheDocument();
   });
 
-  it("daily mode: shows the payout time, says earnings accumulate, and does not promise an instant payout", async () => {
+  it("daily mode: shows the payout time and explains that earnings accumulate until then", async () => {
     mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "daily", payout_time: "21:00", pending_amount: "115.00" }));
     expect(await screen.findByText(/checked for payout at 9:00 PM \(East Africa Time\)/)).toBeInTheDocument();
     expect(screen.getByText(/Daily at 9:00 PM \(EAT\)/)).toBeInTheDocument();
@@ -161,12 +173,6 @@ describe("Earnings screen", () => {
     mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "daily", payout_time: "21:00" }));
     expect(await screen.findByText(/stays here and is checked again the next day/)).toBeInTheDocument();
     expect(screen.queryByText("Paid")).not.toBeInTheDocument();
-  });
-
-  it("instant mode still shows the existing accumulation note", async () => {
-    mount(<HotelOwnerEarningsScreen />, earningsMock({ payout_mode: "instant" }));
-    expect(await screen.findByText(/once they reach KSh 40\. KSh 25 to go/)).toBeInTheDocument();
-    expect(screen.getByText(/Instant — after each eligible order/)).toBeInTheDocument();
   });
 
   it("makes no automatic-payout promise when the feature is switched off", async () => {

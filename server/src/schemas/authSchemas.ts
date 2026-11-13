@@ -88,10 +88,10 @@ export const registerHotelSchema = z.object({
   // of the 5 — nothing here was trimmed from the backend's side.
   settlement: settlementMethodSchema,
 
-  // Payout mode (instant | daily + daily payout time). Optional so older
-  // clients keep working: omitted = instant, the pre-existing behaviour.
-  // There is deliberately NO commission field here — the backend derives
-  // the rate from the mode (src/lib/hotelCommission.ts); a registrant can
+  // Daily payout time. Optional so older clients receive the default
+  // daily schedule on the server.
+  // There is deliberately NO payout-fee field here — the backend applies
+  // the fixed rate (src/lib/hotelCommission.ts); a registrant can
   // never choose it. (.strict() inside payoutConfigSchema rejects any
   // extra key such as commissionPercent.)
   payout: payoutConfigSchema.optional(),

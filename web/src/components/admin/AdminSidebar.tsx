@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut, BarChart3, Megaphone, Wallet } from "lucide-react";
+import { TrendingUp, Building2, Users, ShoppingBag, CreditCard, LogOut, BarChart3, Megaphone, Wallet, UtensilsCrossed } from "lucide-react";
 import { COLORS, FONTS, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: "/admin/home", label: "Overview", icon: TrendingUp, end: true },
   { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/hotels", label: "Hotels", icon: Building2 },
+  { to: "/admin/default-menu", label: "Default Menu", icon: UtensilsCrossed },
   { to: "/admin/students", label: "Students", icon: Users },
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
   { to: "/admin/payments", label: "Payments", icon: CreditCard },

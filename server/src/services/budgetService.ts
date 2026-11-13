@@ -2,6 +2,7 @@ import { pool } from "../config/db";
 import { ApiError } from "../middleware/errorHandler";
 import * as notificationEvents from "./notificationEvents";
 import { businessDate, dateOnly, daysBetweenDates, addDays } from "../lib/businessTime";
+import { toCents, centsToStr, centsToNumber } from "../lib/money";
 
 export interface BudgetRow {
   id: string;
@@ -17,8 +18,11 @@ export interface BudgetRow {
   status: "active" | "completed" | "suspended" | "cancelled";
   spent_today: string;
   last_spend_date: string | null;
+  /** Carried-forward money from earlier days (additive to the fixed daily allowance). */
   banked_amount: string;
+  /** LEGACY (retired): folded into banked_amount at the next rollover; never written with a non-zero value any more. */
   pending_tomorrow_amount: string;
+  /** LEGACY (retired): folded into banked_amount on the next touch; never written with a non-zero value any more. */
   pending_rollover_amount: string;
   /** Money held by paid-but-unscanned meal passes; not yet spent (migration 055). */
   reserved_amount: string;
@@ -27,21 +31,71 @@ export interface BudgetRow {
 }
 
 /**
- * The rule carried over from the original MEALVEST budget spec: daily
- * allowance is always (remaining money) / (remaining days), computed
- * server-side. The client only ever supplies the starting inputs
- * (total amount, number of days) — it never gets to say what the
- * daily figure is, here or on any later recalculation.
+ * APPROVED FINANCIAL MODEL (Stage 1)
+ *
+ *  - daily_allowance is FIXED for the life of the plan: amount funded / plan days
+ *    (floored to the cent so allowance x days never exceeds the funded amount).
+ *    It is never recomputed from remaining_amount / remaining days. The only
+ *    thing that changes it is a Meal Boost (see applyBoostInTx).
+ *  - Unused money carries forward AUTOMATICALLY and ADDITIVELY in banked_amount.
+ *    banked_amount only changes at a day boundary (applyDailyRollover) — spending
+ *    during the day only increases spent_today, so carry-forward can never be
+ *    deducted twice.
+ *
+ *      available today   = daily_allowance + banked_amount - spent_today - reserved_amount
+ *      free plan balance = remaining_amount - reserved_amount
+ *
+ *    A purchase must fit inside BOTH. (available is additionally clamped to the
+ *    free plan balance so a display can never promise money the plan doesn't have.)
  */
-function computeDailyAllowance(remainingAmount: number, remainingDays: number): number {
-  const safeDays = Math.max(1, remainingDays);
-  return Math.round((remainingAmount / safeDays) * 100) / 100;
+export function computeDailyAllowance(fundedAmount: number, planDays: number): number {
+  const days = Math.max(1, Math.trunc(planDays));
+  return Math.floor(toCents(fundedAmount) / days) / 100;
 }
 
-/** Days left in the plan, counted in business-timezone calendar days (minimum 1). */
+/** Days left in the plan, counted in business-timezone calendar days (minimum 1). Display + boost split. */
 function remainingDaysFor(endDate: string | Date): number {
   const end = dateOnly(endDate as string | Date)!;
   return Math.max(1, daysBetweenDates(businessDate(), end));
+}
+
+/** The one place the spendable-balance formulas live. All values in integer cents. */
+export function computeAvailability(
+  b: Pick<BudgetRow, "daily_allowance" | "banked_amount" | "spent_today" | "reserved_amount" | "remaining_amount">
+) {
+  const allowance = toCents(b.daily_allowance);
+  const carried = toCents(b.banked_amount);
+  const spent = toCents(b.spent_today);
+  const reserved = toCents(b.reserved_amount);
+  const remaining = toCents(b.remaining_amount);
+  const freePlan = Math.max(0, remaining - reserved);
+  const rawAvailable = allowance + carried - spent - reserved;
+  const availableToday = Math.max(0, Math.min(rawAvailable, freePlan));
+  return { allowance, carried, spent, reserved, remaining, freePlan, rawAvailable, availableToday, todayTotal: allowance + carried };
+}
+
+export interface BudgetView extends BudgetRow {
+  remainingDays: number;
+  /** Server-calculated figures — the ONLY source the UI should display for these. */
+  available_today: number;
+  free_plan_balance: number;
+  carried_forward_amount: number;
+  held_amount: number;
+  /** Fixed daily allowance + carry-forward: the day's total pool, for the "% spent" ring. */
+  today_total: number;
+}
+
+export function toBudgetView(b: BudgetRow): BudgetView {
+  const a = computeAvailability(b);
+  return {
+    ...b,
+    remainingDays: remainingDaysFor(b.end_date),
+    available_today: centsToNumber(a.availableToday),
+    free_plan_balance: centsToNumber(a.freePlan),
+    carried_forward_amount: centsToNumber(a.carried),
+    held_amount: centsToNumber(a.reserved),
+    today_total: centsToNumber(a.todayTotal),
+  };
 }
 
 export const TERMS_VERSION = "2026-01-mealvest-payment-terms-v1";
@@ -84,6 +138,7 @@ export async function createFundedBudget(
 
   const startDate = businessDate();
   const endDate = addDays(startDate, numberOfDays);
+  // FIXED for the whole plan (approved rule A.1): original amount / plan days.
   const dailyAllowance = computeDailyAllowance(totalAmount, numberOfDays);
 
   const result = await client.query<BudgetRow>(
@@ -109,13 +164,12 @@ export async function createFundedBudget(
 }
 
 /**
- * Fetches the student's active budget with dailyAllowance freshly
- * recalculated from remaining_amount / remaining days — this is what
- * every "get my budget" read should call, so the client always sees
- * a server-derived number, not a stale stored one, even though we
- * also persist it for convenience.
+ * The student's active budget, caught up to today (rollover applied) and
+ * decorated with the server-calculated available / free / carried figures.
+ * Every "get my budget" read goes through here; the daily allowance is the
+ * stored FIXED value — it is no longer recalculated on read.
  */
-export async function getActiveBudget(userId: string): Promise<(BudgetRow & { remainingDays: number }) | null> {
+export async function getActiveBudget(userId: string): Promise<BudgetView | null> {
   const client = await pool.connect();
   let budget: BudgetRow;
   try {
@@ -128,20 +182,9 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
       await client.query("COMMIT");
       return null;
     }
-    // Catching up rollover on every read (not just on spend) means
-    // the student's dashboard shows an accurate "carried over" figure
-    // the moment they open the app on a new day, even before they've
-    // ordered anything that day.
+    // Catching up on every read means the dashboard shows the correct
+    // carried-forward figure the moment the app opens on a new day.
     budget = await applyDailyRollover(client, result.rows[0]);
-
-    // Recalculated and persisted while the row is still locked, so it
-    // can never overwrite a concurrent deduction's view of the budget.
-    const remainingDaysNow = remainingDaysFor(budget.end_date);
-    const freshAllowance = computeDailyAllowance(Number(budget.remaining_amount), remainingDaysNow);
-    if (freshAllowance !== Number(budget.daily_allowance)) {
-      await client.query("UPDATE budgets SET daily_allowance = $1 WHERE id = $2", [freshAllowance, budget.id]);
-      budget.daily_allowance = String(freshAllowance);
-    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -149,241 +192,85 @@ export async function getActiveBudget(userId: string): Promise<(BudgetRow & { re
   } finally {
     client.release();
   }
-
-  const remainingDays = remainingDaysFor(budget.end_date);
-  return { ...budget, remainingDays };
+  return toBudgetView(budget);
 }
 
 /**
- * Atomically deducts `amount` from the caller's active budget — this
- * is what a paid meal order actually does to a student's plan.
- * SELECT...FOR UPDATE locks the budget row so two near-simultaneous
- * orders can never both read the same remaining_amount and both
- * succeed when only one should.
+ * Pure rollover math (unit-testable). Carry-forward is automatic and additive.
+ * At a day boundary:
+ *
+ *   carried_new = max(0, allowance + carried_old - spent_on_last_active_day)   // unused part of that day's pool
+ *               + (fully skipped days) x allowance                              // days nobody touched the app
+ *               + legacy pending_tomorrow_amount + legacy pending_rollover_amount  // retired fields, folded in once
+ *
+ * capped at remaining_amount. Outstanding holds (reserved_amount) are NOT spent,
+ * so they stay inside the carry and keep being subtracted from "available" until
+ * settled or released — never double-counted. A plan never touched before uses
+ * start_date as its baseline so untouched days still carry forward.
  */
+export function computeRollover(
+  budget: Pick<
+    BudgetRow,
+    "daily_allowance" | "banked_amount" | "spent_today" | "remaining_amount" | "pending_tomorrow_amount" | "pending_rollover_amount" | "last_spend_date" | "start_date"
+  >,
+  today: string
+): { changed: boolean; dayAdvanced: boolean; bankedCents: number } {
+  const last = dateOnly(budget.last_spend_date as string | Date | null);
+  const base = last ?? dateOnly(budget.start_date as string | Date)!;
+  const elapsed = daysBetweenDates(base, today);
+  const allowance = toCents(budget.daily_allowance);
+  const carriedOld = toCents(budget.banked_amount);
+  const legacyRollover = toCents(budget.pending_rollover_amount);
+  const remaining = toCents(budget.remaining_amount);
+
+  if (last !== today && elapsed > 0) {
+    const unused = Math.max(0, allowance + carriedOld - toCents(budget.spent_today));
+    const skipped = (elapsed - 1) * allowance;
+    const banked = Math.min(remaining, unused + skipped + toCents(budget.pending_tomorrow_amount) + legacyRollover);
+    return { changed: true, dayAdvanced: true, bankedCents: banked };
+  }
+  if (legacyRollover > 0) {
+    return { changed: true, dayAdvanced: false, bankedCents: Math.min(remaining, carriedOld + legacyRollover) };
+  }
+  // Same day (or a first touch on the start day): nothing to carry.
+  return { changed: last === null && elapsed === 0, dayAdvanced: false, bankedCents: carriedOld };
+}
+
 /**
- * Catches the budget up to the current date, lazily — there's no cron
- * job "closing out the day" at midnight; instead, whenever the budget
- * is touched (read or spent against), this catches it up first. This
- * is what makes it safe against clock games: the server's own
- * CURRENT_DATE is the only clock that matters, never anything the
- * client sends.
- *
- * Unused daily allowance from a day that's now passed does NOT
- * auto-credit to banked_amount here — it accumulates in
- * pending_rollover_amount instead, and only becomes spendable once
- * the student explicitly confirms it (see confirmRollover/
- * declineRollover below and StudentHomeScreen's rollover prompt).
- * Handles gaps of more than one day correctly (e.g. a student who
- * doesn't open the app for 3 days doesn't lose that pending amount —
- * each fully-skipped day's ENTIRE daily_allowance adds to the pending
- * total, still awaiting one combined decision).
- *
- * pending_tomorrow_amount is different: it's an already-explicit
- * manual transfer the student confirmed on a previous day (see
- * transferRemainingToNextDay below), so it keeps crediting into
- * banked_amount automatically here, unaffected by this gate.
- *
- * Must be called with a client already inside a transaction that has
- * the budget row locked (SELECT...FOR UPDATE) — this function itself
- * doesn't lock, it assumes the caller already did.
+ * Catches the budget up to the current Africa/Nairobi date, lazily (no midnight
+ * job). Idempotent per calendar day: once last_spend_date = today, carried money
+ * is never changed again. Must be called with the budget row locked FOR UPDATE.
  */
-async function applyDailyRollover(client: import("pg").PoolClient, budget: BudgetRow): Promise<BudgetRow> {
-  // Business-timezone "today" (L9) — the server's clock, never the client's.
+async function applyDailyRollover(client: DbClient, budget: BudgetRow): Promise<BudgetRow> {
   const today: string = businessDate();
+  const r = computeRollover(budget, today);
+  if (!r.changed) return budget;
 
-  // node-postgres parses the DATE column as a JS Date object by
-  // default, not the plain "YYYY-MM-DD" string this file's own
-  // BudgetRow type claims — comparing it to `today` directly with
-  // `===` never matched, so this "already caught up" guard never
-  // actually short-circuited and the rollover math below ran on
-  // EVERY read, crediting banked_amount again and again instead of
-  // once per calendar day. Normalizing to the same string shape
-  // before comparing fixes it (safe for a string, a Date, or null).
-  const lastSpendDate: string | null = dateOnly(budget.last_spend_date as string | Date | null);
-
-  if (lastSpendDate === today) {
-    return budget; // Already caught up — the common case, no write needed.
-  }
-
-  const dailyAllowance = Number(budget.daily_allowance);
-  let pendingRollover = Number(budget.pending_rollover_amount);
-
-  if (lastSpendDate === null) {
-    // First-ever spend on this budget — nothing to roll over yet,
-    // just start tracking from today.
-  } else {
-    const daysElapsed = Math.max(1, daysBetweenDates(lastSpendDate, today));
-    const unusedFromLastActiveDay = Math.max(0, dailyAllowance - Number(budget.spent_today));
-    const fullySkippedDays = daysElapsed - 1;
-    pendingRollover =
-      Math.round((pendingRollover + unusedFromLastActiveDay + fullySkippedDays * dailyAllowance) * 100) / 100;
-  }
-
-  // A day has genuinely passed — this is the ONE moment any manually
-  // transferred amount (via transferRemainingToNextDay) actually
-  // becomes spendable. Before this point, pending_tomorrow_amount is
-  // deliberately excluded from every "available today" calculation.
-  // Unlike the silent rollover above, this was already explicitly
-  // confirmed by the student on a previous day, so it credits
-  // straight into banked_amount without a second confirmation.
-  const pendingTomorrow = Number(budget.pending_tomorrow_amount);
-  const banked = Math.round((Number(budget.banked_amount) + pendingTomorrow) * 100) / 100;
-
-  // Hard invariant, independent of how the math above got here: a
-  // plan can never roll over more than it actually has left. Without
-  // this, any future bug in the day-crossing arithmetic (or a stale
-  // daily_allowance read at just the wrong moment) turns directly into
-  // a student being able to spend far more in one day than the plan
-  // was ever meant to release — this clamp makes that impossible
-  // regardless of what upstream produced pendingRollover/banked.
-  const remaining = Number(budget.remaining_amount);
-  const cappedPendingRollover = Math.min(pendingRollover, remaining);
-  const cappedBanked = Math.min(banked, remaining);
-
-  const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET spent_today = 0, last_spend_date = $1, banked_amount = $2, pending_tomorrow_amount = 0, pending_rollover_amount = $3, updated_at = now()
-     WHERE id = $4 RETURNING *`,
-    [today, cappedBanked, cappedPendingRollover, budget.id]
-  );
+  const updated = r.dayAdvanced
+    ? await client.query<BudgetRow>(
+        `UPDATE budgets SET spent_today = 0, last_spend_date = $1, banked_amount = $2,
+                pending_tomorrow_amount = 0, pending_rollover_amount = 0, updated_at = now()
+         WHERE id = $3 RETURNING *`,
+        [today, centsToStr(r.bankedCents), budget.id]
+      )
+    : await client.query<BudgetRow>(
+        `UPDATE budgets SET last_spend_date = $1, banked_amount = $2, pending_rollover_amount = 0, updated_at = now()
+         WHERE id = $3 RETURNING *`,
+        [today, centsToStr(r.bankedCents), budget.id]
+      );
   return updated.rows[0];
 }
 
 /**
- * The student's explicit answer to "carry this over?" (see
- * applyDailyRollover above for why this exists instead of
- * auto-crediting). Confirming moves pending_rollover_amount into
- * banked_amount, where it finally becomes spendable.
+ * RETIRED (Stage 1). Carry-forward is now automatic, so the student no longer
+ * confirms it. Kept as an idempotent read so an older cached client calling the
+ * endpoint just gets the current, correct budget (any legacy pending amount is
+ * folded into carry-forward by the rollover).
  */
-export async function confirmRollover(userId: string): Promise<BudgetRow & { remainingDays: number }> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<BudgetRow>(
-      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
-      [userId]
-    );
-    let budget = result.rows[0];
-    if (!budget) {
-      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
-    }
-    budget = await applyDailyRollover(client, budget);
-
-    const pending = Number(budget.pending_rollover_amount);
-    if (pending > 0) {
-      const newBanked = Math.min(
-        Math.round((Number(budget.banked_amount) + pending) * 100) / 100,
-        Number(budget.remaining_amount)
-      );
-      const updated = await client.query<BudgetRow>(
-        `UPDATE budgets SET banked_amount = $1, pending_rollover_amount = 0, updated_at = now()
-         WHERE id = $2 RETURNING *`,
-        [newBanked, budget.id]
-      );
-      budget = updated.rows[0];
-    }
-
-    await client.query("COMMIT");
-    const remainingDays = remainingDaysFor(budget.end_date);
-    return { ...budget, remainingDays };
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Declining forfeits pending_rollover_amount — it's dropped, not
- * banked, and can never be spent (see the updated Mealvest terms
- * disclaimer in BudgetOnboardingScreen: carry-forward is no longer
- * unconditional, the student decides each time).
- */
-export async function declineRollover(userId: string): Promise<BudgetRow & { remainingDays: number }> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<BudgetRow>(
-      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
-      [userId]
-    );
-    let budget = result.rows[0];
-    if (!budget) {
-      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
-    }
-    budget = await applyDailyRollover(client, budget);
-
-    if (Number(budget.pending_rollover_amount) > 0) {
-      const updated = await client.query<BudgetRow>(
-        `UPDATE budgets SET pending_rollover_amount = 0, updated_at = now()
-         WHERE id = $1 RETURNING *`,
-        [budget.id]
-      );
-      budget = updated.rows[0];
-    }
-
-    await client.query("COMMIT");
-    const remainingDays = remainingDaysFor(budget.end_date);
-    return { ...budget, remainingDays };
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * The manual "transfer remaining to next day" action — a student
- * tapping "Available today" and confirming. Unlike the automatic
- * rollover, this happens mid-day, at the student's request, and the
- * whole point is that the money stops being spendable RIGHT NOW, not
- * at the next real day boundary. So it goes into
- * pending_tomorrow_amount (invisible to today's spendable total),
- * and `spent_today` is set to fully consume today's allowance —
- * `spent_today` already means "no longer available today" regardless
- * of whether that's because it was spent on a meal or given away, so
- * this is consistent with what that field already represents
- * elsewhere in this file.
- */
-export async function transferRemainingToNextDay(userId: string): Promise<BudgetRow> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query<BudgetRow>(
-      "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
-      [userId]
-    );
-    let budget = result.rows[0];
-    if (!budget) {
-      throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
-    }
-    budget = await applyDailyRollover(client, budget);
-
-    const spendableToday =
-      Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today)) * 100) / 100;
-
-    if (spendableToday <= 0) {
-      throw new ApiError(400, "NOTHING_TO_TRANSFER", "There's nothing left today to transfer.");
-    }
-
-    const newSpentToday = Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount)) * 100) / 100;
-    const newPendingTomorrow = Math.round((Number(budget.pending_tomorrow_amount) + spendableToday) * 100) / 100;
-
-    const updated = await client.query<BudgetRow>(
-      `UPDATE budgets SET spent_today = $1, pending_tomorrow_amount = $2, updated_at = now()
-       WHERE id = $3 RETURNING *`,
-      [newSpentToday, newPendingTomorrow, budget.id]
-    );
-    await client.query("COMMIT");
-    return updated.rows[0];
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
+export async function confirmRollover(userId: string): Promise<BudgetView> {
+  const budget = await getActiveBudget(userId);
+  if (!budget) throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
+  return budget;
 }
 
 export interface DeductionResult {
@@ -393,18 +280,32 @@ export interface DeductionResult {
   lowBalance: boolean;
 }
 
+/** Throws the same two errors a spend/hold has always thrown, measured against what is still FREE. */
+function assertFits(budget: BudgetRow, amountCents: number, noun: "order" | "meal"): void {
+  const a = computeAvailability(budget);
+  if (amountCents > a.rawAvailable) {
+    throw new ApiError(
+      402,
+      "DAILY_LIMIT_EXCEEDED",
+      `This ${noun} costs more than today's available balance (${centsToNumber(Math.max(0, a.rawAvailable))} left today, including any carried-forward amount and after meal passes already held).`
+    );
+  }
+  if (amountCents > a.freePlan) {
+    throw new ApiError(402, "INSUFFICIENT_BALANCE", `This ${noun} costs more than your remaining plan balance.`);
+  }
+}
+
 /**
- * Deducts `amount` from the student's active budget using the CALLER'S
- * transaction (finding H2). The budget row is locked FOR UPDATE on
- * `client`, so concurrent orders serialize on it and can never both
- * spend the same balance; nothing is committed here — the order
- * payment that called this commits (or rolls back) the deduction and
- * the order status change together.
+ * Deducts `amount` using the CALLER'S transaction (finding H2). The budget row is
+ * locked FOR UPDATE so concurrent orders serialize; nothing is committed here.
+ * A direct spend only increases spent_today (carry-forward is untouched until the
+ * next day boundary) and respects outstanding holds.
  */
 export async function deductFromBudgetInTx(client: DbClient, userId: string, amount: number): Promise<DeductionResult> {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new ApiError(400, "INVALID_ARGUMENT", "Deduction amount must be greater than zero.");
   }
+  const amountCents = toCents(amount);
   const result = await client.query<BudgetRow>(
     "SELECT * FROM budgets WHERE user_id = $1 AND status = 'active' LIMIT 1 FOR UPDATE",
     [userId]
@@ -413,55 +314,29 @@ export async function deductFromBudgetInTx(client: DbClient, userId: string, amo
   if (!budget) {
     throw new ApiError(404, "BUDGET_NOT_FOUND", "You don't have an active meal plan.");
   }
-
   budget = await applyDailyRollover(client, budget);
+  assertFits(budget, amountCents, "order");
 
-  // Two independent caps, both must pass: today's spendable amount
-  // (daily_allowance + whatever rolled in from past days), AND the
-  // budget's total remaining_amount.
-  const spendableToday =
-    Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today)) * 100) / 100;
-
-  if (amount > spendableToday) {
-    throw new ApiError(
-      402,
-      "DAILY_LIMIT_EXCEEDED",
-      `This order costs more than today's available balance (${spendableToday} left today, including any rolled-over amount).`
-    );
-  }
-  if (Number(budget.remaining_amount) < amount) {
-    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This order costs more than your remaining plan balance.");
-  }
-
-  const newRemaining = Math.round((Number(budget.remaining_amount) - amount) * 100) / 100;
-  const newSpent = Math.round((Number(budget.amount_spent) + amount) * 100) / 100;
-  const newSpentToday = Math.round((Number(budget.spent_today) + amount) * 100) / 100;
-  // If today's spend eats into the banked rollover, draw it down so it
-  // can't be double-counted as still-available tomorrow.
-  const bankedUsedToday = Math.max(0, newSpentToday - Number(budget.daily_allowance));
-  const newBanked = Math.round((Number(budget.banked_amount) - bankedUsedToday) * 100) / 100;
-
-  // The WHERE clause re-asserts the balance condition so the database
-  // itself refuses an overspend even if the arithmetic above were wrong.
+  // NUMERIC arithmetic in SQL; the WHERE re-asserts the free-balance condition so
+  // the database itself refuses an overspend even if the checks above were wrong.
   const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET remaining_amount = $1, amount_spent = $2, spent_today = $3, banked_amount = $4, updated_at = now()
-     WHERE id = $5 AND status = 'active' AND remaining_amount >= $6
+    `UPDATE budgets SET remaining_amount = remaining_amount - $1::numeric,
+            amount_spent = amount_spent + $1::numeric,
+            spent_today = spent_today + $1::numeric, updated_at = now()
+     WHERE id = $2 AND status = 'active' AND (remaining_amount - reserved_amount) >= $1::numeric
      RETURNING *`,
-    [newRemaining, newSpent, newSpentToday, Math.max(0, newBanked), budget.id, amount]
+    [centsToStr(amountCents), budget.id]
   );
   if (updated.rows.length === 0) {
     throw new ApiError(402, "INSUFFICIENT_BALANCE", "This order costs more than your remaining plan balance.");
   }
 
   const updatedBudget = updated.rows[0];
-  // Same "below a quarter of today's daily amount" threshold the
-  // student dashboard's credit-ring colour coding uses.
-  const spendableTodayAfter =
-    Math.round((Number(updatedBudget.daily_allowance) + Number(updatedBudget.banked_amount) - Number(updatedBudget.spent_today)) * 100) / 100;
+  const after = computeAvailability(updatedBudget);
   return {
     budget: updatedBudget,
-    spendableTodayAfter,
-    lowBalance: spendableTodayAfter < Number(updatedBudget.daily_allowance) / 4,
+    spendableTodayAfter: centsToNumber(after.availableToday),
+    lowBalance: after.availableToday < after.allowance / 4,
   };
 }
 
@@ -525,45 +400,31 @@ export async function reserveFromBudgetInTx(client: DbClient, userId: string, am
   }
   budget = await applyDailyRollover(client, budget);
 
-  const reserved = Number(budget.reserved_amount);
-  const freeToday =
-    Math.round((Number(budget.daily_allowance) + Number(budget.banked_amount) - Number(budget.spent_today) - reserved) * 100) /
-    100;
-  const freePlan = Math.round((Number(budget.remaining_amount) - reserved) * 100) / 100;
+  const amountCents = toCents(amount);
+  // Measured against what is still FREE after existing holds (today's available
+  // and the free plan balance), so held money can never be reserved/spent twice.
+  assertFits(budget, amountCents, "meal");
 
-  if (amount > freeToday) {
-    throw new ApiError(
-      402,
-      "DAILY_LIMIT_EXCEEDED",
-      `This meal costs more than today's available balance (${Math.max(0, freeToday)} left today, including any rolled-over amount and after meal passes already held).`
-    );
-  }
-  if (amount > freePlan) {
-    throw new ApiError(402, "INSUFFICIENT_BALANCE", "This meal costs more than your remaining plan balance.");
-  }
-
-  const newReserved = Math.round((reserved + amount) * 100) / 100;
-  // The WHERE re-asserts the free-plan condition against the row's CURRENT
-  // (pre-update) reserved_amount, so the database itself refuses an over-hold.
+  // NUMERIC arithmetic in SQL. The WHERE re-asserts the free-plan condition
+  // against the row's CURRENT reserved_amount, so the database itself refuses
+  // an over-hold.
   const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET reserved_amount = $1, updated_at = now()
-     WHERE id = $2 AND status = 'active' AND (remaining_amount - reserved_amount) >= $3
+    `UPDATE budgets SET reserved_amount = reserved_amount + $1::numeric, updated_at = now()
+     WHERE id = $2 AND status = 'active' AND (remaining_amount - reserved_amount) >= $1::numeric
      RETURNING *`,
-    [newReserved, budget.id, amount]
+    [centsToStr(amountCents), budget.id]
   );
   if (updated.rows.length === 0) {
     throw new ApiError(402, "INSUFFICIENT_BALANCE", "This meal costs more than your remaining plan balance.");
   }
 
   const b = updated.rows[0];
-  const spendableTodayAfter =
-    Math.round((Number(b.daily_allowance) + Number(b.banked_amount) - Number(b.spent_today) - Number(b.reserved_amount)) * 100) /
-    100;
+  const after = computeAvailability(b);
   return {
     budget: b,
     budgetId: b.id,
-    spendableTodayAfter,
-    lowBalance: spendableTodayAfter < Number(b.daily_allowance) / 4,
+    spendableTodayAfter: centsToNumber(after.availableToday),
+    lowBalance: after.availableToday < after.allowance / 4,
   };
 }
 
@@ -571,7 +432,7 @@ export async function reserveFromBudgetInTx(client: DbClient, userId: string, am
  * Settles a previously-held amount into a real spend — called inside
  * redeemOrderByQr's transaction when the hotel scans the QR. Moves the money
  * out of reserved_amount and into the spend ledger (remaining/amount_spent/
- * spent_today, drawing down banked exactly as deductFromBudgetInTx does). No
+ * spent_today; carry-forward is untouched). No
  * cap re-check: the hold already guaranteed the funds, and remaining_amount has
  * not moved since. Returns null if the budget is no longer active (rare: e.g.
  * the plan was withdrawn after the hold) so the caller can still complete the
@@ -587,18 +448,21 @@ export async function settleReservationInTx(client: DbClient, budgetId: string, 
 
   budget = await applyDailyRollover(client, budget);
 
-  const newRemaining = Math.max(0, Math.round((Number(budget.remaining_amount) - amount) * 100) / 100);
-  const newSpent = Math.round((Number(budget.amount_spent) + amount) * 100) / 100;
-  const newSpentToday = Math.round((Number(budget.spent_today) + amount) * 100) / 100;
-  const bankedUsedToday = Math.max(0, newSpentToday - Number(budget.daily_allowance));
-  const newBanked = Math.max(0, Math.round((Number(budget.banked_amount) - bankedUsedToday) * 100) / 100);
-  const newReserved = Math.max(0, Math.round((Number(budget.reserved_amount) - amount) * 100) / 100);
-
+  // The money moves out of the hold and into the spend ledger, exactly once
+  // (the caller gates on the order's status under its row lock). Only
+  // spent_today grows — carry-forward (banked_amount) is NOT touched here, which
+  // is what previously deducted carried money twice. NUMERIC arithmetic in SQL;
+  // LEAST/GREATEST keep remaining/reserved from ever going negative so a meal
+  // the hotel already served can still be completed.
   const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET remaining_amount = $1, amount_spent = $2, spent_today = $3, banked_amount = $4,
-            reserved_amount = $5, updated_at = now()
-     WHERE id = $6 RETURNING *`,
-    [newRemaining, newSpent, newSpentToday, newBanked, newReserved, budgetId]
+    `UPDATE budgets SET
+            amount_spent = amount_spent + LEAST($2::numeric, remaining_amount),
+            spent_today = spent_today + LEAST($2::numeric, remaining_amount),
+            remaining_amount = GREATEST(0, remaining_amount - $2::numeric),
+            reserved_amount = GREATEST(0, reserved_amount - $2::numeric),
+            updated_at = now()
+     WHERE id = $1 RETURNING *`,
+    [budgetId, centsToStr(toCents(amount))]
   );
   return updated.rows[0];
 }
@@ -614,7 +478,7 @@ export async function releaseReservationInTx(client: DbClient, budgetId: string,
   await client.query(
     `UPDATE budgets SET reserved_amount = GREATEST(0, reserved_amount - $2), updated_at = now()
      WHERE id = $1`,
-    [budgetId, Math.round(amount * 100) / 100]
+    [budgetId, centsToStr(toCents(amount))]
   );
 }
 
@@ -629,7 +493,7 @@ export async function releaseExpiredReservations(): Promise<{ released: number }
   const ttlMinutes = Number(process.env.ORDER_HOLD_TTL_MINUTES) || 30;
   const candidates = await pool.query<{ id: string }>(
     `SELECT id FROM orders
-     WHERE status = 'paid' AND budget_id IS NOT NULL
+     WHERE status IN ('paid', 'ready') AND budget_id IS NOT NULL
        AND reserved_at IS NOT NULL AND reserved_at < now() - ($1 || ' minutes')::interval
      LIMIT 500`,
     [String(ttlMinutes)]
@@ -642,12 +506,12 @@ export async function releaseExpiredReservations(): Promise<{ released: number }
       await client.query("BEGIN");
       const o = await client.query("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [id]);
       const order = o.rows[0];
-      if (!order || order.status !== "paid") {
+      if (!order || (order.status !== "paid" && order.status !== "ready")) {
         await client.query("COMMIT");
         continue;
       }
       await client.query(
-        "UPDATE orders SET status = 'cancelled', idempotency_key = NULL, updated_at = now() WHERE id = $1",
+        "UPDATE orders SET status = 'cancelled', idempotency_key = NULL, updated_at = now() WHERE id = $1 AND status IN ('paid', 'ready')",
         [id]
       );
       if (order.budget_id) {
@@ -667,9 +531,9 @@ export async function releaseExpiredReservations(): Promise<{ released: number }
 /**
  * Meal Boost / top-up credit — adds `amount` to an ACTIVE budget inside
  * the CALLER'S transaction (the payment-activation transaction, H1), so
- * the payment's success flip and the credit commit together. Only
- * total_amount and remaining_amount move; daily_allowance is recomputed
- * on the next read (getActiveBudget).
+ * the payment's success flip and the credit commit together. total_amount and
+ * remaining_amount grow by the boost and the FIXED daily_allowance is raised by
+ * boost / days left (see the body). Nothing else is redistributed.
  *
  * Returns null (instead of throwing) when the budget is no longer
  * active, so activation can decide what to do with the money rather
@@ -683,16 +547,25 @@ export async function applyBoostInTx(client: DbClient, budgetId: string, amount:
     "SELECT * FROM budgets WHERE id = $1 AND status = 'active' FOR UPDATE",
     [budgetId]
   );
-  const budget = result.rows[0];
+  let budget = result.rows[0];
   if (!budget) return null;
 
-  const newTotal = Math.round((Number(budget.total_amount) + amount) * 100) / 100;
-  const newRemaining = Math.round((Number(budget.remaining_amount) + amount) * 100) / 100;
+  // Catch up to today FIRST so any skipped days are carried at the OLD fixed
+  // allowance, before the boost changes it.
+  budget = await applyDailyRollover(client, budget);
+
+  // Approved rule: a boost raises the FIXED daily allowance by boost / days left
+  // (counting today, min 1). Floored to the cent; any sub-cent remainder stays in
+  // remaining_amount (withdrawable). Existing carry-forward is never redistributed.
+  const boostCents = toCents(amount);
+  const increment = Math.floor(boostCents / remainingDaysFor(budget.end_date));
 
   const updated = await client.query<BudgetRow>(
-    `UPDATE budgets SET total_amount = $1, remaining_amount = $2, updated_at = now()
+    `UPDATE budgets SET total_amount = total_amount + $1::numeric,
+            remaining_amount = remaining_amount + $1::numeric,
+            daily_allowance = daily_allowance + $2::numeric, updated_at = now()
      WHERE id = $3 RETURNING *`,
-    [newTotal, newRemaining, budgetId]
+    [centsToStr(boostCents), centsToStr(increment), budgetId]
   );
   return updated.rows[0];
 }

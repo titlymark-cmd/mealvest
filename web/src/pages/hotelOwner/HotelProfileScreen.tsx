@@ -65,7 +65,7 @@ const reduceMotion = () => typeof window !== "undefined" && window.matchMedia?.(
  *
  * Read-only by design (no owner write path exists on the backend): hotel
  * name, registration/agreement terms and settlement details — these live in
- * the cream "On file" card. MEALVEST's commission is intentionally never
+ * the cream "On file" card. MEALVEST's payout fee is intentionally never
  * shown to hotels (see hotel.controller.ts).
  */
 export default function HotelProfileScreen() {

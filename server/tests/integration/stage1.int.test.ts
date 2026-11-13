@@ -326,6 +326,35 @@ describe("H2 atomic meal payment", { skip }, () => {
     await assert.rejects(m.order.redeemOrderByQr(row.qr_token, h.id, (await makeUser("hotel_owner")).id), /not been paid/);
   });
 
+  test("an expired ready pass is cancelled and cannot be redeemed", async () => {
+    const s = await makeUser();
+    const h = await makeHotel(40);
+    const staff = await makeUser("hotel_owner");
+    await fund(s.id, 3000, 30);
+    const created = await m.order.createOrder({ userId: s.id, hotelId: h.id, lines: [{ itemId: h.itemId, quantity: 1 }] });
+    const paid = await m.order.payOrderFromBudget(created.id, s.id);
+    await m.order.markOrderReady(paid.id, h.id);
+    await q("UPDATE orders SET reserved_at = now() - interval '31 minutes' WHERE id = $1", [paid.id]);
+
+    const originalTtl = process.env.ORDER_HOLD_TTL_MINUTES;
+    process.env.ORDER_HOLD_TTL_MINUTES = "30";
+    try {
+      await assert.rejects(m.order.verifyOrderQr(paid.qr_token, h.id), (err: any) => err.code === "ORDER_EXPIRED");
+      await assert.rejects(m.order.redeemOrderByQr(paid.qr_token, h.id, staff.id), (err: any) => err.code === "ORDER_EXPIRED");
+      const result = await m.budget.releaseExpiredReservations();
+      assert.equal(result.released, 1);
+    } finally {
+      if (originalTtl === undefined) delete process.env.ORDER_HOLD_TTL_MINUTES;
+      else process.env.ORDER_HOLD_TTL_MINUTES = originalTtl;
+    }
+
+    assert.equal((await q("SELECT status FROM orders WHERE id = $1", [paid.id]))[0].status, "cancelled");
+    const budget = await activeBudget(s.id);
+    assert.equal(Number(budget.reserved_amount), 0);
+    assert.equal(Number(budget.spent_today), 0);
+    await assert.rejects(m.order.redeemOrderByQr(paid.qr_token, h.id, staff.id), /not been paid/);
+  });
+
   test("paying the same order 10 times concurrently holds once; scanning settles once", async () => {
     const s = await makeUser();
     const h = await makeHotel(25);

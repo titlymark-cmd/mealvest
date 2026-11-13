@@ -6,7 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
 import { createHotel } from "../../services/adminApi";
 import { SettlementInput } from "../../services/authApi";
-import { DEFAULT_COMMISSION_PERCENT, PayoutMode, isValidPayoutTime, payoutConfigPayload } from "../../utils/payoutMode";
+import { PAYOUT_FEE_PERCENT, isValidPayoutTime, payoutConfigPayload } from "../../utils/payoutMode";
 
 // Narrower than ADMIN_MOBILE_BREAKPOINT on purpose — the modal panel
 // itself is capped at 600px wide, so its two-column field rows only
@@ -49,7 +49,6 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} style={{ ...styles.input, ...props.style }} />;
 }
 
-/** A selectable chip — gradient when active, translucent outline otherwise. */
 function SelectPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
     <button type="button" onClick={onPress} style={active ? styles.pillActive : styles.pill}>
@@ -96,9 +95,7 @@ export function AddHotelModal({ onClose, onCreated }: { onClose: () => void; onC
   const [bankBranch, setBankBranch] = useState("");
 
   const [registrationFee, setRegistrationFee] = useState("500");
-  const [commissionPercent, setCommissionPercent] = useState(""); // blank = payout-mode default
-  const [payoutMode, setPayoutMode] = useState<PayoutMode>("instant");
-  const [payoutTime, setPayoutTime] = useState("");
+  const [payoutTime, setPayoutTime] = useState("18:00");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -135,7 +132,7 @@ export function AddHotelModal({ onClose, onCreated }: { onClose: () => void; onC
   const valid =
     name.trim() && ownerContactName.trim() && phone.trim() && email.trim() &&
     adminUsername.trim() && password.length >= 8 && /^\d{4}$/.test(pin) && settlementValid &&
-    (payoutMode === "instant" || isValidPayoutTime(payoutTime));
+    isValidPayoutTime(payoutTime);
 
   const submit = async () => {
     if (!valid) return;
@@ -154,8 +151,7 @@ export function AddHotelModal({ onClose, onCreated }: { onClose: () => void; onC
         pin,
         payment: buildSettlement(),
         registrationFee: Number(registrationFee) || 0,
-        commissionPercent: commissionPercent.trim() === "" ? undefined : Number(commissionPercent),
-        payout: payoutConfigPayload(payoutMode, payoutTime),
+        payout: payoutConfigPayload(payoutTime),
         termsAccepted: true,
       });
       onCreated();
@@ -340,23 +336,15 @@ export function AddHotelModal({ onClose, onCreated }: { onClose: () => void; onC
             <Field label="Registration fee (KSh)">
               <Input value={registrationFee} onChange={(e) => setRegistrationFee(e.target.value)} inputMode="numeric" />
             </Field>
-            <Field label={`Commission override % (0-30; blank = default ${DEFAULT_COMMISSION_PERCENT[payoutMode]}%)`}>
-              <Input value={commissionPercent} onChange={(e) => setCommissionPercent(e.target.value)} inputMode="decimal" placeholder={`${DEFAULT_COMMISSION_PERCENT[payoutMode]} (default)`} />
+            <Field label="MEALVEST payout fee">
+              <span style={styles.label}>Fixed at {PAYOUT_FEE_PERCENT}% of redeemed meal sales</span>
             </Field>
           </div>
           <span style={styles.sectionLabel}>PAYOUT SCHEDULE</span>
           <div style={row2Style}>
-            <Field label="Payout mode">
-              <div style={{ display: "flex", gap: 8 }}>
-                <SelectPill label="Instant" active={payoutMode === "instant"} onPress={() => setPayoutMode("instant")} />
-                <SelectPill label="Daily" active={payoutMode === "daily"} onPress={() => setPayoutMode("daily")} />
-              </div>
+            <Field label="Daily payout time (EAT)">
+              <Input type="time" value={payoutTime} onChange={(e) => setPayoutTime(e.target.value)} />
             </Field>
-            {payoutMode === "daily" && (
-              <Field label="Daily payout time (EAT)">
-                <Input type="time" value={payoutTime} onChange={(e) => setPayoutTime(e.target.value)} />
-              </Field>
-            )}
           </div>
 
           {error && <p style={styles.errorText}>{error}</p>}

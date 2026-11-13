@@ -8,7 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import {
   fetchPendingPayoutsOverview,
   fetchPayoutHistory,
-  triggerPayout,
+  retryFailedPayout,
   refreshPayoutStatus,
   approvePayout,
   cancelPayout,
@@ -78,7 +78,7 @@ function timeAgo(iso: string): string {
  * Payouts are now created AUTOMATICALLY by the server once a hotel's
  * unpaid earnings reach the payout threshold, so this screen is for
  * MONITORING (status, failures, reconciliation) plus a manual "Pay out"
- * fallback to retry. Payouts in flight are re-read on a timer because
+ * retry only for a confirmed failed payout. Payouts in flight are re-read on a timer because
  * their final status arrives later via the provider's webhook — without
  * that, a payout that succeeded would keep showing "processing" until
  * the page was reloaded.
@@ -131,19 +131,6 @@ export default function AdminPayoutsScreen() {
     };
   }, [hasInFlight, load]);
 
-  const handleTrigger = async (hotelId: string) => {
-    setError(null);
-    setActingOn(hotelId);
-    try {
-      await triggerPayout(authFetch, hotelId);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not trigger this payout.");
-    } finally {
-      setActingOn(null);
-    }
-  };
-
   const handleRefresh = async (payoutId: string) => {
     setActingOn(payoutId);
     try {
@@ -175,6 +162,21 @@ export default function AdminPayoutsScreen() {
     }
   };
 
+  const handleRetry = async (payoutId: string) => {
+    const p = history.find((x) => x.id === payoutId);
+    if (!window.confirm(`Retry the confirmed failed payout for ${p?.hotel_name ?? "this hotel"}?`)) return;
+    setError(null);
+    setActingOn(payoutId);
+    try {
+      await retryFailedPayout(authFetch, payoutId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not retry this failed payout.");
+    } finally {
+      setActingOn(null);
+    }
+  };
+
   if (loading) {
     return (
       <div style={styles.center}>
@@ -191,9 +193,9 @@ export default function AdminPayoutsScreen() {
       </div>
       <p style={styles.subtitle}>
         {autoEnabled === false
-          ? "Automatic payouts are currently OFF — use Pay out to send a hotel's balance."
+          ? "The daily payout scheduler is currently disabled in this environment."
           : thresholdKes !== null
-          ? `Payouts are sent automatically once a hotel's unpaid earnings reach KSh ${thresholdKes.toLocaleString()}. Monitor their status here; use Pay out only to retry.`
+          ? `Eligible balances are processed at each hotel's daily payout time once they reach KSh ${thresholdKes.toLocaleString()}. Monitor status here; failed payouts can be retried after review.`
           : "Review what each hotel is owed and monitor payout status."}
       </p>
 
@@ -210,28 +212,38 @@ export default function AdminPayoutsScreen() {
             typeof h.payout_supported === "boolean"
               ? h.payout_supported
               : Boolean(h.payment_method && ["mpesa_till", "send_money", "pochi_la_biashara"].includes(h.payment_method));
+          const gross = Number(h.pending_gross_amount ?? 0);
+          const fee = Number(h.pending_payout_fee_amount ?? 0);
+          const pendingAmount = Number(h.pending_amount ?? 0);
+          const payoutTimeText = h.payout_time ? `Daily payout at ${formatPayoutTime12(h.payout_time)} EAT` : "Daily payout is scheduled";
+          const isDailyMode = h.payout_mode === "daily" || h.payout_mode == null;
           return (
             <div key={h.hotel_id} style={styles.row}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={styles.rowTitle}>{h.hotel_name}</span>
                 <span style={styles.rowSub}>
                   {h.pending_order_count} redeemed order{h.pending_order_count === "1" ? "" : "s"} awaiting payout
-                  {h.payout_mode === "daily" && ` — Daily payout at ${formatPayoutTime12(h.payout_time)} EAT`}
-                  {h.payout_mode === "daily" && h.below_threshold && thresholdKes !== null && ` — below KSh ${thresholdKes.toLocaleString()}, carries forward`}
-                  {h.payout_mode !== "daily" && h.below_threshold && thresholdKes !== null && ` — accumulating; pays automatically at KSh ${thresholdKes.toLocaleString()}`}
+                  {` — ${payoutTimeText}`}
+                  {isDailyMode && h.below_threshold && thresholdKes !== null && ` — below KSh ${thresholdKes.toLocaleString()}, carries forward`}
                   {!h.below_threshold && h.auto_payout_blocked_reason && ` — automatic payout paused: ${BLOCKED_REASON[h.auto_payout_blocked_reason] ?? h.auto_payout_blocked_reason}`}
-                  {!supported && " — settlement method needs manual payout"}
+                  {!supported && " — settlement method is not enabled for automatic daily payout; update it with support"}
+                  {Number.isFinite(gross) && Number.isFinite(fee) && gross > 0 && fee >= 0 ? ` · Gross KSh ${gross.toLocaleString()} · Fee KSh ${fee.toLocaleString()}` : ""}
                 </span>
               </div>
-              <span style={styles.amount}>KSh {Number(h.pending_amount).toLocaleString()}</span>
+              <span style={styles.amount}>KSh {pendingAmount.toLocaleString()}</span>
               <button
-                className="mv-action"
-                onClick={() => handleTrigger(h.hotel_id)}
-                disabled={actingOn === h.hotel_id || !supported || Boolean(h.below_threshold)}
-                style={{ ...styles.payBtn, opacity: supported && !h.below_threshold ? 1 : 0.4 }}
+                type="button"
+                onClick={() => undefined}
+                disabled={h.below_threshold || !supported}
+                aria-label="Pay out"
+                style={{
+                  ...styles.payBtn,
+                  opacity: h.below_threshold || !supported ? 0.55 : 1,
+                  cursor: h.below_threshold || !supported ? "not-allowed" : "pointer",
+                }}
               >
-                <Send size={13} color="#fff" />
-                <span style={styles.payBtnText}>{actingOn === h.hotel_id ? "Sending…" : "Pay out"}</span>
+                <Wallet size={14} color="#fff" />
+                <span style={styles.payBtnText}>Pay out</span>
               </button>
             </div>
           );
@@ -264,7 +276,9 @@ export default function AdminPayoutsScreen() {
                 {p.transfer_reference} · started {timeAgo(p.created_at)}
                 {(p.status === "successful" || p.status === "failed" || p.status === "cancelled") && ` · ${p.status} ${timeAgo(p.updated_at)}`}
                 {p.transfer_code && ` · provider ref ${p.transfer_code}`}
-                {p.automated ? " · automatic" : ""}
+                {p.automated ? " · automatic daily payout" : " · admin initiated"}
+                {p.gross_amount != null && p.payout_fee_amount != null && Number.isFinite(Number(p.gross_amount)) && Number.isFinite(Number(p.payout_fee_amount)) &&
+                  ` · Gross KSh ${Number(p.gross_amount).toLocaleString()} - fee KSh ${Number(p.payout_fee_amount).toLocaleString()} = net KSh ${Number(p.amount).toLocaleString()}`}
                 {p.needs_attention && p.status === "processing" && " — still processing; check the provider dashboard / webhook delivery"}
                 {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
                 {p.failure_reason && ` — ${p.failure_reason}`}
@@ -285,6 +299,11 @@ export default function AdminPayoutsScreen() {
             {(p.status === "processing" || p.status === "unknown") && (
               <button onClick={() => handleRefresh(p.id)} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Refresh status">
                 <RefreshCw size={13} color={COLORS.primary} />
+              </button>
+            )}
+            {p.status === "failed" && (
+              <button onClick={() => handleRetry(p.id)} disabled={actingOn === p.id} style={styles.refreshBtn} aria-label="Retry failed payout">
+                <Send size={13} color={COLORS.primary} />
               </button>
             )}
           </div>

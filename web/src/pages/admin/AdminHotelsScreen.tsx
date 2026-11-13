@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { PayoutMode, formatPayoutTime12, isValidPayoutTime, payoutConfigPayload } from "../../utils/payoutMode";
+import { PAYOUT_FEE_PERCENT, formatPayoutTime12, isValidPayoutTime, payoutConfigPayload } from "../../utils/payoutMode";
 import { Store, Plus, Pencil, MapPin } from "lucide-react";
 import { Card } from "../../components/Card";
 import { Spinner } from "../../components/Spinner";
@@ -12,7 +12,6 @@ import {
   fetchAdminHotels,
   approveHotel,
   suspendHotel,
-  updateHotelCommission,
   updateHotelPayoutSettings,
   AdminHotel,
 } from "../../services/adminApi";
@@ -37,10 +36,7 @@ export default function AdminHotelsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
-  const [editingCommissionId, setEditingCommissionId] = useState<string | null>(null);
-  const [commissionDraft, setCommissionDraft] = useState("");
   const [editingPayoutId, setEditingPayoutId] = useState<string | null>(null);
-  const [modeDraft, setModeDraft] = useState<PayoutMode>("instant");
   const [timeDraft, setTimeDraft] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showVotingForm, setShowVotingForm] = useState(false);
@@ -91,52 +87,24 @@ export default function AdminHotelsScreen() {
     }
   };
 
-  const startEditCommission = (hotel: AdminHotel) => {
-    setEditingCommissionId(hotel.id);
-    // Blank means "no override": only an explicit override is pre-filled.
-    setCommissionDraft(hotel.commission_is_override ? String(Number(hotel.commission_percent)) : "");
-  };
-
   const startEditPayout = (hotel: AdminHotel) => {
     setEditingPayoutId(hotel.id);
-    setModeDraft(hotel.payout_mode === "daily" ? "daily" : "instant");
     setTimeDraft(hotel.payout_time ?? "");
   };
 
   const savePayout = async (hotelId: string) => {
-    if (modeDraft === "daily" && !isValidPayoutTime(timeDraft)) {
+    if (!isValidPayoutTime(timeDraft)) {
       setError("Choose a valid daily payout time.");
       return;
     }
     setActingOn(hotelId);
     try {
-      await updateHotelPayoutSettings(authFetch, hotelId, payoutConfigPayload(modeDraft, timeDraft));
+      await updateHotelPayoutSettings(authFetch, hotelId, payoutConfigPayload(timeDraft));
       setEditingPayoutId(null);
       setError(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update payout settings.");
-    } finally {
-      setActingOn(null);
-    }
-  };
-
-  const saveCommission = async (hotelId: string) => {
-    // Blank clears the override (mode default applies); a number sets an explicit one.
-    const trimmed = commissionDraft.trim();
-    const value = trimmed === "" ? null : Number(trimmed);
-    if (value !== null && (!Number.isFinite(value) || value < 0 || value > 30)) {
-      setError("Commission must be between 0% and 30%, or blank for the default.");
-      return;
-    }
-    setActingOn(hotelId);
-    try {
-      await updateHotelCommission(authFetch, hotelId, value);
-      setError(null);
-      setEditingCommissionId(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update commission.");
     } finally {
       setActingOn(null);
     }
@@ -306,44 +274,13 @@ export default function AdminHotelsScreen() {
                 {timeAgo(item.created_at)}
               </span>
 
-              {editingCommissionId === item.id ? (
-                <div style={styles.commissionEditRow} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    style={styles.commissionInput}
-                    value={commissionDraft}
-                    onChange={(e) => setCommissionDraft(e.target.value)}
-                    inputMode="numeric"
-                    autoFocus
-                  />
-                  <button onClick={() => saveCommission(item.id)} style={styles.commissionSaveBtn}>
-                    <span style={styles.commissionSaveText}>Save</span>
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startEditCommission(item);
-                  }}
-                  style={styles.commissionRow}
-                >
-                  <span style={styles.commissionText}>
-                    Commission: {Number(item.commission_percent)}% ({item.commission_is_override ? "override" : "default"})
-                  </span>
-                  <Pencil size={10} color={COLORS.textFaint} />
-                </button>
-              )}
-              {editingCommissionId === item.id && (
-                <span style={{ ...styles.commissionText, display: "block", marginTop: 4 }}>Blank = default for the payout mode (15% instant / 10% daily). Max 30.</span>
-              )}
+              <span style={{ ...styles.commissionText, display: "block", marginTop: 8 }}>
+                Payout fee: {PAYOUT_FEE_PERCENT}% (fixed)
+              </span>
 
               {editingPayoutId === item.id ? (
                 <div style={{ ...styles.commissionEditRow, flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
-                  <select aria-label="Payout mode" value={modeDraft} onChange={(e) => setModeDraft(e.target.value as PayoutMode)} style={{ ...styles.commissionInput, width: "auto" }}>
-                    <option value="instant">Instant</option>
-                    <option value="daily">Daily</option>
-                  </select>
-                  {modeDraft === "daily" && <input aria-label="Daily payout time (EAT)" type="time" value={timeDraft} onChange={(e) => setTimeDraft(e.target.value)} style={{ ...styles.commissionInput, width: 110 }} />}
+                  <input aria-label="Daily payout time (EAT)" type="time" value={timeDraft} onChange={(e) => setTimeDraft(e.target.value)} style={{ ...styles.commissionInput, width: 110 }} />
                   <button onClick={() => savePayout(item.id)} disabled={actingOn === item.id} style={styles.commissionSaveBtn}>
                     <span style={styles.commissionSaveText}>Save</span>
                   </button>
@@ -356,7 +293,7 @@ export default function AdminHotelsScreen() {
                   }}
                   style={styles.commissionRow}
                 >
-                  <span style={styles.commissionText}>Payout: {item.payout_mode === "daily" ? `Daily at ${formatPayoutTime12(item.payout_time)} EAT` : "Instant"}</span>
+                  <span style={styles.commissionText}>Payout: Daily at {formatPayoutTime12(item.payout_time)} EAT</span>
                   <Pencil size={10} color={COLORS.textFaint} />
                 </button>
               )}

@@ -16,6 +16,8 @@ export type PayoutStatus =
 export interface HotelPayoutRow {
   id: string;
   hotel_id: string;
+  gross_amount: string | null;
+  payout_fee_amount: string | null;
   amount: string;
   status: PayoutStatus;
   provider: string;
@@ -38,6 +40,8 @@ export interface HotelPendingBalance {
   hotel_name: string;
   payment_method: string | null;
   payment_details: Record<string, unknown> | null;
+  pending_gross_amount: string;
+  pending_payout_fee_amount: string;
   pending_amount: string;
   pending_order_count: string;
   payout_mode: PayoutMode;
@@ -49,6 +53,8 @@ export async function listHotelsWithPendingBalance(): Promise<HotelPendingBalanc
   const result = await pool.query<HotelPendingBalance>(
     `SELECT h.id AS hotel_id, h.name AS hotel_name, h.payment_method, h.payment_details,
             h.payout_mode, to_char(h.payout_time, 'HH24:MI') AS payout_time,
+            COALESCE(SUM(COALESCE(o.hotel_amount, 0) + COALESCE(o.commission_amount, 0)), 0) AS pending_gross_amount,
+            COALESCE(SUM(o.commission_amount), 0) AS pending_payout_fee_amount,
             COALESCE(SUM(o.hotel_amount), 0) AS pending_amount,
             COUNT(o.id) AS pending_order_count
      FROM hotels h
@@ -98,8 +104,8 @@ async function inTx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
 
 /**
  * Atomically claims every redeemed-but-unpaid order for this hotel into
- * ONE new payout row. The hotel row is locked first, so two "Pay out"
- * clicks serialize; the second sees no unclaimed orders (or hits the
+ * ONE new payout row. The hotel row is locked first, so concurrent
+ * scheduled runs serialize; the second sees no unclaimed orders (or hits the
  * one-unsent-payout-per-hotel index) and never reaches the provider.
  *
  * The total is summed in SQL NUMERIC (exact). Limits are checked here,
@@ -113,7 +119,6 @@ export async function claimPendingOrdersForPayout(
   provider: "paystack" | "cyzora",
   limits: PayoutLimits,
   minTotalKes?: number,
-  requiredMode?: PayoutMode
 ): Promise<HotelPayoutRow | null> {
   return inTx(async (client) => {
     const hotel = await client.query<{ id: string; payout_mode: PayoutMode }>(
@@ -121,12 +126,7 @@ export async function claimPendingOrdersForPayout(
       [hotelId]
     );
     if (hotel.rows.length === 0) return null;
-    // Automatic callers name the mode they act for; the hotel's CURRENT
-    // mode is re-read here under the row lock, so an instant trigger can
-    // never reserve a daily hotel's earnings (or vice versa) even if the
-    // mode changed after the caller looked. Manual admin payouts pass no
-    // mode: an explicit, audited operational action.
-    if (requiredMode !== undefined && hotel.rows[0].payout_mode !== requiredMode) return null;
+    if (hotel.rows[0].payout_mode !== "daily") return null;
 
     const ordersResult = await client.query<{ id: string }>(
       "SELECT id FROM orders WHERE hotel_id = $1 AND redeemed = true AND payout_id IS NULL FOR UPDATE",
@@ -135,11 +135,16 @@ export async function claimPendingOrdersForPayout(
     if (ordersResult.rows.length === 0) return null;
     const orderIds = ordersResult.rows.map((r) => r.id);
 
-    const totalResult = await client.query<{ total: string }>(
-      "SELECT COALESCE(SUM(hotel_amount), 0)::numeric(12,2)::text AS total FROM orders WHERE id = ANY($1::uuid[])",
+    const totalResult = await client.query<{ total: string; gross: string; payout_fee: string }>(
+      `SELECT COALESCE(SUM(hotel_amount), 0)::numeric(12,2)::text AS total,
+              COALESCE(SUM(COALESCE(hotel_amount, 0) + COALESCE(commission_amount, 0)), 0)::numeric(12,2)::text AS gross,
+              COALESCE(SUM(commission_amount), 0)::numeric(12,2)::text AS payout_fee
+         FROM orders WHERE id = ANY($1::uuid[])`,
       [orderIds]
     );
     const total = totalResult.rows[0].total;
+    const gross = totalResult.rows[0].gross;
+    const payoutFee = totalResult.rows[0].payout_fee;
     const totalNum = Number(total);
     if (!Number.isFinite(totalNum) || totalNum <= 0) {
       // Nothing payable (e.g. 100% commission orders) — leave orders unclaimed.
@@ -173,9 +178,10 @@ export async function claimPendingOrdersForPayout(
     let payout: HotelPayoutRow;
     try {
       const payoutResult = await client.query<HotelPayoutRow>(
-        `INSERT INTO hotel_payouts (hotel_id, amount, transfer_reference, initiated_by_admin_id, provider, status, review_reason)
-         VALUES ($1, $2::numeric, $3, $4, $5, $6, $7) RETURNING *`,
-        [hotelId, total, transferReference, initiatedByAdminId, provider, status, reviewReason]
+        `INSERT INTO hotel_payouts
+           (hotel_id, gross_amount, payout_fee_amount, amount, transfer_reference, initiated_by_admin_id, provider, status, review_reason)
+         VALUES ($1, $2::numeric, $3::numeric, $4::numeric, $5, $6, $7, $8, $9) RETURNING *`,
+        [hotelId, gross, payoutFee, total, transferReference, initiatedByAdminId, provider, status, reviewReason]
       );
       payout = payoutResult.rows[0];
     } catch (err) {
@@ -371,33 +377,27 @@ export async function listAllPayouts(staleProcessingMinutes = 120): Promise<Admi
 
 export interface UnpaidBalance {
   total: string; // exact NUMERIC as text, 2dp
+  gross: string;
+  payoutFee: string;
   orderCount: number;
 }
 
-/** Redeemed-but-unclaimed earnings for a hotel — the authoritative "payable balance" (SUM of orders.hotel_amount where payout_id IS NULL). */
+/** Redeemed-but-unclaimed gross, fee, and net earnings for a hotel. */
 export async function getUnpaidBalance(hotelId: string): Promise<UnpaidBalance> {
-  const r = await pool.query<{ total: string; n: string }>(
-    `SELECT COALESCE(SUM(hotel_amount), 0)::numeric(12,2)::text AS total, COUNT(*)::text AS n
+  const r = await pool.query<{ total: string; gross: string; payout_fee: string; n: string }>(
+    `SELECT COALESCE(SUM(hotel_amount), 0)::numeric(12,2)::text AS total,
+            COALESCE(SUM(COALESCE(hotel_amount, 0) + COALESCE(commission_amount, 0)), 0)::numeric(12,2)::text AS gross,
+            COALESCE(SUM(commission_amount), 0)::numeric(12,2)::text AS payout_fee,
+            COUNT(*)::text AS n
        FROM orders WHERE hotel_id = $1 AND redeemed = true AND payout_id IS NULL`,
     [hotelId]
   );
-  return { total: r.rows[0].total, orderCount: Number(r.rows[0].n) };
-}
-
-/**
- * INSTANT hotels whose unpaid balance is already at/above the threshold —
- * the sweep's work list. Daily hotels are excluded on purpose: they are
- * paid only by their scheduled run, never by the catch-all sweep.
- */
-export async function listHotelIdsAtOrAboveThreshold(minKes: number, limit: number): Promise<string[]> {
-  const r = await pool.query<{ hotel_id: string }>(
-    `SELECT o.hotel_id FROM orders o JOIN hotels h ON h.id = o.hotel_id
-      WHERE o.redeemed = true AND o.payout_id IS NULL AND h.payout_mode = 'instant'
-      GROUP BY o.hotel_id HAVING SUM(o.hotel_amount) >= $1::numeric
-      ORDER BY SUM(o.hotel_amount) DESC LIMIT $2`,
-    [minKes, limit]
-  );
-  return r.rows.map((x) => x.hotel_id);
+  return {
+    total: r.rows[0].total,
+    gross: r.rows[0].gross,
+    payoutFee: r.rows[0].payout_fee,
+    orderCount: Number(r.rows[0].n),
+  };
 }
 
 /**

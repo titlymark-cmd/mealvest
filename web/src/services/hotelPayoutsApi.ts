@@ -11,6 +11,8 @@ export interface HotelPendingBalance {
   hotel_name: string;
   payment_method: string | null;
   payment_details: Record<string, unknown> | null;
+  pending_gross_amount: string;
+  pending_payout_fee_amount: string;
   pending_amount: string;
   pending_order_count: string;
   /** Decided server-side for the ACTIVE payout provider (Paystack vs Cyzora automate different settlement methods). */
@@ -19,8 +21,8 @@ export interface HotelPendingBalance {
   below_threshold?: boolean;
   /** Why AUTOMATIC payout is paused for this hotel (e.g. payout_unknown, failure_cooldown, repeated_failures), or null. */
   auto_payout_blocked_reason?: string | null;
-  /** The hotel's authoritative payout mode and (daily) time, "HH:MM" EAT. */
-  payout_mode?: "instant" | "daily";
+  /** The hotel's daily payout time, "HH:MM" EAT. */
+  payout_mode?: "daily";
   payout_time?: string | null;
 }
 
@@ -36,6 +38,8 @@ export interface HotelPayout {
   id: string;
   hotel_id: string;
   hotel_name?: string;
+  gross_amount: string | null;
+  payout_fee_amount: string | null;
   amount: string;
   /**
    * review/approved: held for an admin decision (over a limit) — not sent.
@@ -49,7 +53,7 @@ export interface HotelPayout {
   recipient_code: string | null;
   transfer_code: string | null;
   failure_reason: string | null;
-  /** Created by the automatic trigger (no initiating admin). */
+  /** Created by the daily scheduler (no initiating admin). */
   automated?: boolean;
   /** Unconfirmed outcome, failed recently, or stuck in processing past the stale window. */
   needs_attention?: boolean;
@@ -83,13 +87,9 @@ export async function fetchPayoutHistory(authFetch: AuthFetch): Promise<HotelPay
   return data.payouts;
 }
 
-export async function triggerPayout(authFetch: AuthFetch, hotelId: string): Promise<HotelPayout> {
-  const res = await authFetch("/api/admin/payouts/trigger", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hotelId }),
-  });
-  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not trigger this payout.");
+export async function retryFailedPayout(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/${payoutId}/retry`, { method: "POST" });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not retry this failed payout.");
   return data.payout;
 }
 

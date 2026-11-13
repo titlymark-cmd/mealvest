@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ShoppingBag,
@@ -16,6 +16,7 @@ import {
   Utensils,
   ListChecks,
   History,
+  QrCode,
 } from "lucide-react";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { EmptyState, FoodImage, StatusBadge, formatAmount, formatDay, formatDateTime, groupBy, monthLabel, BadgeTone } from "../../components/student/ui";
@@ -33,7 +34,7 @@ const STATUS: Record<OrderStatus, { label: string; tone: BadgeTone; Icon: React.
   pending_payment: { label: "Awaiting payment", tone: "warn", Icon: Clock },
   paid: { label: "Paid", tone: "ok", Icon: BadgeCheck },
   ready: { label: "Ready to collect", tone: "ok", Icon: PackageCheck },
-  redeemed: { label: "Collected", tone: "neutral", Icon: CircleCheck },
+  redeemed: { label: "Redeemed", tone: "ok", Icon: CircleCheck },
   cancelled: { label: "Cancelled", tone: "bad", Icon: Ban },
   refunded: { label: "Refunded", tone: "neutral", Icon: Undo2 },
 };
@@ -43,7 +44,7 @@ const STATUS: Record<OrderStatus, { label: string; tone: BadgeTone; Icon: React.
  * "preparing" state, so none is shown, and nothing here claims live tracking:
  * the tracker moves when the order's status changes on the server.
  */
-const STEPS = ["Placed", "Paid", "Ready", "Collected"] as const;
+const STEPS = ["Placed", "Paid", "Ready", "Redeemed"] as const;
 const STEP_INDEX: Partial<Record<OrderStatus, number>> = { pending_payment: 0, paid: 1, ready: 2, redeemed: 3 };
 
 interface HotelInfo {
@@ -56,10 +57,8 @@ function orderRef(o: Order) {
 }
 
 function describeItems(o: Order) {
-  const first = o.items[0];
-  if (!first) return "Order";
-  const label = first.quantity > 1 ? `${first.quantity}× ${first.name}` : first.name;
-  return o.items.length > 1 ? `${label} + ${o.items.length - 1} more` : label;
+  if (!o.items.length) return "Order";
+  return o.items.map((item) => (item.quantity > 1 ? `${item.quantity}× ${item.name}` : item.name)).join(", ");
 }
 
 export default function OrderHistoryScreen() {
@@ -72,6 +71,7 @@ export default function OrderHistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const statusRefreshInFlight = useRef(false);
 
   const load = useCallback(
     async (silent = false) => {
@@ -109,12 +109,31 @@ export default function OrderHistoryScreen() {
 
   // Pick up status changes when the student comes back to this tab.
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") load(true);
+    const refreshStatuses = async () => {
+      if (statusRefreshInFlight.current) return;
+      statusRefreshInFlight.current = true;
+      try {
+        const data = await listMyOrders(authFetch);
+        setOrders([...data].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not refresh your order statuses.");
+      } finally {
+        statusRefreshInFlight.current = false;
+      }
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshStatuses();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshStatuses();
+    }, 15000);
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [load]);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [authFetch]);
 
   const active = useMemo(() => orders.filter((o) => ACTIVE.includes(o.status)), [orders]);
   const completed = useMemo(() => orders.filter((o) => o.status === "redeemed"), [orders]);
@@ -129,7 +148,7 @@ export default function OrderHistoryScreen() {
   }, [filter, completed, cancelled]);
 
   const imageFor = (o: Order) => (o.items[0] ? hotels[o.hotel_id]?.images[o.items[0].itemId] ?? null : null);
-  const hotelName = (o: Order) => hotels[o.hotel_id]?.name;
+  const hotelName = (o: Order) => o.hotel_name ?? hotels[o.hotel_id]?.name;
 
   // ----- States ----------------------------------------------------------------
 
@@ -163,7 +182,7 @@ export default function OrderHistoryScreen() {
     return (
       <div className="mv-container sv-page">
         <h1 className="sv-title">Your orders</h1>
-        <EmptyState icon={<ShoppingBag size={30} />} title="No orders yet" body="When you order a meal, you'll follow it here from payment to pick-up.">
+        <EmptyState icon={<ShoppingBag size={30} />} title="No orders yet" body="When you order a meal, you'll follow it here until it's redeemed.">
           <PrimaryButton type="button" showArrow={false} icon={<Utensils size={18} aria-hidden />} onPress={() => navigate("/student/menu")}>
             Browse the menu
           </PrimaryButton>
@@ -181,14 +200,14 @@ export default function OrderHistoryScreen() {
 
   const summary =
     active.length > 0
-      ? `${active.length} in progress · ${orders.length} ${orders.length === 1 ? "order" : "orders"} in total`
-      : `Nothing in progress · ${orders.length} ${orders.length === 1 ? "order" : "orders"} in total`;
+      ? `${active.length} active · ${orders.length} ${orders.length === 1 ? "order" : "orders"} in total`
+      : `Nothing active · ${orders.length} ${orders.length === 1 ? "order" : "orders"} in total`;
 
   const noteFor = (o: Order) => {
     const place = hotelName(o) ?? "your hotel";
     if (o.status === "pending_payment") return "We're waiting for the payment to go through. Your order moves on as soon as it's paid.";
-    if (o.status === "paid") return `Paid from your meal plan. Collect it at ${place} with the meal pass you were shown when you ordered.`;
-    return `Your meal is ready at ${place}. Collect it with the meal pass you were shown when you ordered.`;
+    if (o.status === "paid") return `Your meal is reserved at ${place}. Reveal your QR code when you're ready to redeem it.`;
+    return `Your meal is ready at ${place}. Reveal your QR code when you're ready to redeem it.`;
   };
 
   const monthGroups = groupBy(history, (o) => monthLabel(o.created_at));
@@ -221,9 +240,9 @@ export default function OrderHistoryScreen() {
 
       <div className="sv-orders-cols" data-split={filter === "all" && active.length > 0 && history.length > 0}>
         {showActive && (active.length > 0 || filter === "active") && (
-          <section className="sv-stack" aria-label="Orders in progress">
+          <section className="sv-stack" aria-label="Active orders">
             {active.length === 0 ? (
-              <EmptyState icon={<Clock size={30} />} title="Nothing in progress" body="You don't have an order on the way. Pick a meal and it will show up here.">
+              <EmptyState icon={<Clock size={30} />} title="No active orders" body="You don't have an order on the way. Pick a meal and it will show up here.">
                 <PrimaryButton type="button" showArrow={false} icon={<Utensils size={18} aria-hidden />} onPress={() => navigate("/student/menu")}>
                   Browse the menu
                 </PrimaryButton>
@@ -233,7 +252,7 @@ export default function OrderHistoryScreen() {
                 {filter === "all" && (
                   <h2 className="sv-h2">
                     <Clock size={18} aria-hidden />
-                    In progress
+                    Active orders
                   </h2>
                 )}
                 {active.map((o) => {
@@ -281,6 +300,17 @@ export default function OrderHistoryScreen() {
                         <Info size={16} aria-hidden />
                         <span>{noteFor(o)}</span>
                       </div>
+                      {(o.status === "paid" || o.status === "ready") && o.qr_token && (
+                        <PrimaryButton
+                          type="button"
+                          showArrow={false}
+                          icon={<QrCode size={18} aria-hidden />}
+                          style={{ maxWidth: 260, marginTop: 4 }}
+                          onPress={() => navigate("/student/meal-pass", { state: { orderId: o.id, hotelName: hotelName(o) } })}
+                        >
+                          Reveal QR Code
+                        </PrimaryButton>
+                      )}
                     </article>
                   );
                 })}
@@ -322,6 +352,7 @@ export default function OrderHistoryScreen() {
                               <span className="sv-row-sub">
                                 {hotelName(o) ? `${hotelName(o)} · ` : ""}
                                 {formatDay(o.created_at)} · Ref {orderRef(o)}
+                                {o.status === "redeemed" && o.redeemed_at ? ` · Redeemed ${formatDateTime(o.redeemed_at)}` : ""}
                               </span>
                             </div>
                             <div className="sv-row-end">

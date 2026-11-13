@@ -23,7 +23,7 @@ const TABS: { key: SectionKey; label: string; Icon: any }[] = [
  * ?section=payments etc.
  *
  * The rules written here describe how the app actually behaves (plan
- * funds, daily credit, rollover, withdrawal fee, commission, reviews)
+ * funds, daily credit, rollover, withdrawal fee, payout fee, reviews)
  * — if a rule changes in code, change it here too.
  */
 export default function TermsScreen() {
@@ -133,15 +133,15 @@ function TermsOfUse() {
       <H>5. Hotel partners</H>
       <L
         items={[
-          "Hotel partners agree to serve MEALVEST meal-pass holders at the listed prices and to let MEALVEST deduct an agreed commission on each redeemed meal (currently at most 10% per hotel, shown to each partner in their dashboard).",
-          "Hotel earnings after commission are paid out by MEALVEST to the settlement method the hotel registered (M-Pesa till, paybill, Pochi la Biashara, Send Money or bank), once those details have been verified by MEALVEST.",
+          "Hotel partners agree to serve MEALVEST meal-pass holders at the listed prices. A fixed 10% MEALVEST payout fee is deducted once from each redeemed meal; the gross amount, fee, and hotel net are shown in the partner dashboard.",
+          "Hotel earnings after the payout fee are settled once daily to the verified settlement method the hotel registered (M-Pesa till, paybill, Pochi la Biashara, Send Money or bank). Payment-provider transfer fees are accounted for separately.",
           "MEALVEST may suspend a hotel that fails to honour meal passes or breaches these terms.",
         ]}
       />
       <H>6. Changes, availability and liability</H>
       <L
         items={[
-          "We may update the app and these terms. Material changes to money rules (fees, withdrawal timing, commission caps) will be shown in the app before they apply to you.",
+          "We may update the app and these terms. Material changes to money rules (fees, withdrawal timing, payout timing) will be shown in the app before they apply to you.",
           "MEALVEST is provided \"as is\". We work to keep it available but do not promise uninterrupted service. Where the law allows, MEALVEST's liability is limited to the amount you have paid into your current plan.",
           "These terms are governed by the laws of Kenya.",
         ]}
@@ -185,11 +185,11 @@ function PaymentsPolicy() {
           "A hotel loyalty incentive, where a partner offers one, is added on top of your savings by MEALVEST or the hotel. It is never deducted from you.",
         ]}
       />
-      <H>4. Hotel payouts and commission</H>
+      <H>4. Hotel payouts and payout fee</H>
       <L
         items={[
-          "MEALVEST pays hotel partners the price of each redeemed meal minus the agreed commission, batched and sent to the registered settlement method. Payment-provider transfer fees are accounted for separately and are never hidden inside the commission.",
-          "Payout references and statuses are visible to the hotel in its dashboard.",
+          "MEALVEST pays hotel partners daily. The payout fee is fixed at 10% of redeemed meal sales and is deducted once; each payout shows gross earnings, the payout fee, and the net amount sent. Payment-provider transfer fees are separate and are not included in the 10% payout fee.",
+          "Payout references, gross/fee/net breakdowns, and statuses are visible to the hotel in its dashboard.",
         ]}
       />
     </>

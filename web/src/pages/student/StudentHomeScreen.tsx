@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { PiggyBank, Zap, Lock, UtensilsCrossed, ChevronRight, Phone, ArrowRightLeft, CalendarDays, Info, RefreshCw, Store, QrCode } from "lucide-react";
+import { PiggyBank, Zap, Lock, UtensilsCrossed, ChevronRight, Phone, CalendarDays, Info, RefreshCw, Store, QrCode } from "lucide-react";
 import { Card } from "../../components/Card";
 import { PlateRing } from "../../components/PlateRing";
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -8,13 +8,12 @@ import { Modal } from "../../components/ui/Modal";
 import { COLORS, FONTS, NEU, RADIUS } from "../../styles/theme";
 import { useAuth } from "../../context/AuthContext";
 import { useWindowSize } from "../../hooks/useWindowSize";
-import { getActiveBudget, transferToNextDay, getWithdrawalStatus, Budget, WithdrawalStatus } from "../../services/budgetApi";
+import { getActiveBudget, getWithdrawalStatus, Budget, WithdrawalStatus } from "../../services/budgetApi";
 import { fetchCustomerCarePhone } from "../../services/settingsApi";
-import { RolloverPrompt } from "../../components/student/RolloverPrompt";
 import { getDailyCreditStatus } from "../../utils/dailyCreditStatus";
 import { NotificationPermissionBanner } from "../../components/notifications/NotificationPermissionBanner";
 
-type Dialog = null | "rollover" | "transfer-confirm" | "hotel-switch" | { error: string };
+type Dialog = null | "rollover" | "hotel-switch";
 
 /** Greeting follows the device clock only — it never implies data we don't have. */
 function greetingForNow() {
@@ -41,7 +40,6 @@ export default function StudentHomeScreen() {
   // never shown, the tel: link opens the phone app with it pre-filled.
   const [carePhone, setCarePhone] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
-  const [transferring, setTransferring] = useState(false);
 
   useEffect(() => {
     fetchCustomerCarePhone()
@@ -78,17 +76,16 @@ export default function StudentHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Every money figure below is calculated by the server (budgetService.toBudgetView):
+  //   available today = fixed daily allowance + carry-forward - spent today - held
+  // The screen only displays them; it never re-derives a balance.
   const dailyCredit = budget ? Number(budget.daily_allowance) : 0;
-  const bankedAmount = budget ? Number(budget.banked_amount) : 0;
+  const bankedAmount = budget ? budget.carried_forward_amount : 0;
   const spentToday = budget ? Number(budget.spent_today) : 0;
-  // Money held by meal passes not yet scanned. It is NOT spent — it comes back
-  // if the pass isn't scanned — but it isn't available to spend again meanwhile.
-  const heldAmount = budget ? Number(budget.reserved_amount ?? 0) : 0;
-  const spendableToday = Math.max(0, dailyCredit + bankedAmount - spentToday - heldAmount);
-  const todayTotal = dailyCredit + bankedAmount;
-  // Clamp to 0–100%: spent_today can momentarily exceed today's total (e.g. a
-  // same-day boost that lands after spending, or banked-amount accounting), and
-  // the ring/label must never read above 100%.
+  const heldAmount = budget ? budget.held_amount : 0;
+  const spendableToday = budget ? budget.available_today : 0;
+  const todayTotal = budget ? budget.today_total : 0;
+  // Clamp to 0–100% so the ring/label never reads above 100%.
   const pct = todayTotal > 0 ? Math.min(1, Math.max(0, spentToday / todayTotal)) : 0;
   const dailyCreditStatus = getDailyCreditStatus(spentToday, todayTotal);
   const dailyCreditColor =
@@ -100,19 +97,6 @@ export default function StudentHomeScreen() {
   const daysLeft = budget ? budget.remainingDays ?? budget.number_of_days : 0;
   const planProgress = daysTotal > 0 ? Math.min(1, Math.max(0, (daysTotal - daysLeft) / daysTotal)) : 0;
 
-  const doTransferToNextDay = async () => {
-    setDialog(null);
-    setTransferring(true);
-    try {
-      const updated = await transferToNextDay(authFetch);
-      setBudget(updated);
-    } catch (err) {
-      setDialog({ error: err instanceof Error ? err.message : "Something went wrong." });
-    } finally {
-      setTransferring(false);
-    }
-  };
-
   const firstName = (user?.fullName || "").trim().split(/\s+/)[0] || "there";
   const savingsAmount = Number(withdrawal?.availableSavings ?? budget?.remaining_amount ?? 0);
   const savingsOpen = Boolean(withdrawal && !withdrawal.locked);
@@ -120,8 +104,6 @@ export default function StudentHomeScreen() {
   return (
     <div className="mv-container" style={styles.page}>
       <NotificationPermissionBanner />
-
-      {budget && Number(budget.pending_rollover_amount) > 0 && <RolloverPrompt budget={budget} onResolved={setBudget} />}
 
       <div style={styles.headerRow}>
         <div style={{ minWidth: 0 }}>
@@ -213,15 +195,6 @@ export default function StudentHomeScreen() {
                 <PrimaryButton type="button" onPress={() => navigate("/student/menu")} showArrow={false} icon={<UtensilsCrossed size={18} color="#fff" aria-hidden />}>
                   Order today's meal
                 </PrimaryButton>
-                <button
-                  type="button"
-                  style={{ ...styles.softBtn, ...(spendableToday <= 0 || transferring ? styles.softBtnOff : null) }}
-                  disabled={spendableToday <= 0 || transferring}
-                  onClick={() => setDialog("transfer-confirm")}
-                >
-                  <ArrowRightLeft size={16} aria-hidden />
-                  {transferring ? "Moving…" : "Move today's balance to tomorrow"}
-                </button>
               </div>
             </Card>
           </div>
@@ -342,27 +315,8 @@ export default function StudentHomeScreen() {
           </PrimaryButton>
         }
       >
-        KSh {bankedAmount.toLocaleString()} of unused daily allowance has automatically been added to today's balance. You now have KSh{" "}
+        KSh {bankedAmount.toLocaleString()} of unused money from earlier days is added on top of your fixed daily credit automatically. You have KSh{" "}
         {spendableToday.toLocaleString()} available today.
-      </Modal>
-
-      <Modal
-        open={dialog === "transfer-confirm"}
-        title="Move to tomorrow?"
-        icon={<ArrowRightLeft size={22} color={COLORS.primary} aria-hidden />}
-        onClose={() => setDialog(null)}
-        actions={
-          <>
-            <PrimaryButton type="button" showArrow={false} onPress={doTransferToNextDay}>
-              Yes, move it
-            </PrimaryButton>
-            <button type="button" style={styles.cancelBtn} onClick={() => setDialog(null)}>
-              Keep it for today
-            </button>
-          </>
-        }
-      >
-        KSh {spendableToday.toLocaleString()} is available today. Are you sure you want to transfer it to tomorrow instead of using it today? It won't be spendable again until tomorrow.
       </Modal>
 
       <Modal
@@ -379,18 +333,6 @@ export default function StudentHomeScreen() {
         Soon you'll be able to switch your active plan to another MealVest hotel for a KSh 50 fee. This isn't available yet.
       </Modal>
 
-      <Modal
-        open={typeof dialog === "object" && dialog !== null}
-        title="Couldn't move your balance"
-        onClose={() => setDialog(null)}
-        actions={
-          <PrimaryButton type="button" showArrow={false} onPress={() => setDialog(null)}>
-            Close
-          </PrimaryButton>
-        }
-      >
-        {typeof dialog === "object" && dialog !== null ? dialog.error : ""}
-      </Modal>
     </div>
   );
 }

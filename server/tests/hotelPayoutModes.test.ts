@@ -1,10 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEFAULT_COMMISSION_PERCENT,
-  effectiveCommissionPercent,
-  effectiveCommissionSql,
-  hasCommissionOverride,
+  PAYOUT_FEE_PERCENT,
+  payoutFeeSql,
   splitOrderAmount,
   isPayoutMode,
 } from "../src/lib/hotelCommission";
@@ -22,59 +20,27 @@ import { env } from "../src/config/env";
  * database-backed tests in tests/integration/payoutModes.int.test.ts.
  */
 
-describe("commission defaults and overrides", () => {
-  test("instant defaults to 15% and daily to 10%", () => {
-    assert.equal(DEFAULT_COMMISSION_PERCENT.instant, 15);
-    assert.equal(DEFAULT_COMMISSION_PERCENT.daily, 10);
-    assert.equal(effectiveCommissionPercent("instant", null), 15);
-    assert.equal(effectiveCommissionPercent("daily", null), 10);
+describe("fixed hotel payout fee", () => {
+  test("the fee is fixed at 10% and has one SQL representation", () => {
+    assert.equal(PAYOUT_FEE_PERCENT, 10);
+    assert.equal(payoutFeeSql(), "10");
   });
 
-  test("an explicit override wins in either mode and only for that hotel's inputs", () => {
-    assert.equal(effectiveCommissionPercent("instant", 12), 12);
-    assert.equal(effectiveCommissionPercent("daily", "12.00"), 12);
-    // hotel B (no override) is unaffected by hotel A's override
-    assert.equal(effectiveCommissionPercent("daily", null), 10);
+  test("the fee is applied once with integer-cent rounding", () => {
+    assert.deepEqual(splitOrderAmount(100), { payoutFeeAmount: 10, hotelAmount: 90 });
+    const r = splitOrderAmount(33.33);
+    assert.deepEqual(r, { payoutFeeAmount: 3.33, hotelAmount: 30 });
+    assert.equal(Math.round((r.payoutFeeAmount + r.hotelAmount) * 100) / 100, 33.33);
   });
 
-  test("an override of 0 is an explicit override, not 'absent'", () => {
-    assert.equal(hasCommissionOverride(0), true);
-    assert.equal(hasCommissionOverride("0.00"), true);
-    assert.equal(hasCommissionOverride(null), false);
-    assert.equal(effectiveCommissionPercent("instant", 0), 0);
-  });
-
-  test("changing payout mode never changes an explicit override", () => {
-    // The override is a separate input; mode only selects the default.
-    assert.equal(effectiveCommissionPercent("instant", 12), effectiveCommissionPercent("daily", 12));
-  });
-
-  test("the SQL form is built from the same defaults", () => {
-    const sql = effectiveCommissionSql("h");
-    assert.match(sql, /COALESCE\(h\.commission_override_percent/);
-    assert.match(sql, /WHEN 'daily' THEN 10 ELSE 15/);
-  });
-
-  test("commission is applied once and rounding matches the historical rule", () => {
-    assert.deepEqual(splitOrderAmount(100, 15), { commissionAmount: 15, hotelAmount: 85 });
-    assert.deepEqual(splitOrderAmount(100, 10), { commissionAmount: 10, hotelAmount: 90 });
-    const r = splitOrderAmount(33.33, 15);
-    assert.equal(r.commissionAmount, 5);
-    assert.equal(Math.round((r.commissionAmount + r.hotelAmount) * 100) / 100, 33.33);
-  });
-
-  test("isPayoutMode", () => {
-    assert.equal(isPayoutMode("instant"), true);
+  test("only daily payout mode is supported", () => {
+    assert.equal(isPayoutMode("instant"), false);
     assert.equal(isPayoutMode("daily"), true);
     assert.equal(isPayoutMode("weekly"), false);
   });
 });
 
 describe("payout configuration validation", () => {
-  test("instant needs no time and drops any time that is sent", () => {
-    assert.deepEqual(payoutConfigSchema.parse({ mode: "instant" }), { mode: "instant", payoutTime: null });
-    assert.deepEqual(payoutConfigSchema.parse({ mode: "instant", payoutTime: "21:00" }), { mode: "instant", payoutTime: null });
-  });
   test("daily requires a valid HH:MM time", () => {
     assert.deepEqual(payoutConfigSchema.parse({ mode: "daily", payoutTime: "21:00" }), { mode: "daily", payoutTime: "21:00" });
     for (const bad of [undefined, null, "", "9pm", "24:00", "21:60", "21:00:00", "7:5"]) {
@@ -82,12 +48,13 @@ describe("payout configuration validation", () => {
     }
   });
   test("invalid modes are rejected", () => {
+    assert.equal(payoutConfigSchema.safeParse({ mode: "instant", payoutTime: "09:00" }).success, false);
     assert.equal(payoutConfigSchema.safeParse({ mode: "weekly", payoutTime: "09:00" }).success, false);
     assert.equal(payoutConfigSchema.safeParse({ mode: "" }).success, false);
     assert.equal(payoutConfigSchema.safeParse({}).success, false);
   });
   test("a commission value can never be supplied through the payout config", () => {
-    assert.equal(payoutConfigSchema.safeParse({ mode: "instant", commissionPercent: 0 }).success, false);
+    assert.equal(payoutConfigSchema.safeParse({ mode: "daily", payoutTime: "09:00", commissionPercent: 0 }).success, false);
   });
   test("formatPayoutTime trims pg's HH:MM:SS", () => {
     assert.equal(formatPayoutTime("21:00:00"), "21:00");
@@ -110,7 +77,7 @@ describe("payout configuration validation", () => {
     assert.equal((old as any).data.payout, undefined);
     assert.equal(registerHotelSchema.safeParse({ ...base, payout: { mode: "daily", payoutTime: "21:00" } }).success, true);
     assert.equal(registerHotelSchema.safeParse({ ...base, payout: { mode: "daily" } }).success, false);
-    assert.equal(registerHotelSchema.safeParse({ ...base, payout: { mode: "instant", commissionPercent: 1 } }).success, false);
+    assert.equal(registerHotelSchema.safeParse({ ...base, payout: { mode: "instant", payoutTime: "09:00" } }).success, false);
   });
 });
 
@@ -126,7 +93,7 @@ describe("business time", () => {
 // ---------------------------------------------------------------------------
 // Scheduler decisions with in-memory fakes
 // ---------------------------------------------------------------------------
-type Hotel = { id: string; time: string; mode: "daily" | "instant"; balance: number };
+type Hotel = { id: string; time: string; mode: "daily"; balance: number };
 type Run = { id: string; status: string; attempts: number; updatedAt: number; claimedUntil: number | null };
 
 function makeWorld(hotels: Hotel[], opts: { evaluate?: (h: Hotel) => Promise<any> } = {}) {
@@ -244,7 +211,6 @@ describe("daily payout scheduler", () => {
     const w = makeWorld([
       { id: "early", time: "09:00", mode: "daily", balance: 60 },
       { id: "late", time: "23:30", mode: "daily", balance: 70 },
-      { id: "instant", time: "09:00", mode: "instant", balance: 500 },
     ]);
     const s = await runDailyPayouts({ now: w.now(), deps: w.deps }); // 21:00
     assert.deepEqual(w.payouts, [{ hotelId: "early", amount: 60 }]);

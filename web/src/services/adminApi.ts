@@ -34,13 +34,10 @@ export interface AdminHotel {
   location: string | null;
   status: "pending_verification" | "active" | "suspended" | "expired";
   registration_fee: string;
-  /** EFFECTIVE rate: the admin override if set, else the payout-mode default (15% instant / 10% daily). */
-  commission_percent: string;
-  commission_override_percent?: string | null;
-  /** True only for an explicit administrator override. */
-  commission_is_override?: boolean;
-  payout_mode?: "instant" | "daily";
-  /** "HH:MM" East Africa Time; daily mode only. */
+  /** Fixed MEALVEST payout fee percentage. */
+  payout_fee_percent: string;
+  payout_mode?: "daily";
+  /** "HH:MM" East Africa Time. */
   payout_time?: string | null;
   loyalty_incentive_percent: string;
   payment_method: string | null;
@@ -72,7 +69,7 @@ export async function approveHotel(authFetch: AuthFetch, hotelId: string): Promi
  * now reuses the exact same settlementMethodSchema and pinSchema as
  * the public self-registration endpoint (see authApi.ts's
  * SettlementInput) — the two hotel-creation forms collect the same
- * real data. adminUsername/registrationFee/commissionPercent stay
+ * real data. adminUsername and registrationFee stay
  * admin-only fields, since admin-created hotels skip the commercial
  * plan + approval flow self-registration goes through.
  */
@@ -88,9 +85,7 @@ export interface CreateHotelInput {
   pin: string;
   payment: SettlementInput;
   registrationFee: number;
-  /** Omit to use the payout-mode default; present = explicit override (0-30). */
-  commissionPercent?: number;
-  payout?: { mode: "instant" | "daily"; payoutTime?: string };
+  payout?: { mode: "daily"; payoutTime: string };
   termsAccepted: true;
 }
 
@@ -104,25 +99,10 @@ export async function createHotel(authFetch: AuthFetch, input: CreateHotelInput)
   return data.hotel;
 }
 
-export async function updateHotelCommission(
-  authFetch: AuthFetch,
-  hotelId: string,
-  /** A number sets an explicit override; null clears it (back to the mode default). */
-  commissionPercent: number | null
-): Promise<AdminHotel> {
-  const res = await authFetch(`/api/admin/hotels/${hotelId}/commission`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ commissionPercent }),
-  });
-  const data = await parseOrError<{ hotel: AdminHotel }>(res, "Could not update commission.");
-  return data.hotel;
-}
-
 export async function updateHotelPayoutSettings(
   authFetch: AuthFetch,
   hotelId: string,
-  config: { mode: "instant" | "daily"; payoutTime?: string }
+  config: { mode: "daily"; payoutTime: string }
 ): Promise<AdminHotel> {
   const res = await authFetch(`/api/admin/hotels/${hotelId}/payout-settings`, {
     method: "PATCH",
@@ -165,9 +145,8 @@ export interface HotelDetail {
     payment_method: string | null;
     payment_details: Record<string, unknown> | null;
     registration_fee: string;
-    commission_percent: string;
-    commission_is_override?: boolean;
-    payout_mode?: "instant" | "daily";
+    payout_fee_percent: string;
+    payout_mode?: "daily";
     payout_time?: string | null;
     loyalty_incentive_percent: string;
     terms_accepted: boolean;
@@ -509,4 +488,125 @@ export async function updateWithdrawalStatus(
   });
   const data = await parseOrError<{ withdrawal: AdminWithdrawal }>(res, "Could not update this withdrawal.");
   return data.withdrawal;
+}
+
+export interface DefaultMenuCategory {
+  id: string;
+  slug: string;
+  label: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DefaultMenuItem {
+  id: string;
+  category: string;
+  name: string;
+  description: string | null;
+  price: string;
+  image_url: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DefaultMenuCatalogue {
+  categories: DefaultMenuCategory[];
+  items: DefaultMenuItem[];
+}
+
+export async function fetchDefaultMenuCatalogue(authFetch: AuthFetch): Promise<DefaultMenuCatalogue> {
+  const res = await authFetch("/api/admin/default-menu");
+  return parseOrError(res, "Could not load the default menu catalogue.");
+}
+
+export async function createDefaultMenuCategory(
+  authFetch: AuthFetch,
+  input: { slug: string; label: string; sortOrder?: number; isActive?: boolean }
+): Promise<DefaultMenuCategory> {
+  const res = await authFetch("/api/admin/default-menu/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ category: DefaultMenuCategory }>(res, "Could not create the default menu category.");
+  return data.category;
+}
+
+export async function updateDefaultMenuCategory(
+  authFetch: AuthFetch,
+  categoryId: string,
+  input: Partial<{ slug: string; label: string; sortOrder: number; isActive: boolean }>
+): Promise<DefaultMenuCategory> {
+  const res = await authFetch(`/api/admin/default-menu/categories/${categoryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ category: DefaultMenuCategory }>(res, "Could not update the default menu category.");
+  return data.category;
+}
+
+export async function deleteDefaultMenuCategory(authFetch: AuthFetch, categoryId: string): Promise<void> {
+  const res = await authFetch(`/api/admin/default-menu/categories/${categoryId}`, { method: "DELETE" });
+  await parseOrError<{ deleted: boolean }>(res, "Could not delete this default menu category.");
+}
+
+export async function createDefaultMenuItem(
+  authFetch: AuthFetch,
+  input: {
+    category: string;
+    name: string;
+    description?: string;
+    price: number;
+    imageUrl?: string;
+    sortOrder?: number;
+    isActive?: boolean;
+  }
+): Promise<DefaultMenuItem> {
+  const res = await authFetch("/api/admin/default-menu/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ item: DefaultMenuItem }>(res, "Could not create the default menu item.");
+  return data.item;
+}
+
+export async function updateDefaultMenuItem(
+  authFetch: AuthFetch,
+  itemId: string,
+  input: Partial<{
+    category: string;
+    name: string;
+    description: string;
+    price: number;
+    imageUrl: string;
+    sortOrder: number;
+    isActive: boolean;
+  }>
+): Promise<DefaultMenuItem> {
+  const res = await authFetch(`/api/admin/default-menu/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await parseOrError<{ item: DefaultMenuItem }>(res, "Could not update the default menu item.");
+  return data.item;
+}
+
+export async function deleteDefaultMenuItem(authFetch: AuthFetch, itemId: string): Promise<void> {
+  const res = await authFetch(`/api/admin/default-menu/items/${itemId}`, { method: "DELETE" });
+  await parseOrError<{ deleted: boolean }>(res, "Could not delete this default menu item.");
+}
+
+export async function initializeDefaultMenuForHotel(
+  authFetch: AuthFetch,
+  hotelId: string
+): Promise<{ hotelId: string; initialized: boolean; cloned: number; reason: string; skipped: boolean }> {
+  const res = await authFetch(`/api/admin/hotels/${hotelId}/default-menu/init`, { method: "POST" });
+  return parseOrError(res, "Could not initialize this hotel's menu.");
 }
