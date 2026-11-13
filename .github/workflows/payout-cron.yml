@@ -1,0 +1,24 @@
+name: External payout cron
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC.
+    # This runs every 10 minutes. If your free plan hits the minute quota,
+    # reduce to 0 * * * * (hourly) or 0 */2 * * *.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  call-daily-payouts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger payout evaluation endpoint
+        env:
+          PAYOUT_URL: ${{ secrets.VERCEL_APP_URL }}/api/cron/daily-payouts
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            "${PAYOUT_URL}"

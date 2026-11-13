@@ -33,10 +33,6 @@
     {
       "path": "/api/cron/reconcile",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/daily-payouts",
-      "schedule": "*/10 * * * *"
     }
   ],
   "headers": [
