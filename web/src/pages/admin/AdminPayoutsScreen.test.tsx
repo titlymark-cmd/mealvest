@@ -67,6 +67,7 @@ describe("Admin payouts monitoring", () => {
     userEvent.click(screen.getByRole("button", { name: "Failed" }));
     expect(screen.queryByText("needs reconciliation")).toBeNull();
     expect(screen.getByText("Other Hotel")).toBeInTheDocument();
+    expect(screen.getByText(/Invalid destination/)).toBeInTheDocument();
   });
 
   it("a below-threshold hotel shows as accumulating and cannot be paid out manually", async () => {

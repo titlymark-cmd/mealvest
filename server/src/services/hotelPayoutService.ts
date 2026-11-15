@@ -252,7 +252,7 @@ async function sendOnce(
       });
       const status = cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status);
       if (status === "failed") {
-        return await applySendResult(payout, status, initiated.payoutId, null);
+        return await applySendResult(payout, status, initiated.payoutId, null, null, null, initiated.failureReason);
       }
       if (initiated.amountKes == null || Math.round(initiated.amountKes * 100) !== Math.round(amount * 100)) {
         const reason = initiated.amountKes == null
@@ -273,7 +273,15 @@ async function sendOnce(
           )) ?? payout
         );
       }
-      return await applySendResult(payout, status, initiated.payoutId, null, initiated.feeKes, initiated.amountKes);
+      return await applySendResult(
+        payout,
+        status,
+        initiated.payoutId,
+        null,
+        initiated.feeKes,
+        initiated.amountKes,
+        initiated.failureReason
+      );
     }
 
     const initiated = await transferService.initiateTransfer({
@@ -306,11 +314,14 @@ async function applySendResult(
   transferCode: string | null,
   recipientCode: string | null,
   providerFeeKes: number | null = null,
-  providerAmountKes: number | null = null
+  providerAmountKes: number | null = null,
+  providerFailureReason: string | null = null
 ): Promise<model.HotelPayoutRow> {
   if (status === "failed") {
     const row = await model.transitionToFinal(payout.id, "failed", ["unknown"], {
-      failureReason: "Provider reported the payout as failed",
+      failureReason: providerFailureReason ?? (payout.provider === "cyzora"
+        ? "Cyzora reported payout.failed; no failure detail was included."
+        : "Provider reported the payout as failed"),
       transferCode,
     });
     notifyFinal(row);
@@ -336,7 +347,10 @@ async function applySendResult(
 export async function applyCyzoraPayoutWebhook(
   eventName: string,
   cyzoraPayoutId: string,
-  reported: { amountKes: number | null; feeKes: number | null } = { amountKes: null, feeKes: null }
+  reported: { amountKes: number | null; feeKes: number | null; failureReason?: string | null } = {
+    amountKes: null,
+    feeKes: null,
+  }
 ): Promise<model.HotelPayoutRow | null> {
   let payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
   if (!payout) {
@@ -427,7 +441,9 @@ export async function applyCyzoraPayoutWebhook(
   }
 
   const result = await model.transitionToFinal(payout.id, finalStatus, ["processing", "unknown"], {
-    failureReason: finalStatus === "failed" ? "Cyzora reported payout.failed" : null,
+    failureReason: finalStatus === "failed"
+      ? reported.failureReason ?? "Cyzora reported payout.failed; no failure detail was included."
+      : null,
   });
   if (!result) return (await model.getPayoutById(payout.id)) ?? payout; // lost a race with a duplicate delivery
   notifyFinal(result);

@@ -555,6 +555,36 @@ describe("Cyzora payout accounting and recovery", { skip }, () => {
     assert.equal(cyzora.payouts.size, 1);
   });
 
+  test("a signed payout.failed webhook preserves Cyzora's failure detail for the admin screen", async () => {
+    cyzora.reset();
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const started = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    const payout = started.data.payout;
+    const providerPayoutId = [...cyzora.payouts.values()][0].id;
+    const failureReason = "Paybill account is invalid";
+    const webhook = await sendCyzoraWebhook({
+      event: "payout.failed",
+      payout_id: providerPayoutId,
+      status: "failed",
+      error: { message: failureReason },
+      livemode: false,
+    });
+
+    assert.equal(webhook.status, 200);
+    const [stored] = await q("SELECT status, failure_reason FROM hotel_payouts WHERE id=$1", [payout.id]);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failure_reason, failureReason);
+  });
+
   test("a provider amount mismatch stays unresolved instead of being marked successful", async () => {
     cyzora.reset();
     cyzora.nextPayoutMode = "mismatch_amount";

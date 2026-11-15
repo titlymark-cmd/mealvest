@@ -374,12 +374,22 @@ describe("Cyzora payout webhook status tracking", { skip }, () => {
   test("payout.failed releases the entitlement once; a duplicate does not release again", async () => {
     const s = await makeUser(); const h = await makeHotel();
     const p = await insertCyzoraPayout(h, s.id, "processing", 70, "po_cyz_2");
-    assert.equal((await m.payout.applyCyzoraPayoutWebhook("payout.failed", "po_cyz_2")).status, "failed");
+    const reason = "Paybill account is invalid";
+    assert.equal(
+      (await m.payout.applyCyzoraPayoutWebhook("payout.failed", "po_cyz_2", {
+        amountKes: null,
+        feeKes: null,
+        failureReason: reason,
+      })).status,
+      "failed"
+    );
     assert.equal(await unpaid(h), 70);
     await earn(s.id, h, [5]);
     await m.payout.applyCyzoraPayoutWebhook("payout.failed", "po_cyz_2");
     assert.equal(await unpaid(h), 75);
-    assert.equal((await m.model.getPayoutById(p.id)).status, "failed");
+    const stored = await m.model.getPayoutById(p.id);
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failure_reason, reason);
   });
 
   test("webhook for an 'unknown' payout that has its Cyzora id finalises it; unknown id -> null (Cyzora retries)", async () => {

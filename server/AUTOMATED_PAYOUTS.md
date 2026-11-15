@@ -55,6 +55,10 @@ Useful monitoring:
 
 - Admin **Hotel Payouts** shows unpaid balances, payout breakdowns, status,
   failure reason, and stale processing alerts.
+- When Cyzora includes a failure reason in its payout response or signed
+  webhook, Mealvest preserves it in payout history. Cyzora's published
+  `payout.failed` webhook schema does not guarantee a reason; otherwise the
+  admin screen says no detail was included.
 - `hotel_daily_payout_runs` records each evaluation and outcome.
 - A `processing` payout requires its provider's confirmation/webhook. A
   missed webhook leaves it visible for follow-up; it is not assumed paid.

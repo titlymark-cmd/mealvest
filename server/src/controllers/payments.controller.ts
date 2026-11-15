@@ -11,6 +11,7 @@ import {
   extractWebhookResource,
 } from "../services/cyzoraProvider";
 import { centsToKes, isCyzoraConfigured, isCyzoraTestMode } from "../services/cyzoraClient";
+import { extractCyzoraPayoutFailureReason } from "../services/cyzoraPayoutService";
 import {
   generatePaymentReference,
   createPendingTransaction,
@@ -565,6 +566,7 @@ export async function cyzoraWebhook(req: Request, res: Response) {
       const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId), {
         amountKes: Number.isFinite(amountKes) ? amountKes : null,
         feeKes: Number.isFinite(feeKes) ? feeKes : null,
+        failureReason: eventName === "payout.failed" ? extractCyzoraPayoutFailureReason(resource) : null,
       });
       if (!applied) return webhookResponse(res, 404, { error: "no matching payout yet" });
       return webhookResponse(res, 200, { received: true });

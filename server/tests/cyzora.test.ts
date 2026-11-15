@@ -15,6 +15,7 @@ import {
   mapCyzoraPayoutStatus,
   CYZORA_PAYOUT_MIN_CENTS,
   createPayout,
+  extractCyzoraPayoutFailureReason,
 } from "../src/services/cyzoraPayoutService";
 import { ApiError } from "../src/middleware/errorHandler";
 
@@ -224,5 +225,18 @@ describe("Cyzora payout destinations", () => {
       }),
       (error: unknown) => error instanceof ApiError && error.code === "PAYOUT_AMOUNT_NOT_WHOLE_KES"
     );
+  });
+});
+
+describe("Cyzora payout failure details", () => {
+  test("extracts a provider-supplied failure message from the data envelope", () => {
+    assert.equal(
+      extractCyzoraPayoutFailureReason({ data: { status: "failed", error: { message: "Paybill account is invalid" } } }),
+      "Paybill account is invalid"
+    );
+  });
+
+  test("returns null when Cyzora provides no failure detail", () => {
+    assert.equal(extractCyzoraPayoutFailureReason({ payout_id: "payout-1", status: "failed" }), null);
   });
 });

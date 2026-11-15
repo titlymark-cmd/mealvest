@@ -104,6 +104,7 @@ export interface CyzoraPayoutResult {
   status: string; // Cyzora's own string (requested/processing/paid/failed) — mapped by the caller
   amountKes: number | null; // provider-reported destination amount, used to fail closed on mismatches
   feeKes: number | null; // Cyzora's processing fee, when the response reports one; recorded separately from MEALVEST commission
+  failureReason: string | null;
   raw: unknown;
 }
 
@@ -112,6 +113,36 @@ function unwrap(body: any): any {
     return body.data;
   }
   return body ?? {};
+}
+
+/** Reads a provider failure message when Cyzora includes one; it is not guaranteed by the documented payout webhook schema. */
+export function extractCyzoraPayoutFailureReason(value: unknown): string | null {
+  const payout = unwrap(value);
+  if (!payout || typeof payout !== "object" || Array.isArray(payout)) return null;
+
+  const fields = payout as Record<string, unknown>;
+  const candidates = [
+    fields.failure_reason,
+    fields.failure_message,
+    fields.reason,
+    fields.message,
+    fields.error,
+    fields.failure,
+  ];
+
+  for (const candidate of candidates) {
+    const message =
+      typeof candidate === "string"
+        ? candidate
+        : candidate && typeof candidate === "object" && !Array.isArray(candidate)
+          ? ["message", "description", "detail", "error"].map((key) => (candidate as Record<string, unknown>)[key]).find((item) => typeof item === "string")
+          : null;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim().replace(/\s+/g, " ").slice(0, 500);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -156,6 +187,7 @@ export async function createPayout(params: {
       status: String(payout.status ?? "requested"),
       amountKes: Number.isFinite(reportedAmount) ? reportedAmount : null,
       feeKes: Number.isFinite(fee) ? fee : null,
+      failureReason: extractCyzoraPayoutFailureReason(payout),
       raw,
     };
   } catch (err) {
