@@ -112,7 +112,9 @@ describe("Admin payouts monitoring", () => {
     expect(screen.getByText("Mealvest commission: KES 10.00")).toBeInTheDocument();
     expect(screen.getByText("Cyzora fee: KES 21.37 (actual)")).toBeInTheDocument();
     expect(screen.getByText("Mealvest net: -KES 11.37").style.color).toBeTruthy();
-    expect(screen.getByText("Provider-fee shortfall: KES 11.37")).toBeInTheDocument();
+    const shortfall = screen.getByText("Provider-fee shortfall: KES 11.37");
+    expect(shortfall).toBeInTheDocument();
+    expect(shortfall.style.color).toBe("");
   });
 
   it("labels unavailable fees and net as unknown, not zero", async () => {

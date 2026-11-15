@@ -370,7 +370,7 @@ export default function AdminPayoutsScreen() {
                     : `${mealvestNet < 0 ? "-KES " : "KES "}${formatKes(Math.abs(mealvestNet))}`}
                 </span>
                 {providerFeeConfirmed && Number(p.provider_fee_shortfall_amount ?? 0) > 0 && (
-                  <span style={styles.negativeAmount}>
+                  <span>
                     Provider-fee shortfall: KES {formatKes(Number(p.provider_fee_shortfall_amount))}
                   </span>
                 )}

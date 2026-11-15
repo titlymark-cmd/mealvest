@@ -6,7 +6,6 @@ import * as transferService from "./paystackTransferService";
 import * as cyzoraPayouts from "./cyzoraPayoutService";
 import * as notificationEvents from "./notificationEvents";
 import { classifyProviderSendError } from "./payoutOutcome";
-import { allocateProviderFee } from "../lib/hotelCommission";
 
 export type PayoutProviderName = "paystack" | "cyzora";
 
@@ -316,22 +315,6 @@ async function applySendResult(
     });
     notifyFinal(row);
     return row ?? payout;
-  }
-
-  const allocation = allocateProviderFee(
-    Number(payout.gross_amount ?? payout.amount ?? 0),
-    providerFeeKes,
-    Number(payout.payout_fee_amount ?? 0)
-  );
-  if (allocation.providerFeeShortfallAmount != null && allocation.providerFeeShortfallAmount > 0) {
-    console.warn("[hotelPayoutService] provider fee exceeded Mealvest commission; hotel share remains unchanged", {
-      payoutId: payout.id,
-      hotelId: payout.hotel_id,
-      providerFeeAmount: allocation.providerFeeAmount,
-      mealvestFee: allocation.payoutFeeAmount,
-      shortfall: allocation.providerFeeShortfallAmount,
-      hotelAmount: allocation.hotelAmount,
-    });
   }
 
   const accepted = await model.recordSendAccepted(payout.id, {
