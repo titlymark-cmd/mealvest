@@ -44,6 +44,7 @@ import {
   retryFailedPayout,
   refreshPayoutStatus,
   previewPayoutFee,
+  getCyzoraWalletBalances,
   approvePayout,
   cancelPayout,
 } from "../controllers/hotelPayouts.controller";
@@ -92,6 +93,7 @@ adminRouter.post("/notifications/test-send", adminNotificationRateLimiter, admin
 adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
 adminRouter.get("/payouts/pending", listPendingPayouts);
 adminRouter.get("/payouts/fee-preview", previewPayoutFee);
+adminRouter.get("/payouts/cyzora-wallets", getCyzoraWalletBalances);
 adminRouter.get("/payouts", listPayoutHistory);
 adminRouter.post("/payouts/:payoutId/retry", financialActionRateLimiter, retryFailedPayout);
 adminRouter.post("/payouts/:payoutId/refresh", financialActionRateLimiter, refreshPayoutStatus);

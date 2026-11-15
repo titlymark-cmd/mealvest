@@ -76,6 +76,14 @@ export interface AdminPayoutFinancialSummary {
   unknown_provider_fee_payout_count: number;
 }
 
+export interface CyzoraWalletBalances {
+  collectionsKes: number;
+  collectionsPendingKes: number;
+  payoutsKes: number;
+  apiPayoutWallet: "collections" | "payouts";
+  checked_at: string;
+}
+
 export async function fetchPendingPayouts(authFetch: AuthFetch): Promise<HotelPendingBalance[]> {
   const res = await authFetch("/api/admin/payouts/pending");
   const data = await parseOrError<{ hotels: HotelPendingBalance[] }>(res, "Could not load pending payouts.");
@@ -98,6 +106,15 @@ export async function fetchPendingPayoutsOverview(authFetch: AuthFetch): Promise
 export async function fetchPayoutHistory(authFetch: AuthFetch): Promise<{ payouts: HotelPayout[]; financialSummary: AdminPayoutFinancialSummary }> {
   const res = await authFetch("/api/admin/payouts");
   return parseOrError<{ payouts: HotelPayout[]; financialSummary: AdminPayoutFinancialSummary }>(res, "Could not load payout history.");
+}
+
+export async function fetchCyzoraWalletBalances(authFetch: AuthFetch): Promise<CyzoraWalletBalances> {
+  const res = await authFetch("/api/admin/payouts/cyzora-wallets");
+  const data = await parseOrError<{ wallets: Omit<CyzoraWalletBalances, "checked_at">; checked_at: string }>(
+    res,
+    "Could not read Cyzora wallet balances."
+  );
+  return { ...data.wallets, checked_at: data.checked_at };
 }
 
 export async function triggerHotelPayout(authFetch: AuthFetch, hotelId: string): Promise<HotelPayout> {

@@ -55,6 +55,9 @@ Useful monitoring:
 
 - Admin **Hotel Payouts** shows unpaid balances, payout breakdowns, status,
   failure reason, and stale processing alerts.
+- Admins can manually refresh Cyzora's Collections, pending Collections, and
+  Payouts balances from the server-configured key; this read-only check does
+  not initiate or affect a payout.
 - When Cyzora includes a failure reason in its payout response or signed
   webhook, Mealvest preserves it in payout history. Cyzora's published
   `payout.failed` webhook schema does not guarantee a reason; otherwise the

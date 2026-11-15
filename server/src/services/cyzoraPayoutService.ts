@@ -24,6 +24,13 @@ export const CYZORA_PAYOUT_MIN_CENTS = 3000;
 export type CyzoraDestinationType = "mobile" | "till" | "paybill" | "bank";
 export type CyzoraWallet = "collections" | "payouts";
 
+export interface CyzoraWalletBalances {
+  collectionsKes: number;
+  collectionsPendingKes: number;
+  payoutsKes: number;
+  apiPayoutWallet: CyzoraWallet;
+}
+
 export interface CyzoraDestination {
   destination_type: CyzoraDestinationType;
   phone?: string; // mobile
@@ -113,6 +120,43 @@ function unwrap(body: any): any {
     return body.data;
   }
   return body ?? {};
+}
+
+export function parseCyzoraWalletBalances(value: unknown): CyzoraWalletBalances {
+  const data = unwrap(value);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new ApiError(502, "CYZORA_WALLET_RESPONSE_INVALID", "Cyzora returned an invalid wallet balance response.");
+  }
+
+  const balances = data as Record<string, unknown>;
+  const rawCents = [balances.collections, balances.collections_pending, balances.payouts];
+  const cents = rawCents.map((amount) => (typeof amount === "number" ? amount : NaN));
+  const wallet = balances.api_payout_wallet;
+  if (
+    balances.currency !== "KES" ||
+    cents.some((amount) => !Number.isSafeInteger(amount) || amount < 0) ||
+    (wallet !== "collections" && wallet !== "payouts")
+  ) {
+    throw new ApiError(502, "CYZORA_WALLET_RESPONSE_INVALID", "Cyzora returned incomplete or invalid wallet balance fields.");
+  }
+
+  return {
+    collectionsKes: centsToKes(cents[0]),
+    collectionsPendingKes: centsToKes(cents[1]),
+    payoutsKes: centsToKes(cents[2]),
+    apiPayoutWallet: wallet,
+  };
+}
+
+/** Reads the configured Cyzora wallet balances without initiating a payout. */
+export async function getCyzoraWalletBalances(): Promise<CyzoraWalletBalances> {
+  let raw: unknown;
+  try {
+    raw = await cyzoraGet("/wallets");
+  } catch (err) {
+    throw mapCyzoraError(err, "getWalletBalances", "Could not read Cyzora wallet balances.");
+  }
+  return parseCyzoraWalletBalances(raw);
 }
 
 /** Reads a provider failure message when Cyzora includes one; it is not guaranteed by the documented payout webhook schema. */

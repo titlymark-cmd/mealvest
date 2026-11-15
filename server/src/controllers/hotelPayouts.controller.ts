@@ -74,6 +74,16 @@ export async function previewPayoutFee(req: AuthedRequest, res: Response, next: 
   }
 }
 
+/** GET /api/admin/payouts/cyzora-wallets — read-only balance check using the server-side Cyzora key. */
+export async function getCyzoraWalletBalances(_req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const wallets = await cyzoraPayouts.getCyzoraWalletBalances();
+    res.json({ wallets, checked_at: new Date().toISOString() });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function triggerPayout(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const hotelId = typeof req.body?.hotelId === "string" ? req.body.hotelId : req.body?.hotel_id;

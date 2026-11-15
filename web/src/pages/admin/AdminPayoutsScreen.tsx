@@ -13,7 +13,9 @@ import {
   refreshPayoutStatus,
   approvePayout,
   cancelPayout,
+  fetchCyzoraWalletBalances,
   AdminPayoutFinancialSummary,
+  CyzoraWalletBalances,
   HotelPendingBalance,
   HotelPayout,
 } from "../../services/hotelPayoutsApi";
@@ -97,6 +99,9 @@ export default function AdminPayoutsScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [history, setHistory] = useState<HotelPayout[]>([]);
   const [financialSummary, setFinancialSummary] = useState<AdminPayoutFinancialSummary | null>(null);
+  const [cyzoraWallets, setCyzoraWallets] = useState<CyzoraWalletBalances | null>(null);
+  const [loadingCyzoraWallets, setLoadingCyzoraWallets] = useState(false);
+  const [cyzoraWalletError, setCyzoraWalletError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,6 +162,18 @@ export default function AdminPayoutsScreen() {
       setError(err instanceof Error ? err.message : "Could not refresh this payout.");
     } finally {
       setActingOn(null);
+    }
+  };
+
+  const handleRefreshCyzoraWallets = async () => {
+    setLoadingCyzoraWallets(true);
+    setCyzoraWalletError(null);
+    try {
+      setCyzoraWallets(await fetchCyzoraWalletBalances(authFetch));
+    } catch (err) {
+      setCyzoraWalletError(err instanceof Error ? err.message : "Could not read Cyzora wallet balances.");
+    } finally {
+      setLoadingCyzoraWallets(false);
     }
   };
 
@@ -271,6 +288,48 @@ export default function AdminPayoutsScreen() {
           )}
         </Card>
       )}
+
+      <Card style={styles.card}>
+        <div style={styles.walletHeader}>
+          <span style={styles.cardTitle}>Cyzora wallet balances</span>
+          <button
+            type="button"
+            onClick={handleRefreshCyzoraWallets}
+            disabled={loadingCyzoraWallets}
+            style={styles.walletRefreshBtn}
+          >
+            <RefreshCw size={13} color={COLORS.primary} />
+            <span>{loadingCyzoraWallets ? "Checking..." : "Refresh balance"}</span>
+          </button>
+        </div>
+        <p style={styles.walletHelp}>Read directly from Cyzora using the server-configured API key. This does not initiate a payout.</p>
+        {cyzoraWalletError && <p role="alert" style={styles.errorText}>{cyzoraWalletError}</p>}
+        {cyzoraWallets ? (
+          <>
+            <div style={styles.summaryGrid}>
+              <div style={styles.summaryItem}>
+                <span style={styles.summaryLabel}>Collections</span>
+                <strong style={styles.summaryValue}>KES {formatKes(cyzoraWallets.collectionsKes)}</strong>
+              </div>
+              <div style={styles.summaryItem}>
+                <span style={styles.summaryLabel}>Collections pending</span>
+                <strong style={styles.summaryValue}>KES {formatKes(cyzoraWallets.collectionsPendingKes)}</strong>
+              </div>
+              <div style={styles.summaryItem}>
+                <span style={styles.summaryLabel}>Payouts</span>
+                <strong style={styles.summaryValue}>KES {formatKes(cyzoraWallets.payoutsKes)}</strong>
+              </div>
+              <div style={styles.summaryItem}>
+                <span style={styles.summaryLabel}>API payout wallet</span>
+                <strong style={styles.summaryValue}>{cyzoraWallets.apiPayoutWallet}</strong>
+              </div>
+            </div>
+            <p style={styles.walletTimestamp}>Checked {new Date(cyzoraWallets.checked_at).toLocaleString()}</p>
+          </>
+        ) : !cyzoraWalletError ? (
+          <p style={styles.emptyText}>Refresh to read the current Cyzora wallet balances.</p>
+        ) : null}
+      </Card>
 
       <Card style={styles.card}>
         <span style={styles.cardTitle}>Pending payouts</span>
@@ -414,6 +473,10 @@ const styles: Record<string, React.CSSProperties> = {
   errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, marginBottom: 12 },
   card: { display: "flex", flexDirection: "column", marginBottom: 18 },
   cardTitle: { fontFamily: FONTS.displaySemibold, fontWeight: 700, fontSize: 15, color: COLORS.text, marginBottom: 10 },
+  walletHeader: { display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  walletRefreshBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: RADIUS.pill, color: COLORS.primary, fontFamily: FONTS.bodySemibold, fontSize: 12, cursor: "pointer" },
+  walletHelp: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.textMuted, margin: "0 0 10px" },
+  walletTimestamp: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, margin: "8px 0 0" },
   summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 },
   summaryItem: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 },
   summaryLabel: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted },

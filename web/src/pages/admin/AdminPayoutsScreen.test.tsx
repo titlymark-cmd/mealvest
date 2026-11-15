@@ -128,4 +128,35 @@ describe("Admin payouts monitoring", () => {
     expect(screen.getByText("Mealvest net: Unknown")).toBeInTheDocument();
     expect(screen.getByText(/actual provider fees are unknown for 1 successful payout/i)).toBeInTheDocument();
   });
+
+  it("reads Cyzora wallet balances only on request without triggering a payout", async () => {
+    mockAuthFetch.mockImplementation((path: string) => {
+      if (path === "/api/admin/payouts/pending") {
+        return json({ hotels: [], threshold_kes: 40, auto_payouts_enabled: true });
+      }
+      if (path === "/api/admin/payouts") return json({ payouts: [], financialSummary });
+      if (path === "/api/admin/payouts/cyzora-wallets") {
+        return json({
+          wallets: {
+            collectionsKes: 360.74,
+            collectionsPendingKes: 12,
+            payoutsKes: 5.5,
+            apiPayoutWallet: "collections",
+          },
+          checked_at: "2026-11-15T20:30:00.000Z",
+        });
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    render(<AdminPayoutsScreen />);
+    await userEvent.click(await screen.findByRole("button", { name: /refresh balance/i }));
+
+    expect(await screen.findByText("KES 360.74")).toBeInTheDocument();
+    expect(screen.getByText("KES 12.00")).toBeInTheDocument();
+    expect(screen.getByText("KES 5.50")).toBeInTheDocument();
+    expect(screen.getByText("collections")).toBeInTheDocument();
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/admin/payouts/cyzora-wallets");
+    expect(mockAuthFetch).not.toHaveBeenCalledWith("/api/admin/payouts/trigger", expect.anything());
+  });
 });

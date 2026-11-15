@@ -16,6 +16,7 @@ import {
   CYZORA_PAYOUT_MIN_CENTS,
   createPayout,
   extractCyzoraPayoutFailureReason,
+  parseCyzoraWalletBalances,
 } from "../src/services/cyzoraPayoutService";
 import { ApiError } from "../src/middleware/errorHandler";
 
@@ -238,5 +239,32 @@ describe("Cyzora payout failure details", () => {
 
   test("returns null when Cyzora provides no failure detail", () => {
     assert.equal(extractCyzoraPayoutFailureReason({ payout_id: "payout-1", status: "failed" }), null);
+  });
+});
+
+describe("Cyzora wallet balances", () => {
+  test("converts the documented cent balances to KES and preserves the API payout wallet", () => {
+    assert.deepEqual(
+      parseCyzoraWalletBalances({
+        collections: 36074,
+        collections_pending: 1200,
+        payouts: 0,
+        api_payout_wallet: "collections",
+        currency: "KES",
+      }),
+      {
+        collectionsKes: 360.74,
+        collectionsPendingKes: 12,
+        payoutsKes: 0,
+        apiPayoutWallet: "collections",
+      }
+    );
+  });
+
+  test("rejects incomplete or malformed balances instead of showing zero", () => {
+    assert.throws(
+      () => parseCyzoraWalletBalances({ collections: null, collections_pending: 0, payouts: 0, api_payout_wallet: "collections", currency: "KES" }),
+      (error: unknown) => error instanceof ApiError && error.code === "CYZORA_WALLET_RESPONSE_INVALID"
+    );
   });
 });
