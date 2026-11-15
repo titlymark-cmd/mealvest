@@ -54,9 +54,21 @@ export async function previewPayoutFee(req: AuthedRequest, res: Response, next: 
       throw new ApiError(400, "FEE_PREVIEW_UNAVAILABLE", "Fee preview is only available when Cyzora is the active payout provider.");
     }
     const amount = Number(req.query.amount);
-    if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, "VALIDATION_ERROR", "amount (whole KSh) is required.");
-    const preview = await cyzoraPayouts.previewPayoutFee(amount);
-    res.json({ amount, feeKes: preview.feeKes, raw: preview.raw });
+    if (!Number.isInteger(amount) || amount <= 0) throw new ApiError(400, "VALIDATION_ERROR", "amount (whole KSh) is required.");
+    const destination = String(req.query.destination ?? "mobile");
+    if (!["mobile", "till", "paybill", "bank"].includes(destination)) {
+      throw new ApiError(400, "VALIDATION_ERROR", "destination must be mobile, till, paybill, or bank.");
+    }
+    const wallet = req.query.wallet == null ? undefined : String(req.query.wallet);
+    if (wallet != null && wallet !== "collections" && wallet !== "payouts") {
+      throw new ApiError(400, "VALIDATION_ERROR", "wallet must be collections or payouts.");
+    }
+    const preview = await cyzoraPayouts.previewPayoutFee(
+      amount,
+      destination as cyzoraPayouts.CyzoraDestinationType,
+      wallet as cyzoraPayouts.CyzoraWallet | undefined
+    );
+    res.json({ amount, feeKes: preview.feeKes, feeKind: "estimate", raw: preview.raw });
   } catch (err) {
     next(err);
   }
@@ -77,8 +89,11 @@ export async function triggerPayout(req: AuthedRequest, res: Response, next: Nex
 
 export async function listPayoutHistory(_req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const payouts = await model.listAllPayouts(env.payoutStaleProcessingMinutes);
-    res.json({ payouts });
+    const [payouts, financialSummary] = await Promise.all([
+      model.listAllPayouts(env.payoutStaleProcessingMinutes),
+      model.getAdminPayoutFinancialSummary(),
+    ]);
+    res.json({ payouts, financialSummary });
   } catch (err) {
     next(err);
   }

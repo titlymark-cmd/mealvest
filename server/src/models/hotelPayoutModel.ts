@@ -25,7 +25,11 @@ export interface HotelPayoutRow {
   recipient_code: string | null;
   transfer_code: string | null; // Paystack transfer code, or Cyzora's payout id (what payout.* webhooks are matched on)
   provider_fee_amount: string | null; // provider-side processing fee, kept separate from MEALVEST's payout_fee_amount
+  provider_fee_status: "unknown" | "confirmed";
   provider_fee_shortfall_amount: string | null; // provider fee above MEALVEST's 10% commission; hotel share remains untouched
+  provider_payout_amount: string | null;
+  provider_payout_amount_status: "unknown" | "confirmed";
+  mealvest_net_amount?: string | null;
   failure_reason: string | null;
   initiated_by_admin_id: string | null;
   review_reason?: string | null;
@@ -234,22 +238,26 @@ export async function recordSendAccepted(
     transferCode?: string | null;
     recipientCode?: string | null;
     providerFeeAmount?: number | null;
+    providerPayoutAmount?: number | null;
   }
 ): Promise<HotelPayoutRow | null> {
-  const current = await getPayoutById(payoutId);
-  if (!current) return null;
-
-  const payoutFeeAmount = Number(current.payout_fee_amount ?? 0);
-  const providerFeeAmount = fields.providerFeeAmount == null ? null : Number(fields.providerFeeAmount);
-  const providerFeeShortfallAmount = providerFeeAmount == null ? null : Math.max(0, providerFeeAmount - payoutFeeAmount);
+  const feeValue = Number(fields.providerFeeAmount);
+  const amountValue = Number(fields.providerPayoutAmount);
+  const providerFeeAmount = fields.providerFeeAmount != null && Number.isFinite(feeValue) && feeValue >= 0 ? feeValue : null;
+  const providerPayoutAmount = fields.providerPayoutAmount != null && Number.isFinite(amountValue) && amountValue > 0 ? amountValue : null;
 
   const result = await pool.query<HotelPayoutRow>(
     `UPDATE hotel_payouts
         SET status = $2,
             transfer_code = COALESCE($3, transfer_code),
             recipient_code = COALESCE($4, recipient_code),
-            provider_fee_amount = CASE WHEN $5::numeric IS NOT NULL THEN $5::numeric(12,2) ELSE provider_fee_amount END,
-            provider_fee_shortfall_amount = CASE WHEN $6::numeric IS NOT NULL THEN $6::numeric(12,2) ELSE provider_fee_shortfall_amount END,
+            provider_fee_amount = CASE WHEN provider_fee_status = 'unknown' AND $5::numeric IS NOT NULL THEN $5::numeric(12,2) ELSE provider_fee_amount END,
+            provider_fee_shortfall_amount = CASE WHEN provider_fee_status = 'unknown' AND $5::numeric IS NOT NULL
+              THEN GREATEST(0, $5::numeric - COALESCE(payout_fee_amount, 0))::numeric(12,2)
+              ELSE provider_fee_shortfall_amount END,
+            provider_fee_status = CASE WHEN provider_fee_status = 'unknown' AND $5::numeric IS NOT NULL THEN 'confirmed' ELSE provider_fee_status END,
+            provider_payout_amount = CASE WHEN provider_payout_amount_status = 'unknown' AND $6::numeric IS NOT NULL THEN $6::numeric(12,2) ELSE provider_payout_amount END,
+            provider_payout_amount_status = CASE WHEN provider_payout_amount_status = 'unknown' AND $6::numeric IS NOT NULL THEN 'confirmed' ELSE provider_payout_amount_status END,
             failure_reason = NULL
       WHERE id = $1 AND status = 'unknown'
       RETURNING *`,
@@ -259,8 +267,79 @@ export async function recordSendAccepted(
       fields.transferCode ?? null,
       fields.recipientCode ?? null,
       providerFeeAmount,
-      providerFeeShortfallAmount,
+      providerPayoutAmount,
     ]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Stores a provider-confirmed destination amount once for payout reconciliation. */
+export async function recordConfirmedProviderAmount(payoutId: string, providerPayoutAmount: number): Promise<HotelPayoutRow | null> {
+  if (!Number.isFinite(providerPayoutAmount) || providerPayoutAmount <= 0) {
+    throw new Error("recordConfirmedProviderAmount requires a positive finite provider amount.");
+  }
+  const result = await pool.query<HotelPayoutRow>(
+    `UPDATE hotel_payouts
+        SET provider_payout_amount = $2::numeric(12,2),
+            provider_payout_amount_status = 'confirmed'
+      WHERE id = $1
+        AND provider_payout_amount_status = 'unknown'
+        AND provider = 'cyzora'
+        AND status IN ('unknown', 'processing', 'successful')
+      RETURNING *`,
+    [payoutId, providerPayoutAmount]
+  );
+  if (result.rows[0]) return result.rows[0];
+  return getPayoutById(payoutId);
+}
+
+/** Stores a provider-confirmed fee once; repeated webhooks cannot duplicate or overwrite it. */
+export async function recordConfirmedProviderFee(payoutId: string, providerFeeAmount: number): Promise<HotelPayoutRow | null> {
+  if (!Number.isFinite(providerFeeAmount) || providerFeeAmount < 0) {
+    throw new Error("recordConfirmedProviderFee requires a non-negative finite provider fee.");
+  }
+  const result = await pool.query<HotelPayoutRow>(
+    `UPDATE hotel_payouts
+        SET provider_fee_amount = $2::numeric(12,2),
+            provider_fee_shortfall_amount = GREATEST(0, $2::numeric - COALESCE(payout_fee_amount, 0))::numeric(12,2),
+            provider_fee_status = 'confirmed'
+      WHERE id = $1
+        AND provider_fee_status = 'unknown'
+        AND status IN ('unknown', 'processing', 'successful')
+      RETURNING *`,
+    [payoutId, providerFeeAmount]
+  );
+  if (result.rows[0]) return result.rows[0];
+  return getPayoutById(payoutId);
+}
+
+/** Keeps a Cyzora amount mismatch unresolved, retaining its id for webhook reconciliation. */
+export async function recordCyzoraAmountMismatch(
+  payoutId: string,
+  transferCode: string,
+  providerPayoutAmount: number | null,
+  providerFeeAmount: number | null,
+  reason: string
+): Promise<HotelPayoutRow | null> {
+  const feeValue = Number(providerFeeAmount);
+  const providerFee = providerFeeAmount != null && Number.isFinite(feeValue) && feeValue >= 0 ? feeValue : null;
+  const amountValue = Number(providerPayoutAmount);
+  const providerAmount =
+    providerPayoutAmount != null && Number.isFinite(amountValue) && amountValue > 0 ? amountValue : null;
+  const result = await pool.query<HotelPayoutRow>(
+    `UPDATE hotel_payouts
+        SET transfer_code = COALESCE(transfer_code, $2),
+            provider_fee_amount = CASE WHEN provider_fee_status = 'unknown' AND $3::numeric IS NOT NULL THEN $3::numeric(12,2) ELSE provider_fee_amount END,
+            provider_fee_shortfall_amount = CASE WHEN provider_fee_status = 'unknown' AND $3::numeric IS NOT NULL
+              THEN GREATEST(0, $3::numeric - COALESCE(payout_fee_amount, 0))::numeric(12,2)
+              ELSE provider_fee_shortfall_amount END,
+            provider_fee_status = CASE WHEN provider_fee_status = 'unknown' AND $3::numeric IS NOT NULL THEN 'confirmed' ELSE provider_fee_status END,
+            provider_payout_amount = CASE WHEN provider_payout_amount_status = 'unknown' AND $4::numeric IS NOT NULL THEN $4::numeric(12,2) ELSE provider_payout_amount END,
+            provider_payout_amount_status = CASE WHEN provider_payout_amount_status = 'unknown' AND $4::numeric IS NOT NULL THEN 'confirmed' ELSE provider_payout_amount_status END,
+            failure_reason = $5
+      WHERE id = $1 AND status = 'unknown'
+      RETURNING *`,
+    [payoutId, transferCode, providerFee, providerAmount, reason.slice(0, 500)]
   );
   return result.rows[0] ?? null;
 }
@@ -389,6 +468,9 @@ export type AdminPayoutRow = HotelPayoutRow & {
 export async function listAllPayouts(staleProcessingMinutes = 120): Promise<AdminPayoutRow[]> {
   const result = await pool.query<AdminPayoutRow>(
     `SELECT p.*, h.name AS hotel_name, h.payout_mode AS hotel_payout_mode,
+            CASE WHEN p.provider_fee_status = 'confirmed'
+              THEN (COALESCE(p.payout_fee_amount, 0) - p.provider_fee_amount)::numeric(12,2)::text
+              ELSE NULL END AS mealvest_net_amount,
             (p.initiated_by_admin_id IS NULL) AS automated,
             (p.status = 'unknown'
              OR (p.status = 'failed' AND p.updated_at > now() - interval '7 days')
@@ -398,6 +480,29 @@ export async function listAllPayouts(staleProcessingMinutes = 120): Promise<Admi
     [Math.ceil(staleProcessingMinutes)]
   );
   return result.rows;
+}
+
+export interface AdminPayoutFinancialSummary {
+  total_hotel_payouts: string;
+  total_mealvest_commission: string;
+  total_confirmed_cyzora_fees: string;
+  mealvest_net_confirmed: string;
+  unknown_provider_fee_payout_count: number;
+}
+
+/** All-time successful payout totals; unknown fees are excluded from net and reported separately. */
+export async function getAdminPayoutFinancialSummary(): Promise<AdminPayoutFinancialSummary> {
+  const result = await pool.query<AdminPayoutFinancialSummary>(
+    `SELECT
+        COALESCE(SUM(amount), 0)::numeric(12,2)::text AS total_hotel_payouts,
+        COALESCE(SUM(payout_fee_amount), 0)::numeric(12,2)::text AS total_mealvest_commission,
+        COALESCE(SUM(provider_fee_amount) FILTER (WHERE provider = 'cyzora' AND provider_fee_status = 'confirmed'), 0)::numeric(12,2)::text AS total_confirmed_cyzora_fees,
+        COALESCE(SUM(payout_fee_amount - provider_fee_amount) FILTER (WHERE provider_fee_status = 'confirmed'), 0)::numeric(12,2)::text AS mealvest_net_confirmed,
+        COUNT(*) FILTER (WHERE provider_fee_status = 'unknown')::int AS unknown_provider_fee_payout_count
+       FROM hotel_payouts
+      WHERE status = 'successful'`
+  );
+  return result.rows[0];
 }
 
 export interface UnpaidBalance {

@@ -22,6 +22,7 @@ import { isCyzoraConfigured, cyzoraGet, cyzoraPost, kesToCents, centsToKes, mapC
 export const CYZORA_PAYOUT_MIN_CENTS = 3000;
 
 export type CyzoraDestinationType = "mobile" | "till" | "paybill" | "bank";
+export type CyzoraWallet = "collections" | "payouts";
 
 export interface CyzoraDestination {
   destination_type: CyzoraDestinationType;
@@ -101,6 +102,7 @@ export function buildCyzoraDestination(details: HotelPaymentDetails): CyzoraDest
 export interface CyzoraPayoutResult {
   payoutId: string; // Cyzora's payout id — stored in hotel_payouts.transfer_code, matched by payout.* webhooks
   status: string; // Cyzora's own string (requested/processing/paid/failed) — mapped by the caller
+  amountKes: number | null; // provider-reported destination amount, used to fail closed on mismatches
   feeKes: number | null; // Cyzora's processing fee, when the response reports one; recorded separately from MEALVEST commission
   raw: unknown;
 }
@@ -127,6 +129,9 @@ export async function createPayout(params: {
   description?: string;
 }): Promise<CyzoraPayoutResult> {
   const amountCents = kesToCents(params.amount);
+  if (amountCents % 100 !== 0) {
+    throw new ApiError(400, "PAYOUT_AMOUNT_NOT_WHOLE_KES", "Cyzora payouts must be in whole Kenyan shillings; the hotel entitlement was not rounded.");
+  }
   if (amountCents < CYZORA_PAYOUT_MIN_CENTS) {
     throw new ApiError(
       400,
@@ -144,10 +149,12 @@ export async function createPayout(params: {
       console.error("[cyzoraPayoutService.createPayout] Payout response had no id:", raw);
       throw new PayoutSendError(false, "CYZORA_PAYOUT_FAILED", "Cyzora did not return a payout id.");
     }
+    const reportedAmount = centsToKes(payout.amount);
     const fee = centsToKes(payout.fee ?? payout.fee_amount);
     return {
       payoutId: String(payout.id),
       status: String(payout.status ?? "requested"),
+      amountKes: Number.isFinite(reportedAmount) ? reportedAmount : null,
       feeKes: Number.isFinite(fee) ? fee : null,
       raw,
     };
@@ -159,10 +166,18 @@ export async function createPayout(params: {
   }
 }
 
-/** GET /payouts/fee-preview?amount= — what Cyzora will charge for a payout of this size, in whole KSh. */
-export async function previewPayoutFee(amountKes: number): Promise<{ feeKes: number | null; raw: unknown }> {
+/** GET /payouts/fee-preview?amount= — estimate only; never use this as a confirmed accounting fee. */
+export async function previewPayoutFee(
+  amountKes: number,
+  destination: CyzoraDestinationType = "mobile",
+  wallet?: CyzoraWallet
+): Promise<{ feeKes: number | null; raw: unknown }> {
   try {
-    const raw = await cyzoraGet("/payouts/fee-preview", { amount: kesToCents(amountKes) });
+    const raw = await cyzoraGet("/payouts/fee-preview", {
+      amount: kesToCents(amountKes),
+      destination,
+      ...(wallet ? { wallet } : {}),
+    });
     const data = unwrap(raw);
     const fee = centsToKes(data?.fee ?? data?.fee_amount);
     return { feeKes: Number.isFinite(fee) ? fee : null, raw };

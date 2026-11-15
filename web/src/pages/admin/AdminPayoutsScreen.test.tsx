@@ -8,15 +8,23 @@ jest.mock("../../context/AuthContext", () => ({ useAuth: () => ({ authFetch: moc
 
 const payout = (over: Record<string, unknown> = {}) => ({
   id: "p1", hotel_id: "h1", hotel_name: "Mama Ngina's", amount: "60.00", status: "processing", provider: "cyzora",
+  payout_fee_amount: "6.67", provider_fee_amount: null, provider_fee_status: "unknown", provider_fee_shortfall_amount: null, mealvest_net_amount: null,
   transfer_reference: "PO-1", recipient_code: null, transfer_code: "po_abc", failure_reason: null,
   automated: true, needs_attention: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...over,
 });
 const json = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+const financialSummary = {
+  total_hotel_payouts: "0.00",
+  total_mealvest_commission: "0.00",
+  total_confirmed_cyzora_fees: "0.00",
+  mealvest_net_confirmed: "0.00",
+  unknown_provider_fee_payout_count: 0,
+};
 
-function serve(opts: { payouts: () => unknown[]; hotels?: unknown[] }) {
+function serve(opts: { payouts: () => unknown[]; hotels?: unknown[]; summary?: typeof financialSummary }) {
   mockAuthFetch.mockImplementation((path: string) => {
     if (path === "/api/admin/payouts/pending") return json({ hotels: opts.hotels ?? [], threshold_kes: 40, auto_payouts_enabled: true });
-    if (path === "/api/admin/payouts") return json({ payouts: opts.payouts() });
+    if (path === "/api/admin/payouts") return json({ payouts: opts.payouts(), financialSummary: opts.summary ?? financialSummary });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -74,7 +82,7 @@ describe("Admin payouts monitoring", () => {
   it("clicking Pay out triggers the admin manual payout API", async () => {
     mockAuthFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === "/api/admin/payouts/pending") return json({ hotels: [{ hotel_id: "h7", hotel_name: "Manual Hotel", payment_method: "send_money", payment_details: null, pending_amount: "60.00", pending_order_count: "3", payout_supported: true, below_threshold: false, auto_payout_blocked_reason: null }], threshold_kes: 40, auto_payouts_enabled: true });
-      if (path === "/api/admin/payouts") return json({ payouts: [] });
+      if (path === "/api/admin/payouts") return json({ payouts: [], financialSummary });
       if (path === "/api/admin/payouts/trigger") return json({ payout: payout({ id: "p2", hotel_id: "h7", hotel_name: "Manual Hotel", amount: "60.00", status: "processing" }) });
       return Promise.reject(new Error(`unexpected ${path}`));
     });
@@ -83,5 +91,38 @@ describe("Admin payouts monitoring", () => {
     const button = await screen.findByRole("button", { name: /pay out/i });
     await userEvent.click(button);
     expect(mockAuthFetch).toHaveBeenCalledWith("/api/admin/payouts/trigger", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("shows a confirmed fee, negative Mealvest net, shortfall, and the full hotel amount", async () => {
+    serve({
+      payouts: () => [
+        payout({
+          amount: "90.00",
+          payout_fee_amount: "10.00",
+          provider_fee_amount: "21.37",
+          provider_fee_status: "confirmed",
+          provider_fee_shortfall_amount: "11.37",
+          mealvest_net_amount: "-11.37",
+          status: "successful",
+        }),
+      ],
+    });
+    render(<AdminPayoutsScreen />);
+    expect(await screen.findByText("Hotel payout: KES 90.00")).toBeInTheDocument();
+    expect(screen.getByText("Mealvest commission: KES 10.00")).toBeInTheDocument();
+    expect(screen.getByText("Cyzora fee: KES 21.37 (actual)")).toBeInTheDocument();
+    expect(screen.getByText("Mealvest net: -KES 11.37").style.color).toBeTruthy();
+    expect(screen.getByText("Provider-fee shortfall: KES 11.37")).toBeInTheDocument();
+  });
+
+  it("labels unavailable fees and net as unknown, not zero", async () => {
+    serve({
+      payouts: () => [payout({ provider_fee_status: "unknown", provider_fee_amount: null, mealvest_net_amount: null })],
+      summary: { ...financialSummary, total_hotel_payouts: "90.00", total_mealvest_commission: "10.00", unknown_provider_fee_payout_count: 1 },
+    });
+    render(<AdminPayoutsScreen />);
+    expect(await screen.findByText("Cyzora fee: Unknown (not confirmed)")).toBeInTheDocument();
+    expect(screen.getByText("Mealvest net: Unknown")).toBeInTheDocument();
+    expect(screen.getByText(/actual provider fees are unknown for 1 successful payout/i)).toBeInTheDocument();
   });
 });

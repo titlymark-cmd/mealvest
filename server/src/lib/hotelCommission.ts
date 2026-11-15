@@ -12,10 +12,14 @@ export interface ProviderFeeAllocation {
   grossAmount: number;
   payoutFeeAmount: number; // Mealvest's 10% commission share
   hotelAmount: number; // hotel's 90% share
-  providerFeeAmount: number; // provider-side fee, if any
-  mealvestAfterProviderFee: number; // fee deducted from Mealvest's commission only
-  providerFeeShortfallAmount: number; // provider fee above Mealvest's available commission
+  providerFeeAmount: number | null; // actual provider-side fee, null until confirmed
+  mealvestNetAmount: number | null; // commission less actual provider fee
+  providerFeeShortfallAmount: number | null; // provider fee above Mealvest's commission
   hotelReceives: number; // hotelAmount; unchanged even if provider fee exists
+}
+
+function money(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 export function isPayoutMode(value: unknown): value is PayoutMode {
@@ -48,18 +52,21 @@ export function allocateProviderFee(
   payoutFeeAmount: number | null | undefined = null
 ): ProviderFeeAllocation {
   const gross = Number.isFinite(grossAmount) ? grossAmount : 0;
-  const mealvestCommission = Number.isFinite(Number(payoutFeeAmount)) ? Number(payoutFeeAmount) : splitOrderAmount(gross).payoutFeeAmount;
-  const hotelAmount = gross - mealvestCommission;
-  const providerFee = Number.isFinite(Number(providerFeeAmount)) ? Math.max(0, Number(providerFeeAmount)) : 0;
-  const mealvestAfterProviderFee = Math.max(0, mealvestCommission - providerFee);
-  const providerFeeShortfallAmount = Math.max(0, providerFee - mealvestCommission);
+  const mealvestCommission =
+    payoutFeeAmount != null && Number.isFinite(payoutFeeAmount) ? money(payoutFeeAmount) : splitOrderAmount(gross).payoutFeeAmount;
+  const hotelAmount = money(gross - mealvestCommission);
+  const providerFee =
+    providerFeeAmount != null && Number.isFinite(providerFeeAmount) ? money(Math.max(0, providerFeeAmount)) : null;
+  const mealvestNetAmount = providerFee == null ? null : money(mealvestCommission - providerFee);
+  const providerFeeShortfallAmount =
+    providerFee == null ? null : money(Math.max(0, providerFee - mealvestCommission));
 
   return {
     grossAmount: gross,
     payoutFeeAmount: mealvestCommission,
     hotelAmount,
     providerFeeAmount: providerFee,
-    mealvestAfterProviderFee,
+    mealvestNetAmount,
     providerFeeShortfallAmount,
     hotelReceives: hotelAmount,
   };

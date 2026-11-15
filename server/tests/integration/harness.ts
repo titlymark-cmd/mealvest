@@ -143,6 +143,97 @@ export class MockPaystack {
 }
 
 // ---------------------------------------------------------------------------
+// Mock Cyzora payout API
+// ---------------------------------------------------------------------------
+export class MockCyzora {
+  server!: http.Server;
+  port = 0;
+  requests: MockRequest[] = [];
+  payouts = new Map<string, { id: string; amount: number; fee?: number; status: string; reference: string }>();
+  payoutReferences: string[] = [];
+  feeCents = 2137;
+  nextPayoutError: { status: number; error: string } | null = null;
+  nextPayoutMode: "normal" | "omit_fee" | "mismatch_amount" | "error_after_create" = "normal";
+  counter = 0;
+
+  async start(): Promise<void> {
+    this.server = http.createServer((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => this.handle(req, res, raw));
+    });
+    await new Promise<void>((resolve) => this.server.listen(0, "127.0.0.1", resolve));
+    this.port = (this.server.address() as AddressInfo).port;
+  }
+
+  stop(): Promise<void> {
+    return new Promise((resolve) => this.server.close(() => resolve()));
+  }
+
+  reset(): void {
+    this.requests = [];
+    this.payouts.clear();
+    this.payoutReferences = [];
+    this.feeCents = 2137;
+    this.nextPayoutError = null;
+    this.nextPayoutMode = "normal";
+    this.counter = 0;
+  }
+
+  count(method: string, exactPath: string): number {
+    return this.requests.filter((request) => request.method === method && request.path === exactPath).length;
+  }
+
+  private json(res: http.ServerResponse, status: number, body: unknown): void {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  }
+
+  private handle(req: http.IncomingMessage, res: http.ServerResponse, raw: string): void {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    const body = raw ? JSON.parse(raw) : {};
+    this.requests.push({ method: req.method || "", path: url.pathname, body });
+
+    if (req.headers["x-api-key"] !== "sk_test_local_cyzora") {
+      return this.json(res, 401, { error: "Invalid test key" });
+    }
+    if (req.method !== "POST" || url.pathname !== "/api/v1/payouts") {
+      return this.json(res, 404, { error: "Unknown mock route" });
+    }
+
+    const reference = String(req.headers["idempotency-key"] || "");
+    this.payoutReferences.push(reference);
+    if (!reference) return this.json(res, 400, { error: "Idempotency-Key required" });
+    if (this.nextPayoutError) {
+      const error = this.nextPayoutError;
+      this.nextPayoutError = null;
+      return this.json(res, error.status, { error: error.error });
+    }
+
+    const existing = this.payouts.get(reference);
+    const mode = this.nextPayoutMode;
+    this.nextPayoutMode = "normal";
+    const payout = existing ?? {
+      id: `cyzora-${++this.counter}`,
+      amount: mode === "mismatch_amount" ? Number(body.amount) - 100 : Number(body.amount),
+      fee: this.feeCents,
+      status: "processing",
+      reference,
+    };
+    if (!existing) this.payouts.set(reference, payout);
+    if (mode === "error_after_create") return this.json(res, 500, { error: "Upstream response unavailable" });
+    const response: Record<string, unknown> = {
+      id: payout.id,
+      amount: payout.amount,
+      status: payout.status,
+      wallet: "collections",
+    };
+    if (mode !== "omit_fee" && payout.fee !== undefined) response.fee = payout.fee;
+    return this.json(res, 201, response);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Database reset + migrations
 // ---------------------------------------------------------------------------
 export async function resetDatabase(): Promise<void> {

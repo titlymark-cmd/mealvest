@@ -251,7 +251,30 @@ async function sendOnce(
         destination: ctx.destination!,
         description: `MEALVEST payout — ${payout.amount} KES`,
       });
-      return await applySendResult(payout, cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status), initiated.payoutId, null, initiated.feeKes);
+      const status = cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status);
+      if (status === "failed") {
+        return await applySendResult(payout, status, initiated.payoutId, null);
+      }
+      if (initiated.amountKes == null || Math.round(initiated.amountKes * 100) !== Math.round(amount * 100)) {
+        const reason = initiated.amountKes == null
+          ? "Cyzora accepted the request but did not report the destination amount; payout remains unresolved."
+          : `Cyzora reported KSh ${initiated.amountKes} to the destination; expected KSh ${amount}. Payout remains unresolved.`;
+        console.error("[hotelPayoutService] Cyzora payout amount is unconfirmed or mismatched", {
+          payoutId: payout.id,
+          expectedAmount: amount,
+          providerAmount: initiated.amountKes,
+        });
+        return (
+          (await model.recordCyzoraAmountMismatch(
+            payout.id,
+            initiated.payoutId,
+            initiated.amountKes,
+            initiated.feeKes,
+            reason
+          )) ?? payout
+        );
+      }
+      return await applySendResult(payout, status, initiated.payoutId, null, initiated.feeKes, initiated.amountKes);
     }
 
     const initiated = await transferService.initiateTransfer({
@@ -283,7 +306,8 @@ async function applySendResult(
   status: "processing" | "successful" | "failed",
   transferCode: string | null,
   recipientCode: string | null,
-  providerFeeKes: number | null = null
+  providerFeeKes: number | null = null,
+  providerAmountKes: number | null = null
 ): Promise<model.HotelPayoutRow> {
   if (status === "failed") {
     const row = await model.transitionToFinal(payout.id, "failed", ["unknown"], {
@@ -299,7 +323,7 @@ async function applySendResult(
     providerFeeKes,
     Number(payout.payout_fee_amount ?? 0)
   );
-  if (allocation.providerFeeShortfallAmount > 0) {
+  if (allocation.providerFeeShortfallAmount != null && allocation.providerFeeShortfallAmount > 0) {
     console.warn("[hotelPayoutService] provider fee exceeded Mealvest commission; hotel share remains unchanged", {
       payoutId: payout.id,
       hotelId: payout.hotel_id,
@@ -310,7 +334,13 @@ async function applySendResult(
     });
   }
 
-  const accepted = await model.recordSendAccepted(payout.id, { status, transferCode, recipientCode, providerFeeAmount: providerFeeKes });
+  const accepted = await model.recordSendAccepted(payout.id, {
+    status,
+    transferCode,
+    recipientCode,
+    providerFeeAmount: providerFeeKes,
+    providerPayoutAmount: providerAmountKes,
+  });
   if (status === "successful") notifyFinal(accepted);
   return accepted ?? (await model.getPayoutById(payout.id)) ?? payout;
 }
@@ -322,9 +352,10 @@ async function applySendResult(
  */
 export async function applyCyzoraPayoutWebhook(
   eventName: string,
-  cyzoraPayoutId: string
+  cyzoraPayoutId: string,
+  reported: { amountKes: number | null; feeKes: number | null } = { amountKes: null, feeKes: null }
 ): Promise<model.HotelPayoutRow | null> {
-  const payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
+  let payout = await model.getPayoutByProviderId("cyzora", cyzoraPayoutId);
   if (!payout) {
     // A payout this app never created, or the webhook beat our own
     // transfer_code write — null makes the controller answer 404 and
@@ -332,6 +363,61 @@ export async function applyCyzoraPayoutWebhook(
     console.warn("[hotelPayoutService.applyCyzoraPayoutWebhook] No hotel_payouts row for Cyzora payout id:", cyzoraPayoutId);
     return null;
   }
+
+  if (eventName === "payout.paid" && reported.feeKes != null) {
+    if (!Number.isFinite(reported.feeKes) || reported.feeKes < 0) {
+      console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] Invalid provider-reported fee; fee remains unknown", {
+        payoutId: payout.id,
+      });
+    } else {
+      const previousFee = payout.provider_fee_status === "confirmed" ? Number(payout.provider_fee_amount) : null;
+      const updated = await model.recordConfirmedProviderFee(payout.id, reported.feeKes);
+      if (previousFee != null && Math.round(previousFee * 100) !== Math.round(reported.feeKes * 100)) {
+        console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] Conflicting confirmed provider fee; preserving the first value", {
+          payoutId: payout.id,
+          recordedFee: previousFee,
+          webhookFee: reported.feeKes,
+        });
+      }
+      payout = updated ?? payout;
+    }
+  }
+
+  if (eventName === "payout.paid") {
+    if (reported.amountKes != null && Number.isFinite(reported.amountKes) && reported.amountKes > 0) {
+      const previousAmount = payout.provider_payout_amount_status === "confirmed" ? Number(payout.provider_payout_amount) : null;
+      const updated = await model.recordConfirmedProviderAmount(payout.id, reported.amountKes);
+      if (previousAmount != null && Math.round(previousAmount * 100) !== Math.round(reported.amountKes * 100)) {
+        console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] Conflicting provider payout amount; preserving the first value", {
+          payoutId: payout.id,
+          recordedAmount: previousAmount,
+          webhookAmount: reported.amountKes,
+        });
+      }
+      payout = updated ?? payout;
+    } else {
+      console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] Invalid provider payout amount; payout remains unresolved", {
+        payoutId: payout.id,
+        providerAmount: reported.amountKes,
+      });
+    }
+
+    const expectedCents = Math.round(Number(payout.amount) * 100);
+    const reportedCents = reported.amountKes == null ? NaN : Math.round(reported.amountKes * 100);
+    const storedProviderCents = payout.provider_payout_amount_status === "confirmed"
+      ? Math.round(Number(payout.provider_payout_amount) * 100)
+      : reportedCents;
+    if (!Number.isFinite(reportedCents) || reportedCents !== expectedCents || storedProviderCents !== reportedCents) {
+      console.error("[hotelPayoutService.applyCyzoraPayoutWebhook] Cyzora payout amount is missing or mismatched; payout remains unresolved", {
+        payoutId: payout.id,
+        expectedAmount: payout.amount,
+        providerAmount: reported.amountKes,
+        storedProviderAmount: payout.provider_payout_amount,
+      });
+      return payout;
+    }
+  }
+
   if (payout.status !== "processing" && payout.status !== "unknown") {
     // Final already (duplicate/late event) or never sent: idempotent no-op — a final status is never reverted.
     if ((payout.status === "successful" && eventName === "payout.failed") || (payout.status === "failed" && eventName === "payout.paid")) {

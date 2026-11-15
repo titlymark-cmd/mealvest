@@ -9,11 +9,12 @@ import { describe, test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
-import { integrationEnabled, MockPaystack, resetDatabase, configureEnv, listen, http_ } from "./harness";
+import { integrationEnabled, MockPaystack, MockCyzora, resetDatabase, configureEnv, listen, http_ } from "./harness";
 
 const enabled = integrationEnabled();
 const skip = enabled ? false : "TEST_DATABASE_URL not set — integration tests skipped";
 const mock = new MockPaystack();
+const cyzora = new MockCyzora();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const m: Record<string, any> = {};
 let api: { base: string; close: () => Promise<void> };
@@ -25,7 +26,11 @@ const NEXT_DAY_2100 = new Date("2026-10-25T18:00:00Z");
 before(async () => {
   if (!enabled) return;
   await mock.start();
+  await cyzora.start();
   configureEnv(mock.port);
+  process.env.CYZORA_SECRET_KEY = "sk_test_local_cyzora";
+  process.env.CYZORA_WEBHOOK_SECRET = "whsec_local_test_only";
+  process.env.CYZORA_BASE_URL = `http://127.0.0.1:${cyzora.port}/api/v1`;
   process.env.AUTO_PAYOUTS_ENABLED = "true";
   process.env.AUTO_PAYOUT_THRESHOLD_KES = "40";
   await resetDatabase();
@@ -45,6 +50,7 @@ after(async () => {
   if (!enabled) return;
   await api.close();
   await mock.stop();
+  await cyzora.stop();
   await new Promise((r) => setTimeout(r, 300));
   await m.db.pool.end();
 });
@@ -87,6 +93,14 @@ async function earn(userId: string, hotelId: string, hotelAmounts: number[]) {
     );
   }
 }
+async function earnSplit(userId: string, hotelId: string, gross: number) {
+  const commission = Math.round(gross * 10) / 100;
+  await q(
+    `INSERT INTO orders (user_id, hotel_id, items, amount, status, redeemed, commission_amount, hotel_amount)
+     VALUES ($1, $2, '[]', $3, 'redeemed', true, $4, $5)`,
+    [userId, hotelId, gross, commission, gross - commission]
+  );
+}
 async function unpaid(hotelId: string): Promise<number> {
   return Number((await q("SELECT COALESCE(SUM(hotel_amount),0) s FROM orders WHERE hotel_id=$1 AND redeemed AND payout_id IS NULL", [hotelId]))[0].s);
 }
@@ -102,6 +116,19 @@ async function redeem(hotelId: string, amount: number) {
   await m.order.redeemOrderByQr(m.qr.generateOrderQrPayload(orderId), hotelId, staff.id);
   const [o] = await q("SELECT commission_amount, hotel_amount FROM orders WHERE id=$1", [orderId]);
   return { orderId, commission: Number(o.commission_amount), hotelAmount: Number(o.hotel_amount) };
+}
+function setPayoutProvider(provider: "paystack" | "cyzora") {
+  m.env.env.paymentProviderDefault = provider;
+}
+async function sendCyzoraWebhook(event: Record<string, unknown>) {
+  const rawBody = Buffer.from(JSON.stringify(event));
+  const signature = crypto.createHmac("sha256", "whsec_local_test_only").update(rawBody).digest("hex");
+  const response = await fetch(`${api.base}/api/webhooks/cyzora`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Cyzora-Signature": signature },
+    body: rawBody,
+  });
+  return { status: response.status, data: await response.json() };
 }
 // ============================================================ configuration
 describe("payout-mode configuration", { skip }, () => {
@@ -437,5 +464,182 @@ describe("Daily Payout", { skip }, () => {
     assert.equal(ok.status, 200);
     assert.equal(typeof ok.data.localDate, "string");
     assert.equal(ok.data.enabled, true);
+  });
+});
+
+describe("Cyzora payout accounting and recovery", { skip }, () => {
+  test("submits and records the full hotel amount while an over-commission actual fee becomes negative Mealvest net", async () => {
+    cyzora.reset();
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const response = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    assert.equal(response.status, 201, JSON.stringify(response.data));
+    const payout = response.data.payout;
+    assert.equal(payout.status, "processing");
+    assert.equal(Number(payout.amount), 90);
+
+    const request = cyzora.requests.find((item) => item.method === "POST" && item.path === "/api/v1/payouts");
+    assert.equal(request?.body.amount, 9000);
+    assert.equal(cyzora.payouts.size, 1);
+    const [stored] = await q(
+      "SELECT amount, payout_fee_amount, provider_fee_amount, provider_fee_status, provider_fee_shortfall_amount, provider_payout_amount, provider_payout_amount_status, status FROM hotel_payouts WHERE id=$1",
+      [payout.id]
+    );
+    assert.deepEqual(
+      {
+        hotelAmount: Number(stored.amount),
+        commission: Number(stored.payout_fee_amount),
+        providerFee: Number(stored.provider_fee_amount),
+        feeStatus: stored.provider_fee_status,
+        shortfall: Number(stored.provider_fee_shortfall_amount),
+        providerAmount: Number(stored.provider_payout_amount),
+        providerAmountStatus: stored.provider_payout_amount_status,
+        status: stored.status,
+      },
+      {
+        hotelAmount: 90,
+        commission: 10,
+        providerFee: 21.37,
+        feeStatus: "confirmed",
+        shortfall: 11.37,
+        providerAmount: 90,
+        providerAmountStatus: "confirmed",
+        status: "processing",
+      }
+    );
+  });
+
+  test("a missing fee stays unknown until a signed paid webhook confirms it; duplicate webhooks are idempotent", async () => {
+    cyzora.reset();
+    cyzora.nextPayoutMode = "omit_fee";
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const started = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    const payout = started.data.payout;
+    let [stored] = await q("SELECT provider_fee_amount, provider_fee_status FROM hotel_payouts WHERE id=$1", [payout.id]);
+    assert.equal(stored.provider_fee_amount, null);
+    assert.equal(stored.provider_fee_status, "unknown");
+
+    const providerPayoutId = [...cyzora.payouts.values()][0].id;
+    const event = { event: "payout.paid", payout_id: providerPayoutId, amount: 9000, fee: 0, status: "paid", livemode: false };
+    assert.equal((await sendCyzoraWebhook(event)).status, 200);
+    assert.equal((await sendCyzoraWebhook(event)).status, 200);
+
+    [stored] = await q(
+      "SELECT amount, payout_fee_amount, provider_fee_amount, provider_fee_status, provider_fee_shortfall_amount, status FROM hotel_payouts WHERE id=$1",
+      [payout.id]
+    );
+    assert.equal(Number(stored.amount), 90);
+    assert.equal(Number(stored.payout_fee_amount), 10);
+    assert.equal(Number(stored.provider_fee_amount), 0);
+    assert.equal(stored.provider_fee_status, "confirmed");
+    assert.equal(Number(stored.provider_fee_shortfall_amount), 0);
+    assert.equal(stored.status, "successful");
+    assert.equal((await payoutsOf(hotelId)).length, 1);
+    assert.equal(cyzora.payouts.size, 1);
+  });
+
+  test("a provider amount mismatch stays unresolved instead of being marked successful", async () => {
+    cyzora.reset();
+    cyzora.nextPayoutMode = "mismatch_amount";
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const started = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    const payout = started.data.payout;
+    assert.equal(payout.status, "unknown");
+    const providerPayoutId = [...cyzora.payouts.values()][0].id;
+    await sendCyzoraWebhook({
+      event: "payout.paid",
+      payout_id: providerPayoutId,
+      amount: 8900,
+      fee: 2137,
+      status: "paid",
+      livemode: false,
+    });
+    const [stored] = await q("SELECT status, amount, provider_payout_amount, failure_reason FROM hotel_payouts WHERE id=$1", [payout.id]);
+    assert.equal(stored.status, "unknown");
+    assert.equal(Number(stored.amount), 90);
+    assert.equal(Number(stored.provider_payout_amount), 89);
+    assert.match(stored.failure_reason, /remains unresolved/i);
+  });
+
+  test("insufficient wallet funds are a confirmed failure, and only then can an admin retry", async () => {
+    cyzora.reset();
+    cyzora.nextPayoutError = { status: 400, error: "Insufficient wallet funds" };
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const failed = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    assert.equal(failed.data.payout.status, "failed");
+    assert.equal(await unpaid(hotelId), 90);
+
+    const retry = await http_(api.base, `/api/admin/payouts/${failed.data.payout.id}/retry`, {
+      method: "POST",
+      token: admin.token,
+    });
+    assert.equal(retry.status, 201, JSON.stringify(retry.data));
+    assert.equal(retry.data.payout.status, "processing");
+    assert.equal(Number(retry.data.payout.amount), 90);
+    assert.equal(cyzora.payouts.size, 1);
+    assert.equal(cyzora.count("POST", "/api/v1/payouts"), 2);
+  });
+
+  test("a 5xx outcome remains unknown and reconciliation reuses the same idempotency reference", async () => {
+    cyzora.reset();
+    cyzora.nextPayoutMode = "error_after_create";
+    setPayoutProvider("cyzora");
+    const admin = await makeUser("mealvest_admin");
+    const student = await makeUser();
+    const hotelId = await makeHotel();
+    await earnSplit(student.id, hotelId, 100);
+
+    const started = await http_(api.base, "/api/admin/payouts/trigger", {
+      method: "POST",
+      token: admin.token,
+      body: { hotelId },
+    });
+    const payout = started.data.payout;
+    assert.equal(payout.status, "unknown");
+    assert.equal(cyzora.payouts.size, 1);
+    await q("UPDATE hotel_payouts SET submitted_at = now() - interval '6 minutes' WHERE id=$1", [payout.id]);
+
+    const reconciled = await m.payout.verifyPayout(payout.id);
+    assert.equal(reconciled.status, "processing");
+    assert.equal(cyzora.payouts.size, 1);
+    assert.equal(cyzora.count("POST", "/api/v1/payouts"), 2);
+    assert.equal(cyzora.payoutReferences.length, 2);
+    assert.ok(cyzora.payoutReferences[0]);
+    assert.equal(cyzora.payoutReferences[0], cyzora.payoutReferences[1]);
   });
 });

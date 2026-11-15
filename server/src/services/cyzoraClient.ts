@@ -166,6 +166,7 @@ export function kesToCents(amountKes: number): number {
 }
 
 export function centsToKes(cents: unknown): number {
+  if (cents === null || cents === undefined || cents === "") return NaN;
   const n = Number(cents);
   if (!Number.isFinite(n)) return NaN;
   return Math.round(n) / 100;

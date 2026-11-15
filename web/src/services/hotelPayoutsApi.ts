@@ -53,7 +53,11 @@ export interface HotelPayout {
   recipient_code: string | null;
   transfer_code: string | null;
   provider_fee_amount: string | null;
+  provider_fee_status: "unknown" | "confirmed";
   provider_fee_shortfall_amount: string | null;
+  provider_payout_amount: string | null;
+  provider_payout_amount_status: "unknown" | "confirmed";
+  mealvest_net_amount: string | null;
   failure_reason: string | null;
   /** Created by the daily scheduler (no initiating admin). */
   automated?: boolean;
@@ -62,6 +66,14 @@ export interface HotelPayout {
   submitted_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AdminPayoutFinancialSummary {
+  total_hotel_payouts: string;
+  total_mealvest_commission: string;
+  total_confirmed_cyzora_fees: string;
+  mealvest_net_confirmed: string;
+  unknown_provider_fee_payout_count: number;
 }
 
 export async function fetchPendingPayouts(authFetch: AuthFetch): Promise<HotelPendingBalance[]> {
@@ -83,10 +95,9 @@ export async function fetchPendingPayoutsOverview(authFetch: AuthFetch): Promise
   };
 }
 
-export async function fetchPayoutHistory(authFetch: AuthFetch): Promise<HotelPayout[]> {
+export async function fetchPayoutHistory(authFetch: AuthFetch): Promise<{ payouts: HotelPayout[]; financialSummary: AdminPayoutFinancialSummary }> {
   const res = await authFetch("/api/admin/payouts");
-  const data = await parseOrError<{ payouts: HotelPayout[] }>(res, "Could not load payout history.");
-  return data.payouts;
+  return parseOrError<{ payouts: HotelPayout[]; financialSummary: AdminPayoutFinancialSummary }>(res, "Could not load payout history.");
 }
 
 export async function triggerHotelPayout(authFetch: AuthFetch, hotelId: string): Promise<HotelPayout> {

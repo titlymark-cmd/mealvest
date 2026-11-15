@@ -10,7 +10,7 @@ import {
   verifyCyzoraWebhookSignature,
   extractWebhookResource,
 } from "../services/cyzoraProvider";
-import { isCyzoraConfigured, isCyzoraTestMode } from "../services/cyzoraClient";
+import { centsToKes, isCyzoraConfigured, isCyzoraTestMode } from "../services/cyzoraClient";
 import {
   generatePaymentReference,
   createPendingTransaction,
@@ -560,7 +560,12 @@ export async function cyzoraWebhook(req: Request, res: Response) {
       // `payout_id` (docs.cyzora.co.ke, Webhooks); older shapes used `id`.
       const payoutId = resource?.id ?? resource?.payout_id ?? event?.payout_id;
       if (!payoutId) return webhookResponse(res, 400, { error: "payout event had no id" });
-      const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId));
+      const amountKes = centsToKes(resource?.amount);
+      const feeKes = centsToKes(resource?.fee ?? resource?.fee_amount);
+      const applied = await applyCyzoraPayoutWebhook(eventName, String(payoutId), {
+        amountKes: Number.isFinite(amountKes) ? amountKes : null,
+        feeKes: Number.isFinite(feeKes) ? feeKes : null,
+      });
       if (!applied) return webhookResponse(res, 404, { error: "no matching payout yet" });
       return webhookResponse(res, 200, { received: true });
     }

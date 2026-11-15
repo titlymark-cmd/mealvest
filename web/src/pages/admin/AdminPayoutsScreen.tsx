@@ -13,6 +13,7 @@ import {
   refreshPayoutStatus,
   approvePayout,
   cancelPayout,
+  AdminPayoutFinancialSummary,
   HotelPendingBalance,
   HotelPayout,
 } from "../../services/hotelPayoutsApi";
@@ -74,6 +75,10 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function formatKes(value: number): string {
+  return value.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 /**
  * HOTEL PAYOUT COMPLETED is a separate event from PAYMENT RECEIVED.
  * Payouts are now created AUTOMATICALLY by the server once a hotel's
@@ -91,6 +96,7 @@ export default function AdminPayoutsScreen() {
   const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [history, setHistory] = useState<HotelPayout[]>([]);
+  const [financialSummary, setFinancialSummary] = useState<AdminPayoutFinancialSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -100,11 +106,12 @@ export default function AdminPayoutsScreen() {
   const load = useCallback(
     async (silent = false) => {
       try {
-        const [overview, h] = await Promise.all([fetchPendingPayoutsOverview(authFetch), fetchPayoutHistory(authFetch)]);
+        const [overview, payoutData] = await Promise.all([fetchPendingPayoutsOverview(authFetch), fetchPayoutHistory(authFetch)]);
         setPending(overview.hotels);
         setThresholdKes(overview.thresholdKes);
         setAutoEnabled(overview.autoPayoutsEnabled);
-        setHistory(h);
+        setHistory(payoutData.payouts);
+        setFinancialSummary(payoutData.financialSummary);
       } catch (err) {
         if (!silent) setError(err instanceof Error ? err.message : "Could not load payouts.");
       } finally {
@@ -227,6 +234,44 @@ export default function AdminPayoutsScreen() {
 
       {error && <p style={styles.errorText}>{error}</p>}
 
+      {financialSummary && (
+        <Card style={styles.card}>
+          <span style={styles.cardTitle}>Successful payout totals</span>
+          <div style={styles.summaryGrid}>
+            <div style={styles.summaryItem}>
+              <span style={styles.summaryLabel}>Total hotel payouts</span>
+              <strong style={styles.summaryValue}>KES {formatKes(Number(financialSummary.total_hotel_payouts))}</strong>
+            </div>
+            <div style={styles.summaryItem}>
+              <span style={styles.summaryLabel}>Total Mealvest commission</span>
+              <strong style={styles.summaryValue}>KES {formatKes(Number(financialSummary.total_mealvest_commission))}</strong>
+            </div>
+            <div style={styles.summaryItem}>
+              <span style={styles.summaryLabel}>Confirmed Cyzora fees</span>
+              <strong style={styles.summaryValue}>KES {formatKes(Number(financialSummary.total_confirmed_cyzora_fees))}</strong>
+            </div>
+            <div style={styles.summaryItem}>
+              <span style={styles.summaryLabel}>Mealvest net (confirmed fees)</span>
+              <strong
+                style={{
+                  ...styles.summaryValue,
+                  ...(Number(financialSummary.mealvest_net_confirmed) < 0 ? styles.negativeAmount : null),
+                }}
+              >
+                {Number(financialSummary.mealvest_net_confirmed) < 0 ? "-KES " : "KES "}
+                {formatKes(Math.abs(Number(financialSummary.mealvest_net_confirmed)))}
+              </strong>
+            </div>
+          </div>
+          {financialSummary.unknown_provider_fee_payout_count > 0 && (
+            <p style={styles.unknownFees}>
+              Actual provider fees are unknown for {financialSummary.unknown_provider_fee_payout_count} successful payout
+              {financialSummary.unknown_provider_fee_payout_count === 1 ? "" : "s"}; the net total is incomplete. Fee previews are not counted as actual fees.
+            </p>
+          )}
+        </Card>
+      )}
+
       <Card style={styles.card}>
         <span style={styles.cardTitle}>Pending payouts</span>
         {pending.length === 0 && <p style={styles.emptyText}>No hotel currently has an unpaid balance.</p>}
@@ -294,25 +339,43 @@ export default function AdminPayoutsScreen() {
         {history.length > 0 && history.filter((p) => matchesFilter(p, filter)).length === 0 && (
           <p style={styles.emptyText}>No payouts match this filter.</p>
         )}
-        {history.filter((p) => matchesFilter(p, filter)).map((p) => (
-          <div key={p.id} style={styles.row}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+        {history.filter((p) => matchesFilter(p, filter)).map((p) => {
+          const providerFeeConfirmed = p.provider_fee_status === "confirmed" && p.provider_fee_amount != null;
+          const mealvestNet = p.mealvest_net_amount == null ? null : Number(p.mealvest_net_amount);
+          const providerFeeLabel = p.provider === "cyzora" ? "Cyzora fee" : "Provider fee";
+          return (
+          <div key={p.id} style={{ ...styles.row, ...styles.historyRow }}>
+            <div style={{ flex: "1 1 280px", minWidth: 0 }}>
               <span style={styles.rowTitle}>{p.hotel_name}</span>
               <span style={styles.rowSub}>
                 {p.transfer_reference} · started {timeAgo(p.created_at)}
                 {(p.status === "successful" || p.status === "failed" || p.status === "cancelled") && ` · ${p.status} ${timeAgo(p.updated_at)}`}
                 {p.transfer_code && ` · provider ref ${p.transfer_code}`}
                 {p.automated ? " · automatic daily payout" : " · admin initiated"}
-                {p.gross_amount != null && p.payout_fee_amount != null && Number.isFinite(Number(p.gross_amount)) && Number.isFinite(Number(p.payout_fee_amount)) &&
-                  ` · Gross KSh ${Number(p.gross_amount).toLocaleString()} - Mealvest fee KSh ${Number(p.payout_fee_amount).toLocaleString()} = hotel net KSh ${Number(p.amount).toLocaleString()}`}
-                {p.provider_fee_amount != null && Number(p.provider_fee_amount) > 0 && ` · provider fee KSh ${Number(p.provider_fee_amount).toLocaleString()}`}
-                {p.provider_fee_shortfall_amount != null && Number(p.provider_fee_shortfall_amount) > 0 && ` · Mealvest shortfall KSh ${Number(p.provider_fee_shortfall_amount).toLocaleString()}`}
                 {p.needs_attention && p.status === "processing" && " — still processing; check the provider dashboard / webhook delivery"}
                 {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
                 {p.failure_reason && ` — ${p.failure_reason}`}
               </span>
+              <div style={styles.breakdownGrid}>
+                <span>Hotel payout: KES {formatKes(Number(p.amount))}</span>
+                <span>Mealvest commission: KES {formatKes(Number(p.payout_fee_amount ?? 0))}</span>
+                <span>
+                  {providerFeeLabel}:{" "}
+                  {providerFeeConfirmed ? `KES ${formatKes(Number(p.provider_fee_amount))} (actual)` : "Unknown (not confirmed)"}
+                </span>
+                <span style={mealvestNet != null && mealvestNet < 0 ? styles.negativeAmount : undefined}>
+                  Mealvest net:{" "}
+                  {mealvestNet == null
+                    ? "Unknown"
+                    : `${mealvestNet < 0 ? "-KES " : "KES "}${formatKes(Math.abs(mealvestNet))}`}
+                </span>
+                {providerFeeConfirmed && Number(p.provider_fee_shortfall_amount ?? 0) > 0 && (
+                  <span style={styles.negativeAmount}>
+                    Provider-fee shortfall: KES {formatKes(Number(p.provider_fee_shortfall_amount))}
+                  </span>
+                )}
+              </div>
             </div>
-            <span style={styles.amount}>KSh {Number(p.amount).toLocaleString()}</span>
             <span style={{ ...styles.statusChip, backgroundColor: STATUS_COLOR[p.status] }}>{STATUS_LABEL[p.status] ?? p.status}</span>
             {p.status === "review" && (
               <>
@@ -335,14 +398,15 @@ export default function AdminPayoutsScreen() {
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
       </Card>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, maxWidth: 760, display: "flex", flexDirection: "column" },
+  container: { minHeight: "100vh", backgroundColor: COLORS.bg, padding: 24, maxWidth: 960, display: "flex", flexDirection: "column", boxSizing: "border-box", width: "100%" },
   center: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: COLORS.bg },
   titleRow: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8 },
   title: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 22, color: COLORS.textOnDark, margin: 0 },
@@ -350,18 +414,27 @@ const styles: Record<string, React.CSSProperties> = {
   errorText: { fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.danger, marginBottom: 12 },
   card: { display: "flex", flexDirection: "column", marginBottom: 18 },
   cardTitle: { fontFamily: FONTS.displaySemibold, fontWeight: 700, fontSize: 15, color: COLORS.text, marginBottom: 10 },
+  summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 },
+  summaryItem: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 },
+  summaryLabel: { fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted },
+  summaryValue: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 15, color: COLORS.text, overflowWrap: "anywhere" },
+  unknownFees: { fontFamily: FONTS.body, fontSize: 12, color: COLORS.warning, margin: "10px 0 0" },
   emptyText: { fontFamily: FONTS.body, fontSize: 13, color: COLORS.textFaint, padding: "8px 0" },
   row: {
     display: "flex",
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 10,
     paddingTop: 12,
     paddingBottom: 12,
     borderTop: `1px solid ${COLORS.borderSoft}`,
   },
+  historyRow: { alignItems: "flex-start" },
   rowTitle: { display: "block", fontFamily: FONTS.bodySemibold, fontWeight: 600, fontSize: 13, color: COLORS.text },
   rowSub: { display: "block", fontFamily: FONTS.body, fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  breakdownGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "4px 12px", marginTop: 8, fontFamily: FONTS.body, fontSize: 12, color: COLORS.text },
+  negativeAmount: { color: COLORS.danger },
   amount: { fontFamily: FONTS.displayBold, fontWeight: 800, fontSize: 14, color: COLORS.text, flexShrink: 0 },
   payBtn: {
     display: "flex",

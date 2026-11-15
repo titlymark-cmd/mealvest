@@ -6,6 +6,9 @@
 - The minimum accumulated net balance is KSh 40 (or the active provider's higher minimum). A balance below the minimum remains unpaid and carries forward.
 - New redeemed orders use a fixed 10% MEALVEST payout fee, calculated per order in integer cents. Provider transfer fees are separate.
 - Payout records expose gross, fee, and net amounts. Migration 052 preserves existing order and payout amounts; it does not recalculate historical settlements. Existing redeemed orders retain their previously frozen fee/net split.
+- Every payout submits the full frozen hotel amount. Cyzora's payout `amount` is the amount received by the destination; its fee is charged separately to the configured API payout wallet. Provider fees never reduce the hotel's amount or block a payout because they exceed Mealvest's commission.
+- Only a fee returned by a Cyzora payout response or signed `payout.paid` event is recorded as actual. Fee previews are estimates and are not written to payout accounting. Missing actual fees remain `unknown`, and the admin net and totals indicate when that prevents a complete total.
+- Mealvest net for a payout is `payout_fee_amount - provider_fee_amount` and may be negative. `provider_fee_shortfall_amount` records the confirmed fee above Mealvest's commission. Neither value changes the hotel's payout amount.
 - Hotel administrators can edit the daily payout time, but cannot select another schedule or change the fee.
 
 ## Scheduled run
@@ -36,6 +39,17 @@ Open or unresolved payouts are not resent. Confirmed failures release their
 orders; automatic retries respect the configured cooldown and consecutive
 failure limit. Administrators may retry only a confirmed failed payout.
 Over-limit payouts continue through the existing review/approval controls.
+
+Cyzora charges its fee separately from the destination amount, from the wallet
+selected by the account's API payout-wallet setting (unless an explicit wallet
+is requested). Keep that wallet funded for both the hotel amount and applicable
+fees. A clear insufficient-balance refusal becomes a confirmed failure and
+releases the orders for an authorized retry. Timeouts and server errors remain
+`unknown`; they cannot be retried under a new reference.
+
+Cyzora requires payout amounts in whole Kenyan shillings. Mealvest does not
+round fractional hotel entitlements; a fractional amount is refused before
+transfer and remains payable for a later safe attempt/provider configuration.
 
 Useful monitoring:
 

@@ -40,28 +40,48 @@ describe("fixed hotel payout fee", () => {
       payoutFeeAmount: 30,
       hotelAmount: 270,
       providerFeeAmount: 5,
-      mealvestAfterProviderFee: 25,
+      mealvestNetAmount: 25,
       providerFeeShortfallAmount: 0,
       hotelReceives: 270,
     });
-    assert.deepEqual(allocateProviderFee(300, 0, 30), {
-      grossAmount: 300,
-      payoutFeeAmount: 30,
-      hotelAmount: 270,
+  });
+
+  test("negative Mealvest net and shortfall are recorded without reducing the hotel share", () => {
+    assert.deepEqual(allocateProviderFee(100, 0, 10), {
+      grossAmount: 100,
+      payoutFeeAmount: 10,
+      hotelAmount: 90,
       providerFeeAmount: 0,
-      mealvestAfterProviderFee: 30,
+      mealvestNetAmount: 10,
       providerFeeShortfallAmount: 0,
-      hotelReceives: 270,
+      hotelReceives: 90,
     });
-    assert.deepEqual(allocateProviderFee(300, 35, 30), {
-      grossAmount: 300,
-      payoutFeeAmount: 30,
-      hotelAmount: 270,
-      providerFeeAmount: 35,
-      mealvestAfterProviderFee: 0,
-      providerFeeShortfallAmount: 5,
-      hotelReceives: 270,
+    assert.deepEqual(allocateProviderFee(100, 10, 10), {
+      grossAmount: 100,
+      payoutFeeAmount: 10,
+      hotelAmount: 90,
+      providerFeeAmount: 10,
+      mealvestNetAmount: 0,
+      providerFeeShortfallAmount: 0,
+      hotelReceives: 90,
     });
+    assert.deepEqual(allocateProviderFee(100, 21.37, 10), {
+      grossAmount: 100,
+      payoutFeeAmount: 10,
+      hotelAmount: 90,
+      providerFeeAmount: 21.37,
+      mealvestNetAmount: -11.37,
+      providerFeeShortfallAmount: 11.37,
+      hotelReceives: 90,
+    });
+  });
+
+  test("unknown actual fees stay unknown instead of being treated as zero", () => {
+    const allocation = allocateProviderFee(100, null, 10);
+    assert.equal(allocation.hotelReceives, 90);
+    assert.equal(allocation.providerFeeAmount, null);
+    assert.equal(allocation.mealvestNetAmount, null);
+    assert.equal(allocation.providerFeeShortfallAmount, null);
   });
 
   test("only daily payout mode is supported", () => {

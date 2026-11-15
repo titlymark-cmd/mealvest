@@ -14,6 +14,7 @@ import {
   isCyzoraPayoutSupported,
   mapCyzoraPayoutStatus,
   CYZORA_PAYOUT_MIN_CENTS,
+  createPayout,
 } from "../src/services/cyzoraPayoutService";
 import { ApiError } from "../src/middleware/errorHandler";
 
@@ -140,6 +141,7 @@ describe("amounts are integers in cents at the Cyzora boundary only", () => {
   test("cents come back as whole KSh, and a missing amount is NaN (so the amount check fails closed)", () => {
     assert.equal(centsToKes(500000), 5000);
     assert.equal(Number.isNaN(centsToKes(undefined)), true);
+    assert.equal(Number.isNaN(centsToKes(null)), true);
   });
 });
 
@@ -212,5 +214,15 @@ describe("Cyzora payout destinations", () => {
     assert.equal(mapCyzoraPayoutStatus("processing"), "processing");
     assert.equal(mapCyzoraPayoutStatus("paid"), "successful");
     assert.equal(mapCyzoraPayoutStatus("failed"), "failed");
+  });
+  test("fractional KSh is rejected rather than rounding down the hotel's entitlement", async () => {
+    await assert.rejects(
+      createPayout({
+        amount: 90.01,
+        reference: "PO-test-fractional",
+        destination: { destination_type: "mobile", phone: "254712345678" },
+      }),
+      (error: unknown) => error instanceof ApiError && error.code === "PAYOUT_AMOUNT_NOT_WHOLE_KES"
+    );
   });
 });
