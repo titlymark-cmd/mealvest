@@ -6,6 +6,7 @@ import * as transferService from "./paystackTransferService";
 import * as cyzoraPayouts from "./cyzoraPayoutService";
 import * as notificationEvents from "./notificationEvents";
 import { classifyProviderSendError } from "./payoutOutcome";
+import { allocateProviderFee } from "../lib/hotelCommission";
 
 export type PayoutProviderName = "paystack" | "cyzora";
 
@@ -60,6 +61,10 @@ function notifyFinal(row: model.HotelPayoutRow | null): void {
  *     'unknown' with its orders still claimed — never 'failed' — so it
  *     can only ever be reconciled under the SAME reference.
  */
+export async function triggerPayout(hotelId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
+  return initiatePayout(hotelId, adminUserId, effectiveThresholdKes());
+}
+
 export async function retryFailedPayout(payoutId: string, adminUserId: string): Promise<model.HotelPayoutRow> {
   const previous = await model.getPayoutById(payoutId);
   if (!previous) throw new ApiError(404, "PAYOUT_NOT_FOUND", "No matching payout found.");
@@ -246,7 +251,7 @@ async function sendOnce(
         destination: ctx.destination!,
         description: `MEALVEST payout — ${payout.amount} KES`,
       });
-      return await applySendResult(payout, cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status), initiated.payoutId, null);
+      return await applySendResult(payout, cyzoraPayouts.mapCyzoraPayoutStatus(initiated.status), initiated.payoutId, null, initiated.feeKes);
     }
 
     const initiated = await transferService.initiateTransfer({
@@ -256,7 +261,7 @@ async function sendOnce(
       reason: `MEALVEST payout — ${payout.amount} KES`,
     });
     const mapped = initiated.status === "success" ? "successful" : initiated.status === "failed" ? "failed" : "processing";
-    return await applySendResult(payout, mapped, initiated.transferCode, ctx.recipientCode);
+    return await applySendResult(payout, mapped, initiated.transferCode, ctx.recipientCode, null);
   } catch (err) {
     const classified = classifyProviderSendError(err, "PAYOUT_SEND_FAILED", "Could not send this payout.");
     if (classified.definite) {
@@ -277,7 +282,8 @@ async function applySendResult(
   payout: model.HotelPayoutRow,
   status: "processing" | "successful" | "failed",
   transferCode: string | null,
-  recipientCode: string | null
+  recipientCode: string | null,
+  providerFeeKes: number | null = null
 ): Promise<model.HotelPayoutRow> {
   if (status === "failed") {
     const row = await model.transitionToFinal(payout.id, "failed", ["unknown"], {
@@ -287,7 +293,24 @@ async function applySendResult(
     notifyFinal(row);
     return row ?? payout;
   }
-  const accepted = await model.recordSendAccepted(payout.id, { status, transferCode, recipientCode });
+
+  const allocation = allocateProviderFee(
+    Number(payout.gross_amount ?? payout.amount ?? 0),
+    providerFeeKes,
+    Number(payout.payout_fee_amount ?? 0)
+  );
+  if (allocation.providerFeeShortfallAmount > 0) {
+    console.warn("[hotelPayoutService] provider fee exceeded Mealvest commission; hotel share remains unchanged", {
+      payoutId: payout.id,
+      hotelId: payout.hotel_id,
+      providerFeeAmount: allocation.providerFeeAmount,
+      mealvestFee: allocation.payoutFeeAmount,
+      shortfall: allocation.providerFeeShortfallAmount,
+      hotelAmount: allocation.hotelAmount,
+    });
+  }
+
+  const accepted = await model.recordSendAccepted(payout.id, { status, transferCode, recipientCode, providerFeeAmount: providerFeeKes });
   if (status === "successful") notifyFinal(accepted);
   return accepted ?? (await model.getPayoutById(payout.id)) ?? payout;
 }

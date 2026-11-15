@@ -15,10 +15,33 @@ jobs:
     steps:
       - name: Trigger payout evaluation endpoint
         env:
+          VERCEL_APP_URL: ${{ secrets.VERCEL_APP_URL }}
           PAYOUT_URL: ${{ secrets.VERCEL_APP_URL }}/api/cron/daily-payouts
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl --fail --silent --show-error \
+          set -euo pipefail
+          if [ -z "${VERCEL_APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing VERCEL_APP_URL or CRON_SECRET secret for the daily payout cron job."
+            exit 1
+          fi
+          if [[ "${VERCEL_APP_URL}" != https://* ]]; then
+            echo "VERCEL_APP_URL must be the canonical HTTPS production origin."
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --location --max-redirs 0 --max-time 30 \
+            -D headers.txt \
+            -o payout-response.json \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
             "${PAYOUT_URL}"
+
+          status=$(awk 'NR == 1 {print $2}' headers.txt)
+          if [ "${status:-}" != "200" ]; then
+            echo "Cron endpoint responded with HTTP ${status:-unknown}."
+            cat payout-response.json || true
+            exit 1
+          fi
+
+          jq -e '.enabled == true and (.localDate | type == "string") and (.localTime | type == "string")' payout-response.json > /dev/null
+          echo "Daily payout scheduler executed successfully."

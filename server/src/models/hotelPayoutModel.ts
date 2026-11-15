@@ -24,6 +24,8 @@ export interface HotelPayoutRow {
   transfer_reference: string;
   recipient_code: string | null;
   transfer_code: string | null; // Paystack transfer code, or Cyzora's payout id (what payout.* webhooks are matched on)
+  provider_fee_amount: string | null; // provider-side processing fee, kept separate from MEALVEST's payout_fee_amount
+  provider_fee_shortfall_amount: string | null; // provider fee above MEALVEST's 10% commission; hotel share remains untouched
   failure_reason: string | null;
   initiated_by_admin_id: string | null;
   review_reason?: string | null;
@@ -227,15 +229,38 @@ export async function recordResendAttempt(payoutId: string): Promise<void> {
 /** The provider accepted the transfer: unknown -> processing | successful. */
 export async function recordSendAccepted(
   payoutId: string,
-  fields: { status: "processing" | "successful"; transferCode?: string | null; recipientCode?: string | null }
+  fields: {
+    status: "processing" | "successful";
+    transferCode?: string | null;
+    recipientCode?: string | null;
+    providerFeeAmount?: number | null;
+  }
 ): Promise<HotelPayoutRow | null> {
+  const current = await getPayoutById(payoutId);
+  if (!current) return null;
+
+  const payoutFeeAmount = Number(current.payout_fee_amount ?? 0);
+  const providerFeeAmount = fields.providerFeeAmount == null ? null : Number(fields.providerFeeAmount);
+  const providerFeeShortfallAmount = providerFeeAmount == null ? null : Math.max(0, providerFeeAmount - payoutFeeAmount);
+
   const result = await pool.query<HotelPayoutRow>(
     `UPDATE hotel_payouts
-        SET status = $2, transfer_code = COALESCE($3, transfer_code), recipient_code = COALESCE($4, recipient_code),
+        SET status = $2,
+            transfer_code = COALESCE($3, transfer_code),
+            recipient_code = COALESCE($4, recipient_code),
+            provider_fee_amount = CASE WHEN $5::numeric IS NOT NULL THEN $5::numeric(12,2) ELSE provider_fee_amount END,
+            provider_fee_shortfall_amount = CASE WHEN $6::numeric IS NOT NULL THEN $6::numeric(12,2) ELSE provider_fee_shortfall_amount END,
             failure_reason = NULL
       WHERE id = $1 AND status = 'unknown'
       RETURNING *`,
-    [payoutId, fields.status, fields.transferCode ?? null, fields.recipientCode ?? null]
+    [
+      payoutId,
+      fields.status,
+      fields.transferCode ?? null,
+      fields.recipientCode ?? null,
+      providerFeeAmount,
+      providerFeeShortfallAmount,
+    ]
   );
   return result.rows[0] ?? null;
 }

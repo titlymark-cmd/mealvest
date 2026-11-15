@@ -24,6 +24,7 @@ function serve(opts: { payouts: () => unknown[]; hotels?: unknown[] }) {
 beforeEach(() => {
   jest.useFakeTimers();
   mockAuthFetch.mockReset();
+  (window as any).confirm = jest.fn(() => true);
 });
 afterEach(() => jest.useRealTimers());
 
@@ -68,5 +69,19 @@ describe("Admin payouts monitoring", () => {
     render(<AdminPayoutsScreen />);
     expect(await screen.findByText(/below KSh 40, carries forward/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pay out/i })).toBeDisabled();
+  });
+
+  it("clicking Pay out triggers the admin manual payout API", async () => {
+    mockAuthFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/api/admin/payouts/pending") return json({ hotels: [{ hotel_id: "h7", hotel_name: "Manual Hotel", payment_method: "send_money", payment_details: null, pending_amount: "60.00", pending_order_count: "3", payout_supported: true, below_threshold: false, auto_payout_blocked_reason: null }], threshold_kes: 40, auto_payouts_enabled: true });
+      if (path === "/api/admin/payouts") return json({ payouts: [] });
+      if (path === "/api/admin/payouts/trigger") return json({ payout: payout({ id: "p2", hotel_id: "h7", hotel_name: "Manual Hotel", amount: "60.00", status: "processing" }) });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    render(<AdminPayoutsScreen />);
+    const button = await screen.findByRole("button", { name: /pay out/i });
+    await userEvent.click(button);
+    expect(mockAuthFetch).toHaveBeenCalledWith("/api/admin/payouts/trigger", expect.objectContaining({ method: "POST" }));
   });
 });

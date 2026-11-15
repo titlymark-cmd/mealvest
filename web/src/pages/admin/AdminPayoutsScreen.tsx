@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import {
   fetchPendingPayoutsOverview,
   fetchPayoutHistory,
+  triggerHotelPayout,
   retryFailedPayout,
   refreshPayoutStatus,
   approvePayout,
@@ -131,6 +132,15 @@ export default function AdminPayoutsScreen() {
     };
   }, [hasInFlight, load]);
 
+  const confirmAction = (question: string): boolean => {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
+    try {
+      return window.confirm(question);
+    } catch {
+      return true;
+    }
+  };
+
   const handleRefresh = async (payoutId: string) => {
     setActingOn(payoutId);
     try {
@@ -149,7 +159,7 @@ export default function AdminPayoutsScreen() {
       decision === "approve"
         ? `Approve and send KSh ${Number(p?.amount ?? 0).toLocaleString()} to ${p?.hotel_name ?? "this hotel"}?`
         : "Cancel this payout? Its orders go back to the unpaid balance.";
-    if (!window.confirm(question)) return;
+    if (!confirmAction(question)) return;
     setError(null);
     setActingOn(payoutId);
     try {
@@ -164,7 +174,7 @@ export default function AdminPayoutsScreen() {
 
   const handleRetry = async (payoutId: string) => {
     const p = history.find((x) => x.id === payoutId);
-    if (!window.confirm(`Retry the confirmed failed payout for ${p?.hotel_name ?? "this hotel"}?`)) return;
+    if (!confirmAction(`Retry the confirmed failed payout for ${p?.hotel_name ?? "this hotel"}?`)) return;
     setError(null);
     setActingOn(payoutId);
     try {
@@ -172,6 +182,22 @@ export default function AdminPayoutsScreen() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not retry this failed payout.");
+    } finally {
+      setActingOn(null);
+    }
+  };
+
+  const handleManualPayout = async (hotelId: string) => {
+    const hotel = pending.find((h) => h.hotel_id === hotelId);
+    if (!hotel) return;
+    if (!confirmAction(`Pay out KSh ${Number(hotel.pending_amount ?? 0).toLocaleString()} for ${hotel.hotel_name}?`)) return;
+    setError(null);
+    setActingOn(hotelId);
+    try {
+      await triggerHotelPayout(authFetch, hotelId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start this payout.");
     } finally {
       setActingOn(null);
     }
@@ -233,13 +259,13 @@ export default function AdminPayoutsScreen() {
               <span style={styles.amount}>KSh {pendingAmount.toLocaleString()}</span>
               <button
                 type="button"
-                onClick={() => undefined}
-                disabled={h.below_threshold || !supported}
+                onClick={() => handleManualPayout(h.hotel_id)}
+                disabled={h.below_threshold || !supported || actingOn === h.hotel_id}
                 aria-label="Pay out"
                 style={{
                   ...styles.payBtn,
-                  opacity: h.below_threshold || !supported ? 0.55 : 1,
-                  cursor: h.below_threshold || !supported ? "not-allowed" : "pointer",
+                  opacity: h.below_threshold || !supported || actingOn === h.hotel_id ? 0.55 : 1,
+                  cursor: h.below_threshold || !supported || actingOn === h.hotel_id ? "not-allowed" : "pointer",
                 }}
               >
                 <Wallet size={14} color="#fff" />
@@ -278,7 +304,9 @@ export default function AdminPayoutsScreen() {
                 {p.transfer_code && ` · provider ref ${p.transfer_code}`}
                 {p.automated ? " · automatic daily payout" : " · admin initiated"}
                 {p.gross_amount != null && p.payout_fee_amount != null && Number.isFinite(Number(p.gross_amount)) && Number.isFinite(Number(p.payout_fee_amount)) &&
-                  ` · Gross KSh ${Number(p.gross_amount).toLocaleString()} - fee KSh ${Number(p.payout_fee_amount).toLocaleString()} = net KSh ${Number(p.amount).toLocaleString()}`}
+                  ` · Gross KSh ${Number(p.gross_amount).toLocaleString()} - Mealvest fee KSh ${Number(p.payout_fee_amount).toLocaleString()} = hotel net KSh ${Number(p.amount).toLocaleString()}`}
+                {p.provider_fee_amount != null && Number(p.provider_fee_amount) > 0 && ` · provider fee KSh ${Number(p.provider_fee_amount).toLocaleString()}`}
+                {p.provider_fee_shortfall_amount != null && Number(p.provider_fee_shortfall_amount) > 0 && ` · Mealvest shortfall KSh ${Number(p.provider_fee_shortfall_amount).toLocaleString()}`}
                 {p.needs_attention && p.status === "processing" && " — still processing; check the provider dashboard / webhook delivery"}
                 {p.review_reason && p.status === "review" && ` — needs approval: ${p.review_reason}`}
                 {p.failure_reason && ` — ${p.failure_reason}`}

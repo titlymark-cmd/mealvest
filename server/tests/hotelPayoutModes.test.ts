@@ -5,6 +5,7 @@ import {
   payoutFeeSql,
   splitOrderAmount,
   isPayoutMode,
+  allocateProviderFee,
 } from "../src/lib/hotelCommission";
 import { payoutConfigSchema, formatPayoutTime } from "../src/schemas/payoutModeSchema";
 import { registerHotelSchema } from "../src/schemas/authSchemas";
@@ -31,6 +32,36 @@ describe("fixed hotel payout fee", () => {
     const r = splitOrderAmount(33.33);
     assert.deepEqual(r, { payoutFeeAmount: 3.33, hotelAmount: 30 });
     assert.equal(Math.round((r.payoutFeeAmount + r.hotelAmount) * 100) / 100, 33.33);
+  });
+
+  test("provider fees are charged against Mealvest's 10% only and never against the hotel's 90%", () => {
+    assert.deepEqual(allocateProviderFee(300, 5, 30), {
+      grossAmount: 300,
+      payoutFeeAmount: 30,
+      hotelAmount: 270,
+      providerFeeAmount: 5,
+      mealvestAfterProviderFee: 25,
+      providerFeeShortfallAmount: 0,
+      hotelReceives: 270,
+    });
+    assert.deepEqual(allocateProviderFee(300, 0, 30), {
+      grossAmount: 300,
+      payoutFeeAmount: 30,
+      hotelAmount: 270,
+      providerFeeAmount: 0,
+      mealvestAfterProviderFee: 30,
+      providerFeeShortfallAmount: 0,
+      hotelReceives: 270,
+    });
+    assert.deepEqual(allocateProviderFee(300, 35, 30), {
+      grossAmount: 300,
+      payoutFeeAmount: 30,
+      hotelAmount: 270,
+      providerFeeAmount: 35,
+      mealvestAfterProviderFee: 0,
+      providerFeeShortfallAmount: 5,
+      hotelReceives: 270,
+    });
   });
 
   test("only daily payout mode is supported", () => {

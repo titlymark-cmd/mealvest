@@ -361,6 +361,30 @@ describe("Daily Payout", { skip }, () => {
     assert.equal(mock.count("POST", "/transfer"), 2);
   });
 
+  test("provider fees are tracked separately from the hotel's 90% and a retry keeps the hotel share untouched", async () => {
+    mock.reset();
+    const admin = await makeUser("mealvest_admin");
+    const s = await makeUser();
+    const h = await makeHotel({ time: "21:00" });
+    await earn(s.id, h, [300]);
+
+    const payout = await m.model.claimPendingOrdersForPayout(h, "PO-fee-shortfall-" + crypto.randomBytes(3).toString("hex"), null, "paystack", { perPayoutMaxKes: 5000, dailyMaxKes: 1000000 }, 40);
+    assert.ok(payout);
+    assert.equal(Number(payout.amount), 270);
+
+    await m.model.markSubmitting(payout.id);
+    const accepted = await m.model.recordSendAccepted(payout.id, { status: "successful", transferCode: "TRF_fee", providerFeeAmount: 40 });
+    assert.ok(accepted);
+    assert.equal(Number(accepted.amount), 270);
+    assert.equal(Number(accepted.payout_fee_amount), 30);
+    assert.equal(Number(accepted.provider_fee_amount), 40);
+    assert.equal(Number(accepted.provider_fee_shortfall_amount), 10);
+
+    const retry = await http_(api.base, `/api/admin/payouts/${payout.id}/retry`, { method: "POST", token: admin.token });
+    assert.equal(retry.status, 404);
+    assert.equal(Number((await m.model.getPayoutById(payout.id))?.amount ?? 0), 270);
+  });
+
   test("an uncertain (unknown) outcome is never re-sent by the scheduler — it waits for reconciliation", async () => {
     mock.reset();
     const s = await makeUser(); const h = await makeHotel({ mode: "daily", time: "21:00" });

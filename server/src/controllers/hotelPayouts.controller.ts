@@ -62,6 +62,19 @@ export async function previewPayoutFee(req: AuthedRequest, res: Response, next: 
   }
 }
 
+export async function triggerPayout(req: AuthedRequest, res: Response, next: NextFunction) {
+  try {
+    const hotelId = typeof req.body?.hotelId === "string" ? req.body.hotelId : req.body?.hotel_id;
+    if (!hotelId || typeof hotelId !== "string") {
+      throw new ApiError(400, "VALIDATION_ERROR", "hotelId is required.");
+    }
+    const payout = await payoutService.triggerPayout(hotelId, req.user!.id);
+    res.status(201).json({ payout });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function listPayoutHistory(_req: AuthedRequest, res: Response, next: NextFunction) {
   try {
     const payouts = await model.listAllPayouts(env.payoutStaleProcessingMinutes);

@@ -52,6 +52,8 @@ export interface HotelPayout {
   transfer_reference: string;
   recipient_code: string | null;
   transfer_code: string | null;
+  provider_fee_amount: string | null;
+  provider_fee_shortfall_amount: string | null;
   failure_reason: string | null;
   /** Created by the daily scheduler (no initiating admin). */
   automated?: boolean;
@@ -85,6 +87,16 @@ export async function fetchPayoutHistory(authFetch: AuthFetch): Promise<HotelPay
   const res = await authFetch("/api/admin/payouts");
   const data = await parseOrError<{ payouts: HotelPayout[] }>(res, "Could not load payout history.");
   return data.payouts;
+}
+
+export async function triggerHotelPayout(authFetch: AuthFetch, hotelId: string): Promise<HotelPayout> {
+  const res = await authFetch(`/api/admin/payouts/trigger`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hotelId }),
+  });
+  const data = await parseOrError<{ payout: HotelPayout }>(res, "Could not start this payout.");
+  return data.payout;
 }
 
 export async function retryFailedPayout(authFetch: AuthFetch, payoutId: string): Promise<HotelPayout> {

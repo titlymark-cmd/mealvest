@@ -39,6 +39,7 @@ import {
 import { adminBroadcast, adminTestSend } from "../controllers/notifications.controller";
 import {
   listPendingPayouts,
+  triggerPayout,
   listPayoutHistory,
   retryFailedPayout,
   refreshPayoutStatus,
@@ -88,6 +89,7 @@ adminRouter.patch("/announcements/:id", updateAnnouncement);
 adminRouter.delete("/announcements/:id", deleteAnnouncement);
 adminRouter.post("/notifications/broadcast", adminNotificationRateLimiter, adminBroadcast);
 adminRouter.post("/notifications/test-send", adminNotificationRateLimiter, adminTestSend);
+adminRouter.post("/payouts/trigger", financialActionRateLimiter, triggerPayout);
 adminRouter.get("/payouts/pending", listPendingPayouts);
 adminRouter.get("/payouts/fee-preview", previewPayoutFee);
 adminRouter.get("/payouts", listPayoutHistory);

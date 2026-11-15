@@ -10,12 +10,15 @@
 
 ## Scheduled run
 
+The real architecture is:
+
+GitHub Actions → `https://<production-domain>/api/cron/daily-payouts` → `CRON_SECRET` bearer auth → `runDailyPayouts()` → the shared payout execution service.
+
 `GET /api/cron/daily-payouts` must be invoked every 10 minutes with
-`Authorization: Bearer $CRON_SECRET`. `vercel.json` configures this cadence;
-Vercel requires a plan that supports sub-daily Cron Jobs (Pro or higher).
-Otherwise, use an external scheduler at the same cadence and provide the
-bearer header. A once-daily schedule is insufficient: payout initiation can
-be delayed by up to the scheduler interval.
+`Authorization: Bearer $CRON_SECRET`. This is intentionally not a Vercel Cron
+job: GitHub-hosted cron is used for this daily-payout trigger, while Vercel
+remains the app host. A once-daily schedule is insufficient: payout initiation
+can be delayed by up to the scheduler interval.
 
 Each invocation considers hotels whose configured time has passed and that
 have not completed their daily evaluation. `hotel_daily_payout_runs`

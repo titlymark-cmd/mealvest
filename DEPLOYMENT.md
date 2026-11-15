@@ -187,24 +187,13 @@ the business verified on Cyzora's side.
 
 ### Daily hotel payout scheduler
 
-`vercel.json` schedules `GET /api/cron/daily-payouts` every 10 minutes.
-Deployments need a Vercel plan that supports sub-daily Cron Jobs (Pro or
-higher). If the plan does not support that cadence, configure an external
-scheduler to call the same URL every 10 minutes with
-`Authorization: Bearer <CRON_SECRET>`.
+The daily hotel payout scheduler runs through GitHub Actions, not Vercel's cron system:
 
-Set `CRON_SECRET` as a server environment variable in Vercel; Vercel Cron
-Jobs send it as the bearer token. For an external scheduler, configure the
-same secret in its authorization header. Never put this value in the
-frontend or commit it to the repository.
+GitHub Actions → `https://<production-domain>/api/cron/daily-payouts` → `Authorization: Bearer <CRON_SECRET>` → `runDailyPayouts()` → shared payout execution service → provider.
 
-Keep `AUTO_PAYOUTS_ENABLED=false` until the active payout provider, its
-webhook, and reconciliation have been verified with a test payout. Change it
-to `true` only when ready to enable daily hotel payouts. The scheduler checks
-hotels after their configured Africa/Nairobi payout time; the KSh 40
-minimum balance carries forward when unmet. New redeemed meals use the fixed
-10% payout fee; provider transfer fees are separate. See
-`server/AUTOMATED_PAYOUTS.md` for lifecycle and retry safeguards.
+Set `CRON_SECRET` as a server environment variable in Vercel; the GitHub Action sends it as the bearer token. For local or sandbox testing, the same secret can be used in a curl call or a test harness. Never put this value in the frontend or commit it to the repository.
+
+Set `AUTO_PAYOUTS_ENABLED=true` only after the active payout provider, its webhook, and reconciliation flow have been verified in a non-production test. The scheduler checks hotels after their configured Africa/Nairobi payout time; the KSh 40 minimum balance carries forward when unmet. New redeemed meals use the fixed 10% payout fee; provider transfer fees are separate. See `server/AUTOMATED_PAYOUTS.md` for lifecycle and retry safeguards.
 
 ## 7. Accessing each dashboard securely
 
