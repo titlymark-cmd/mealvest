@@ -820,6 +820,14 @@ async function lookupFullName(user: UserRow): Promise<string> {
     const r = await pool.query("SELECT full_name FROM hotel_staff WHERE user_id = $1", [user.id]);
     return r.rows[0]?.full_name ?? "";
   }
+  if (user.role === "university_ambassador") {
+    const r = await pool.query("SELECT full_name FROM university_ambassadors WHERE user_id = $1", [user.id]);
+    return r.rows[0]?.full_name ?? "";
+  }
+  if (user.role === "team_member") {
+    const r = await pool.query("SELECT full_name FROM team_members WHERE user_id = $1", [user.id]);
+    return r.rows[0]?.full_name ?? "";
+  }
   const r = await pool.query("SELECT full_name FROM admins WHERE user_id = $1", [user.id]);
   return r.rows[0]?.full_name ?? "";
 }

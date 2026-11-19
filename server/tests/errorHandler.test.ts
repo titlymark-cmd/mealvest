@@ -48,11 +48,11 @@ describe("errorHandler", () => {
   });
 
   test("oversized JSON body -> 413 INVALID_REQUEST_BODY", async () => {
-    // express.json() default limit is 100kb.
+    // express.json() limit is 10mb.
     const res = await send("/api/payments/initialize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pad: "x".repeat(200 * 1024) }),
+      body: JSON.stringify({ pad: "x".repeat(11 * 1024 * 1024) }),
     });
     assert.equal(res.status, 413);
     assert.equal(res.json?.error?.code, "INVALID_REQUEST_BODY");

@@ -20,6 +20,7 @@ import { settingsRouter } from "./routes/settings.routes";
 import { announcementsRouter } from "./routes/announcements.routes";
 import { notificationsRouter } from "./routes/notifications.routes";
 import { cronRouter } from "./routes/cron.routes";
+import { ambassadorRouter } from "./routes/ambassador.routes";
 
 export function createApp() {
   logIntegrationStatusOnce();
@@ -87,6 +88,7 @@ export function createApp() {
   app.use("/api/announcements", announcementsRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/cron", cronRouter);
+  app.use("/api/ambassador", ambassadorRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

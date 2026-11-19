@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "migrate": "node scripts/migrate.js",
     "seed:admin": "node scripts/seedAdmin.js",
+    "seed:ambassador": "node scripts/seedAmbassador.js",
     "seed:demo": "node scripts/seedDemoData.js",
     "test": "node --import tsx --import ./tests/setup.ts --test \"tests/*.test.ts\"",
     "test:e2e": "bash tests/e2e/run-e2e.sh",

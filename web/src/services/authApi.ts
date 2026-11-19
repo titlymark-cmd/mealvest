@@ -1,6 +1,12 @@
 import { API_BASE_URL } from "./config";
 
-export type Role = "student" | "hotel_staff" | "hotel_owner" | "mealvest_admin";
+export type Role =
+  | "student"
+  | "hotel_staff"
+  | "hotel_owner"
+  | "mealvest_admin"
+  | "university_ambassador"
+  | "team_member";
 
 export interface AuthUser {
   id: string;
