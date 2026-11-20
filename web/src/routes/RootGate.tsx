@@ -17,6 +17,7 @@ import TermsScreen from "../pages/TermsScreen";
 import { ResetPasswordScreen } from "../pages/ResetPasswordScreen";
 import { VerifyEmailScreen } from "../pages/VerifyEmailScreen";
 import { onNotificationNavigate } from "../services/pushNotifications";
+import { AmbassadorRoutes } from "./AmbassadorRoutes";
 
 /**
  * /install is matched here, before anything else in the app — no
@@ -143,6 +144,9 @@ function AuthGatedApp() {
       );
     case "mealvest_admin":
       return <AdminRoutes />;
+    case "university_ambassador":
+    case "team_member":
+      return <AmbassadorRoutes />;
     default:
       return <UnauthenticatedRoutes />;
   }

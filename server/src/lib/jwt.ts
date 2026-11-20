@@ -22,7 +22,14 @@ const REFRESH_TOKEN_TTL_DAYS = 30;
 export const JWT_ALGORITHM = "HS256" as const;
 export const JWT_ISSUER = "mealvest-api";
 export const JWT_AUDIENCE = "mealvest-app";
-const VALID_ROLES: ReadonlySet<string> = new Set(["student", "hotel_staff", "hotel_owner", "mealvest_admin"]);
+const VALID_ROLES: ReadonlySet<string> = new Set([
+  "student",
+  "hotel_staff",
+  "hotel_owner",
+  "mealvest_admin",
+  "university_ambassador",
+  "team_member",
+]);
 
 export function signAccessToken(payload: AccessTokenPayload): string {
   return jwt.sign({ userId: payload.userId, role: payload.role }, env.jwtAccessSecret, {

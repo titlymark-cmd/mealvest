@@ -33,10 +33,12 @@ export function invalidateUserStatusCache(userId?: string): void {
 async function lookupAccount(userId: string): Promise<{ status: string; role: string; staffActive: boolean } | null> {
   const cached = statusCache.get(userId);
   if (cached && Date.now() - cached.at < STATUS_CACHE_MS) return cached;
-  // LEFT JOIN: only hotel_staff/hotel_owner users have a hotel_staff row; everyone else is "active".
-  const result = await pool.query<{ account_status: string; role: string; is_active: boolean | null }>(
-    `SELECT u.account_status, u.role, hs.is_active
-       FROM users u LEFT JOIN hotel_staff hs ON hs.user_id = u.id
+  // LEFT JOIN: check hotel_staff or team_members
+  const result = await pool.query<{ account_status: string; role: string; is_active: boolean | null; tm_status: string | null }>(
+    `SELECT u.account_status, u.role, hs.is_active, tm.status AS tm_status
+       FROM users u
+       LEFT JOIN hotel_staff hs ON hs.user_id = u.id
+       LEFT JOIN team_members tm ON tm.user_id = u.id
       WHERE u.id = $1`,
     [userId]
   );
@@ -45,7 +47,8 @@ async function lookupAccount(userId: string): Promise<{ status: string; role: st
     statusCache.delete(userId);
     return null;
   }
-  const entry = { status: row.account_status, role: row.role, staffActive: row.is_active !== false, at: Date.now() };
+  const isTeamActive = row.tm_status ? row.tm_status === "active" : true;
+  const entry = { status: row.account_status, role: row.role, staffActive: row.is_active !== false && isTeamActive, at: Date.now() };
   if (statusCache.size > 10_000) statusCache.clear();
   statusCache.set(userId, entry);
   return entry;
